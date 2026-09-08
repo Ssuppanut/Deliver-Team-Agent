@@ -23,6 +23,7 @@ const EX = (f) => resolve(ROOT, '_shared/schemas/examples', f);
 const PRODUCT = EX('product-card.spec.yaml');
 const LIST = EX('user-card-list.spec.yaml');
 const ALERT = resolve(ROOT, '.claude/artifacts/alert/design-spec.yaml');
+const FORM = resolve(ROOT, '.claude/artifacts/form-field/design-spec.yaml');
 
 let pass = 0, fail = 0;
 const results = [];
@@ -159,6 +160,56 @@ check('P11', 'perf-guard: a used icon import is not reported as dead', () => {
 check('P12', 'compose: warns that container color variant does not cascade', () => {
   const { warnings } = generateCompose(ALERT, '_verify');
   assert(warnings.some((w) => /color.*variant.*not applied on Compose/.test(w)), 'missing cascade warning');
+});
+
+// --- P13: web inputs get a programmatically associated visible label -------
+check('P13', 'web: <label for/htmlFor> matches the input id', () => {
+  const cases = [
+    [generateReact, /<label htmlFor="field-input">/, /<input id="field-input"/],
+    [generateVue, /<label for="field-input">/, /<input id="field-input"/],
+    [generateSvelte, /<label for="field-input">/, /<input id="field-input"/],
+  ];
+  for (const [gen, labelRe, inputRe] of cases) {
+    const { code } = gen(FORM, '_verify');
+    assert(labelRe.test(code), `${gen.name} missing associated label`);
+    assert(inputRe.test(code), `${gen.name} missing input id`);
+  }
+});
+
+// --- P14: web aria wiring — invalid + describedby (gated) + error id -------
+check('P14', 'web: aria-invalid + gated aria-describedby + error element id', () => {
+  const { code } = generateReact(FORM, '_verify');
+  assert(/aria-invalid=\{!!error\}/.test(code), 'missing aria-invalid');
+  assert(/aria-describedby=\{error \? "field-error" : undefined\}/.test(code), 'describedby not gated on error');
+  assert(/id="field-error"[^]*role="alert"/.test(code), 'error element missing id/role');
+});
+
+// --- P15: a value-change handler is typed to take a string -----------------
+check('P15', 'change handler typed with a string arg on every adapter', () => {
+  const expect = [
+    [generateReact, /onChange: \(value: string\) => void/],
+    [generateVue, /onChange: \(value: string\) => void/],
+    [generateSvelte, /onChange[^]*: \(value: string\) => void/],
+    [generateReactNative, /onChange: \(value: string\) => void/],
+    [generateSwiftUI, /onChange: \(String\) -> Void/],
+    [generateCompose, /onChange: \(String\) -> Unit/],
+  ];
+  for (const [gen, re] of expect) {
+    const { code } = gen(FORM, '_verify');
+    assert(re.test(code), `${gen.name} change handler not typed for a string`);
+  }
+});
+
+// --- P16: optional string prop is optional-typed + safely guarded ----------
+check('P16', 'native: optional String is String? and null/nil-checked, not a Bool', () => {
+  const sw = generateSwiftUI(FORM, '_verify').code;
+  assert(/let error: String\?/.test(sw), 'swiftui error not optional');
+  assert(/if let error = error \{/.test(sw), 'swiftui error not bind-unwrapped');
+  assert(!/if error \{/.test(sw), 'swiftui used optional String as Bool');
+  const cp = generateCompose(FORM, '_verify').code;
+  assert(/error: String\?/.test(cp), 'compose error not nullable');
+  assert(/if \(error != null\) \{/.test(cp), 'compose error not null-checked');
+  assert(!/if \(error\) \{/.test(cp), 'compose used nullable String as Boolean');
 });
 
 console.log('\n=== verify-patches ===');

@@ -85,18 +85,26 @@ class SwiftUIRenderer extends RendererBase {
     const label = node.label ? JSON.stringify(String(node.label.value)) : '""';
     return `Link(${label}, destination: URL(string: ${url})!)${this.modifiers(node)}`;
   }
+  plain(vr, fallback = '""') {
+    if (!vr) return fallback;
+    return vr.kind === 'literal' ? JSON.stringify(String(vr.value)) : safe(vr.value);
+  }
   visitInput(node) {
     const i = node.input ?? {};
-    const label = node.a11y?.label?.value ?? '';
-    return `TextField(${JSON.stringify(String(label))}, text: $${safe(i.valueProp ?? 'value')})${this.modifiers(node)}`;
+    const title = this.plain(node.label ?? node.a11y?.label);
+    // Wire the controlled value+onChange contract through a custom Binding.
+    const binding = i.changeProp
+      ? `Binding(get: { ${safe(i.valueProp ?? 'value')} }, set: { ${safe(i.changeProp)}($0) })`
+      : `$${safe(i.valueProp ?? 'value')}`;
+    return `TextField(${title}, text: ${binding})${this.modifiers(node)}`;
   }
   visitSlot() { return 'content'; }
   wrapConditional(node, rendered) {
     const prop = this.ir.props.find((p) => p.name === node.when);
     const w = safe(node.when);
-    // An optional closure can't be used as a Bool; bind-unwrap it (the bound
-    // name shadows the optional inside the block, so callers use it directly).
-    if (prop?.type === 'function' && !prop.required) {
+    // An optional value (String?, closure?, ...) can't be used as a Bool;
+    // bind-unwrap it. The bound name shadows the optional inside the block.
+    if (prop && prop.required === false) {
       return `if let ${w} = ${w} {\n${indent(rendered, 2)}\n}`;
     }
     return `if ${w} {\n${indent(rendered, 2)}\n}`;
@@ -106,13 +114,17 @@ class SwiftUIRenderer extends RendererBase {
     return `ForEach(${safe(items)}, id: \\.${key}) { ${safe(as)} in\n${indent(rendered, 2)}\n}`;
   }
   swiftType(prop) {
+    const opt = prop.required === false;
     switch (prop.type) {
-      case 'number': return 'Double';
-      case 'boolean': return 'Bool';
-      case 'function': return prop.required === false ? '(() -> Void)?' : '() -> Void';
-      case 'enum': return 'String';
+      case 'number': return opt ? 'Double?' : 'Double';
+      case 'boolean': return opt ? 'Bool?' : 'Bool';
+      case 'function': {
+        const base = /change/i.test(prop.name) ? '(String) -> Void' : '() -> Void';
+        return opt ? `(${base})?` : base;
+      }
+      case 'enum': return opt ? 'String?' : 'String';
       case 'array': return `[${this.ir.component}Item]`;
-      default: return 'String';
+      default: return opt ? 'String?' : 'String';
     }
   }
   renderComponent(root) {

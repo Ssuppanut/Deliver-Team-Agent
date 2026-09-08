@@ -99,16 +99,26 @@ class ComposeRenderer extends RendererBase {
   visitLink(node, children) {
     return `Text(text = ${node.label ? this.strExpr(node.label) : `"${'link'}"`}, modifier = Modifier.clickable { /* open ${node.href?.value ?? ''} */ })`;
   }
+  plain(vr) {
+    if (!vr) return null;
+    return vr.kind === 'literal' ? JSON.stringify(String(vr.value)) : vr.value;
+  }
   visitInput(node) {
     const i = node.input ?? {};
-    return `TextField(value = ${i.valueProp ?? 'value'}, onValueChange = ${i.changeProp ?? '{}'}${this._mod(node)})`;
+    const parts = [`value = ${i.valueProp ?? 'value'}`, `onValueChange = ${i.changeProp ?? '{}'}`];
+    const label = this.plain(node.label ?? node.a11y?.label);
+    if (label) parts.push(`label = { Text(${label}) }`);
+    if (node.a11y?.invalid) parts.push(`isError = ${node.a11y.invalid} != null`);
+    const mod = this.modifierArg(node);
+    if (mod) parts.push(mod);
+    return `TextField(${parts.join(', ')})`;
   }
   visitSlot() { return 'content()'; }
   wrapConditional(node, rendered) {
     const prop = this.ir.props.find((p) => p.name === node.when);
-    // A nullable lambda can't be a Boolean; null-check it (Kotlin smart-casts
-    // it to non-null inside the block, so onClick = <prop> is valid).
-    const test = prop?.type === 'function' && !prop.required ? `${node.when} != null` : node.when;
+    // A nullable value (String?, lambda?, ...) can't be a Boolean; null-check
+    // it. Kotlin smart-casts it to non-null inside the block.
+    const test = prop && prop.required === false ? `${node.when} != null` : node.when;
     return `if (${test}) {\n${indent(rendered, 2)}\n}`;
   }
   wrapIteration(node, rendered) {
@@ -116,13 +126,17 @@ class ComposeRenderer extends RendererBase {
     return `${items}.forEach { ${as} ->\n${indent(rendered, 2)}\n}`;
   }
   ktType(prop) {
+    const opt = prop.required === false;
     switch (prop.type) {
-      case 'number': return 'Double';
-      case 'boolean': return 'Boolean';
-      case 'function': return prop.required === false ? '(() -> Unit)?' : '() -> Unit';
-      case 'enum': return 'String';
+      case 'number': return opt ? 'Double?' : 'Double';
+      case 'boolean': return opt ? 'Boolean?' : 'Boolean';
+      case 'function': {
+        const base = /change/i.test(prop.name) ? '(String) -> Unit' : '() -> Unit';
+        return opt ? `(${base})?` : base;
+      }
+      case 'enum': return opt ? 'String?' : 'String';
       case 'array': return `List<${this.ir.component}Item>`;
-      default: return 'String';
+      default: return opt ? 'String?' : 'String';
     }
   }
   renderComponent(root) {

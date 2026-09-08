@@ -1,0 +1,44 @@
+component: FormField
+description: Labeled controlled text input with an optional inline error message.
+category: input
+props:
+  - { name: label, type: string, required: true }
+  - { name: value, type: string, required: true }
+  - { name: onChange, type: function, required: true }
+  - { name: error, type: string, required: false }
+tokens:
+  - color.fg.default
+  - color.fg.muted
+  - color.danger.fg
+  - color.border.default
+  - space.stack.sm
+  - space.inset.sm
+  - radius.control
+root:
+  el: container
+  style:
+    gap: space.stack.sm
+  children:
+    - el: input
+      id: field-input
+      label: { kind: ref, value: label }
+      input:
+        valueProp: value
+        changeProp: onChange
+        inputType: text
+      a11y:
+        describedBy: field-error
+        invalid: error
+      style:
+        border: color.border.default
+        padding: space.inset.sm
+        radius: radius.control
+    - el: text
+      id: field-error
+      when: error
+      role: alert
+      text: { kind: ref, value: error }
+      a11y:
+        live: polite
+      style:
+        color: color.danger.fg

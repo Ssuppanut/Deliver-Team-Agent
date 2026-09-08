@@ -67,8 +67,12 @@ class RNRenderer extends RendererBase {
     const i = node.input ?? {};
     const value = i.valueProp ? ` value={${i.valueProp}}` : '';
     const change = i.changeProp ? ` onChangeText={${i.changeProp}}` : '';
-    const label = node.a11y?.label ? ` accessibilityLabel={${this.attr(node.a11y.label)}}` : '';
-    return `<TextInput${value}${change}${label}${this.style(node)} />`;
+    // A visible label also serves as the accessible name (no htmlFor on native).
+    const labelSource = node.label ?? node.a11y?.label;
+    const labelEl = node.label ? `<Text>${this.interp(node.label)}</Text>\n` : '';
+    const a11yLabel = labelSource ? ` accessibilityLabel={${this.attr(labelSource)}}` : '';
+    const invalid = node.a11y?.invalid ? ` aria-invalid={!!${node.a11y.invalid}}` : '';
+    return `${labelEl}<TextInput${value}${change}${a11yLabel}${invalid}${this.style(node)} />`;
   }
   visitSlot(node) {
     const name = node.label?.value ?? 'children';

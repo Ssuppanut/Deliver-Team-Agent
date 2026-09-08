@@ -1,0 +1,19 @@
+component: FormField
+purpose: A labeled, controlled text input with an optional inline error message.
+audience: End users filling forms.
+platforms: [react, vue, svelte, react-native, swiftui, compose]
+variants: []
+states: [default, error]
+interaction: controlled
+a11y:
+  - "visible label programmatically associated with the input (for/id)"
+  - "error message linked via aria-describedby and aria-invalid when present"
+  - "error announced (role=alert / live region)"
+scope:
+  in:
+    - "controlled value + onChange"
+    - "visible label association"
+    - "optional error text with describedby + invalid wiring"
+  out:
+    - "validation logic (caller owns it — the field only presents error state)"
+    - "select/checkbox/radio groups (separate specs)"
