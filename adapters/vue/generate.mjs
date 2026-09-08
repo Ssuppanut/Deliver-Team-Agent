@@ -23,10 +23,25 @@ class VueRenderer extends RendererBase {
     return ` :${attr}="${vr.value}"`;
   }
   styleAttr(node) {
-    if (!node.style) return '';
-    const entries = Object.entries(node.style)
-      .map(([slot, token]) => `${STYLE_PROP[slot] ?? slot}: ${mapToken(token)}`);
-    return ` style="${entries.join('; ')}"`;
+    const v = this.variantData(node);
+    if (!node.style && !v) return '';
+    if (!v) {
+      const entries = Object.entries(node.style)
+        .map(([slot, token]) => `${STYLE_PROP[slot] ?? slot}: ${mapToken(token)}`);
+      return ` style="${entries.join('; ')}"`;
+    }
+    // Dynamic :style object binding so the variant resolves at runtime.
+    const base = node.style
+      ? Object.entries(node.style).map(([slot, token]) => `'${STYLE_PROP[slot] ?? slot}': '${mapToken(token)}'`)
+      : [];
+    const cases = Object.entries(v.styleCases)
+      .map(([value, slots]) => {
+        const inner = Object.entries(slots).map(([s, t]) => `'${STYLE_PROP[s] ?? s}': '${mapToken(t)}'`).join(', ');
+        return `${JSON.stringify(value)}: { ${inner} }`;
+      })
+      .join(', ');
+    const inner = [...base, `...({ ${cases} })[${v.prop}]`].filter(Boolean).join(', ');
+    return ` :style="{ ${inner} }"`;
   }
   a11y(node) {
     const out = [];
@@ -110,7 +125,7 @@ export function generateVue(specPath, feature) {
   mkdirSync(outDir, { recursive: true });
   const file = resolve(outDir, `${ir.component}.vue`);
   writeFileSync(file, code);
-  return { file, code, warnings: renderer.warnings, component: ir.component };
+  return { file, code, warnings: renderer.warnings, component: ir.component, usedIconsCount: renderer.usedIcons.size };
 }
 
 function main() {

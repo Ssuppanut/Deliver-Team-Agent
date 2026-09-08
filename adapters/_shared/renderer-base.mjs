@@ -42,6 +42,27 @@ export class RendererBase {
     return sym;
   }
 
+  /**
+   * Normalize a node's `variant` into data the adapters format identically.
+   * Splits style slots from an optional per-case `icon`, so parity across
+   * adapters is a property of this shared shaping, not of each adapter.
+   * @returns {null | { prop: string, styleCases: Record<string,object>, iconCases: Record<string,string> }}
+   */
+  variantData(node) {
+    if (!node.variant) return null;
+    const { prop, cases } = node.variant;
+    const styleCases = {};
+    const iconCases = {};
+    for (const [value, slots] of Object.entries(cases)) {
+      styleCases[value] = {};
+      for (const [slot, token] of Object.entries(slots)) {
+        if (slot === 'icon') iconCases[value] = token;
+        else styleCases[value][slot] = token;
+      }
+    }
+    return { prop, styleCases, iconCases };
+  }
+
   /** Adapter must override: format a { kind, value } reference. */
   interp(_valueRef) {
     throw new Error('interp() not implemented');

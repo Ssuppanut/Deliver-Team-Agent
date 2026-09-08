@@ -1,0 +1,16 @@
+component: Alert
+purpose: Communicate a status message with a severity-driven color treatment.
+audience: End users of the product surface.
+platforms: [react, vue, svelte, react-native, swiftui, compose]
+variants: [info, success, warning, error]
+states: [default]
+interaction: variants
+a11y:
+  - "role=alert with aria-live=polite so AT announces it"
+  - "dismiss is an icon button with an accessible label"
+scope:
+  in:
+    - "4-way severity enum driving background + foreground tokens"
+    - "optional dismiss action (conditional render)"
+  out:
+    - "auto-dismiss timers, toasts, stacking (out of scope — that is a toast system)"

@@ -28,11 +28,30 @@ class SwiftUIRenderer extends RendererBase {
   }
   interp(vr) { return this.textExpr(vr); }
   modifiers(node) {
-    if (!node.style) return '';
-    return Object.entries(node.style)
-      .filter(([slot]) => MODIFIER[slot])
-      .map(([slot, token]) => `\n  ${MODIFIER[slot](mapToken(token))}`)
-      .join('');
+    const out = [];
+    if (node.style) {
+      for (const [slot, token] of Object.entries(node.style)) {
+        if (MODIFIER[slot]) out.push(`\n  ${MODIFIER[slot](mapToken(token))}`);
+      }
+    }
+    const v = this.variantData(node);
+    if (v) {
+      // .foregroundColor cascades to child Text in SwiftUI, so a container-level
+      // color variant is honored natively here.
+      const slots = new Set();
+      for (const s of Object.values(v.styleCases)) for (const k of Object.keys(s)) slots.add(k);
+      const fallback = { background: 'Color.clear', color: 'Color.primary' };
+      for (const slot of slots) {
+        if (!MODIFIER[slot]) continue;
+        const dict = Object.entries(v.styleCases)
+          .filter(([, s]) => s[slot])
+          .map(([val, s]) => `${JSON.stringify(val)}: ${mapToken(s[slot])}`)
+          .join(', ');
+        const expr = `([${dict}][${safe(v.prop)}] ?? ${fallback[slot] ?? 'Color.clear'})`;
+        out.push(`\n  ${MODIFIER[slot](expr)}`);
+      }
+    }
+    return out.join('');
   }
   a11y(node) {
     if (!node.a11y?.label) return '';
@@ -73,7 +92,14 @@ class SwiftUIRenderer extends RendererBase {
   }
   visitSlot() { return 'content'; }
   wrapConditional(node, rendered) {
-    return `if ${safe(node.when)} {\n${indent(rendered, 2)}\n}`;
+    const prop = this.ir.props.find((p) => p.name === node.when);
+    const w = safe(node.when);
+    // An optional closure can't be used as a Bool; bind-unwrap it (the bound
+    // name shadows the optional inside the block, so callers use it directly).
+    if (prop?.type === 'function' && !prop.required) {
+      return `if let ${w} = ${w} {\n${indent(rendered, 2)}\n}`;
+    }
+    return `if ${w} {\n${indent(rendered, 2)}\n}`;
   }
   wrapIteration(node, rendered) {
     const { items, as, key } = node.each;
@@ -83,7 +109,7 @@ class SwiftUIRenderer extends RendererBase {
     switch (prop.type) {
       case 'number': return 'Double';
       case 'boolean': return 'Bool';
-      case 'function': return '() -> Void';
+      case 'function': return prop.required === false ? '(() -> Void)?' : '() -> Void';
       case 'enum': return 'String';
       case 'array': return `[${this.ir.component}Item]`;
       default: return 'String';
@@ -116,7 +142,7 @@ export function generateSwiftUI(specPath, feature) {
   mkdirSync(outDir, { recursive: true });
   const file = resolve(outDir, `${ir.component}.swift`);
   writeFileSync(file, code);
-  return { file, code, warnings: renderer.warnings, component: ir.component };
+  return { file, code, warnings: renderer.warnings, component: ir.component, usedIconsCount: renderer.usedIcons.size };
 }
 
 function main() {

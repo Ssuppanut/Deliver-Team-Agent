@@ -11,9 +11,9 @@ export function checkPerf(ir, results) {
   for (const [adapter, res] of Object.entries(results)) {
     if (!res?.code) continue;
     const lines = res.code.split('\n').length;
-    const importsIcon = /lucide|SF Symbols|material\.icons/i.test(res.code);
+    const importsIcon = /import .*lucide|material\.icons\.filled/i.test(res.code);
     const usesIcon = (res.usedIconsCount ?? 0) > 0;
-    if (importsIcon && !usesIcon && /import .*lucide/.test(res.code)) {
+    if (importsIcon && !usesIcon) {
       issues.push({ severity: 'minor', rule: 'dead-icon-import', msg: `${adapter}: icon library imported but unused` });
     }
     const budget = 12 + nodeCount * 8;

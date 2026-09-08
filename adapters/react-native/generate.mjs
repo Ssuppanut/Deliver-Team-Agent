@@ -23,10 +23,22 @@ class RNRenderer extends RendererBase {
     return vr.value;
   }
   style(node) {
-    if (!node.style) return '';
-    const entries = Object.entries(node.style)
-      .map(([slot, token]) => `${STYLE_PROP[slot] ?? slot}: ${mapToken(token)}`);
-    return ` style={{ ${entries.join(', ')} }}`;
+    const base = node.style
+      ? Object.entries(node.style).map(([slot, token]) => `${STYLE_PROP[slot] ?? slot}: ${mapToken(token)}`)
+      : [];
+    let spread = '';
+    const v = this.variantData(node);
+    if (v) {
+      const cases = Object.entries(v.styleCases)
+        .map(([value, slots]) => {
+          const inner = Object.entries(slots).map(([s, t]) => `${STYLE_PROP[s] ?? s}: ${mapToken(t)}`).join(', ');
+          return `${JSON.stringify(value)}: { ${inner} }`;
+        })
+        .join(', ');
+      spread = `...({ ${cases} })[${v.prop}]`;
+    }
+    const inner = [...base, spread].filter(Boolean).join(', ');
+    return inner ? ` style={{ ${inner} }}` : '';
   }
   visitContainer(node, children) {
     const label = node.a11y?.label ? ` accessibilityLabel={${this.attr(node.a11y.label)}}` : '';
@@ -108,7 +120,7 @@ export function generateReactNative(specPath, feature) {
   mkdirSync(outDir, { recursive: true });
   const file = resolve(outDir, `${ir.component}.tsx`);
   writeFileSync(file, code);
-  return { file, code, warnings: renderer.warnings, component: ir.component };
+  return { file, code, warnings: renderer.warnings, component: ir.component, usedIconsCount: renderer.usedIcons.size };
 }
 
 function main() {

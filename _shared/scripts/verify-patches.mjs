@@ -15,12 +15,14 @@ import { generateSvelte } from '../../adapters/svelte/generate.mjs';
 import { generateReactNative } from '../../adapters/react-native/generate.mjs';
 import { checkA11y } from '../../.claude/skills/_guards/a11y-guard/scripts/check.mjs';
 import { checkTokens } from '../../.claude/skills/_guards/token-guard/scripts/check.mjs';
+import { checkPerf } from '../../.claude/skills/_guards/perf-guard/scripts/check.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '../..');
 const EX = (f) => resolve(ROOT, '_shared/schemas/examples', f);
 const PRODUCT = EX('product-card.spec.yaml');
 const LIST = EX('user-card-list.spec.yaml');
+const ALERT = resolve(ROOT, '.claude/artifacts/alert/design-spec.yaml');
 
 let pass = 0, fail = 0;
 const results = [];
@@ -112,6 +114,51 @@ check('P8', 'iteration: each adapter uses its native loop construct', () => {
     const { code } = gen(LIST, '_verify');
     assert(re.test(code), `${gen.name} missing expected loop construct`);
   }
+});
+
+// --- P9: enum variant is applied (not a no-op) on all 6 adapters -----------
+check('P9', 'variant: severity drives the info background token on every adapter', () => {
+  const expect = [
+    [generateReact, /info[^]*var\(--color-info-bg\)[^]*\[severity\]/],
+    [generateVue, /:style=[^]*var\(--color-info-bg\)[^]*\[severity\]/],
+    [generateSvelte, /background-color: var\(--color-info-bg\)[^]*\[severity\]/],
+    [generateReactNative, /tokens\.color\.info\.bg[^]*\[severity\]/],
+    [generateSwiftUI, /"info": DesignTokens\.ColorInfoBg[^]*\[severity\]/],
+    [generateCompose, /when \(severity\) \{[^]*"info" -> DesignTokens\.ColorInfoBg/],
+  ];
+  for (const [gen, re] of expect) {
+    const { code } = gen(ALERT, '_verify');
+    assert(re.test(code), `${gen.name} did not apply the severity variant`);
+  }
+});
+
+// --- P10: optional function prop + `when` is valid native code -------------
+check('P10', 'native: optional callback typed optional + guarded, not used as Bool', () => {
+  const sw = generateSwiftUI(ALERT, '_verify').code;
+  assert(/let onDismiss: \(\(\) -> Void\)\?/.test(sw), 'swiftui optional closure type missing');
+  assert(/if let onDismiss = onDismiss \{/.test(sw), 'swiftui should bind-unwrap the optional');
+  assert(!/if onDismiss \{/.test(sw), 'swiftui regressed to using a closure as Bool');
+  const cp = generateCompose(ALERT, '_verify').code;
+  assert(/onDismiss: \(\(\) -> Unit\)\?/.test(cp), 'compose nullable lambda type missing');
+  assert(/if \(onDismiss != null\) \{/.test(cp), 'compose should null-check the lambda');
+  assert(!/if \(onDismiss\) \{/.test(cp), 'compose regressed to using a lambda as Boolean');
+});
+
+// --- P11: perf-guard does not false-flag a used icon import ----------------
+check('P11', 'perf-guard: a used icon import is not reported as dead', () => {
+  const results = {
+    react: generateReact(ALERT, '_verify'),
+    swiftui: generateSwiftUI(ALERT, '_verify'),
+  };
+  const ir = specToIrFromFile(ALERT);
+  const { issues } = checkPerf(ir, results);
+  assert(!issues.some((i) => i.rule === 'dead-icon-import'), 'used icon flagged as dead');
+});
+
+// --- P12: Compose reports the container color-cascade limitation -----------
+check('P12', 'compose: warns that container color variant does not cascade', () => {
+  const { warnings } = generateCompose(ALERT, '_verify');
+  assert(warnings.some((w) => /color.*variant.*not applied on Compose/.test(w)), 'missing cascade warning');
 });
 
 console.log('\n=== verify-patches ===');

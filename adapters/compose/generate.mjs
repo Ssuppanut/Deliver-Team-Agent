@@ -25,13 +25,32 @@ class ComposeRenderer extends RendererBase {
   interp(vr) { return this.strExpr(vr); }
   /** Build a Modifier chain from style slots, excluding color (a Text param). */
   modifier(node) {
-    if (!node.style) return '';
     const chain = [];
-    for (const [slot, token] of Object.entries(node.style)) {
-      const t = mapToken(token);
-      if (slot === 'background') chain.push(`.background(${t})`);
-      else if (slot === 'padding') chain.push(`.padding(${t})`);
-      else if (slot === 'radius') chain.push(`.clip(RoundedCornerShape(${t}))`);
+    if (node.style) {
+      for (const [slot, token] of Object.entries(node.style)) {
+        const t = mapToken(token);
+        if (slot === 'background') chain.push(`.background(${t})`);
+        else if (slot === 'padding') chain.push(`.padding(${t})`);
+        else if (slot === 'radius') chain.push(`.clip(RoundedCornerShape(${t}))`);
+      }
+    }
+    const v = this.variantData(node);
+    if (v) {
+      const whenExpr = (slot, fallback) => {
+        const arms = Object.entries(v.styleCases)
+          .filter(([, s]) => s[slot])
+          .map(([val, s]) => `${JSON.stringify(val)} -> ${mapToken(s[slot])}`)
+          .join('; ');
+        return `when (${v.prop}) { ${arms}; else -> ${fallback} }`;
+      };
+      const slots = new Set();
+      for (const s of Object.values(v.styleCases)) for (const k of Object.keys(s)) slots.add(k);
+      if (slots.has('background')) chain.push(`.background(${whenExpr('background', 'Color.Transparent')})`);
+      // Column has no cascading text color, so a container-level `color` variant
+      // cannot be honored here — set text color on the Text children instead.
+      if (slots.has('color')) {
+        this.warnings.push('container `color` variant not applied on Compose (Column does not cascade text color); set it on Text children');
+      }
     }
     return chain.length ? `Modifier${chain.join('')}` : '';
   }
@@ -86,7 +105,11 @@ class ComposeRenderer extends RendererBase {
   }
   visitSlot() { return 'content()'; }
   wrapConditional(node, rendered) {
-    return `if (${node.when}) {\n${indent(rendered, 2)}\n}`;
+    const prop = this.ir.props.find((p) => p.name === node.when);
+    // A nullable lambda can't be a Boolean; null-check it (Kotlin smart-casts
+    // it to non-null inside the block, so onClick = <prop> is valid).
+    const test = prop?.type === 'function' && !prop.required ? `${node.when} != null` : node.when;
+    return `if (${test}) {\n${indent(rendered, 2)}\n}`;
   }
   wrapIteration(node, rendered) {
     const { items, as } = node.each;
@@ -96,7 +119,7 @@ class ComposeRenderer extends RendererBase {
     switch (prop.type) {
       case 'number': return 'Double';
       case 'boolean': return 'Boolean';
-      case 'function': return '() -> Unit';
+      case 'function': return prop.required === false ? '(() -> Unit)?' : '() -> Unit';
       case 'enum': return 'String';
       case 'array': return `List<${this.ir.component}Item>`;
       default: return 'String';
@@ -121,6 +144,7 @@ class ComposeRenderer extends RendererBase {
       + `import androidx.compose.runtime.Composable\n`
       + `import androidx.compose.ui.Modifier\n`
       + `import androidx.compose.ui.draw.clip\n`
+      + `import androidx.compose.ui.graphics.Color\n`
       + `import androidx.compose.ui.semantics.contentDescription\n`
       + `import androidx.compose.ui.semantics.semantics\n`
       + `import androidx.compose.foundation.clickable\n`
@@ -138,7 +162,7 @@ export function generateCompose(specPath, feature) {
   mkdirSync(outDir, { recursive: true });
   const file = resolve(outDir, `${ir.component}.kt`);
   writeFileSync(file, code);
-  return { file, code, warnings: renderer.warnings, component: ir.component };
+  return { file, code, warnings: renderer.warnings, component: ir.component, usedIconsCount: renderer.usedIcons.size };
 }
 
 function main() {

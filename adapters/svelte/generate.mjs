@@ -23,10 +23,22 @@ class SvelteRenderer extends RendererBase {
     return ` ${attr}={${vr.value}}`;
   }
   styleAttr(node) {
-    if (!node.style) return '';
-    const entries = Object.entries(node.style)
-      .map(([slot, token]) => `${STYLE_PROP[slot] ?? slot}: ${mapToken(token)}`);
-    return ` style="${entries.join('; ')}"`;
+    const v = this.variantData(node);
+    if (!node.style && !v) return '';
+    const base = node.style
+      ? Object.entries(node.style).map(([slot, token]) => `${STYLE_PROP[slot] ?? slot}: ${mapToken(token)}`)
+      : [];
+    if (!v) return ` style="${base.join('; ')}"`;
+    // Inline a per-value CSS string, indexed by the variant prop, via Svelte
+    // attribute interpolation — no extra script state needed.
+    const cases = Object.entries(v.styleCases)
+      .map(([value, slots]) => {
+        const css = Object.entries(slots).map(([s, t]) => `${STYLE_PROP[s] ?? s}: ${mapToken(t)}`).join('; ');
+        return `${JSON.stringify(value)}: ${JSON.stringify(css)}`;
+      })
+      .join(', ');
+    const prefix = base.length ? `${base.join('; ')}; ` : '';
+    return ` style="${prefix}{({ ${cases} })[${v.prop}]}"`;
   }
   a11y(node) {
     const out = [];
@@ -108,7 +120,7 @@ export function generateSvelte(specPath, feature) {
   mkdirSync(outDir, { recursive: true });
   const file = resolve(outDir, `${ir.component}.svelte`);
   writeFileSync(file, code);
-  return { file, code, warnings: renderer.warnings, component: ir.component };
+  return { file, code, warnings: renderer.warnings, component: ir.component, usedIconsCount: renderer.usedIcons.size };
 }
 
 function main() {
