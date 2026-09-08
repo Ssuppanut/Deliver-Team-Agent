@@ -1,0 +1,16 @@
+{
+  "$schema": "https://design-tokens.github.io/community-group/format/",
+  "$description": "Icon tokens. Platform-neutral semantic names mapped per-adapter to the platform icon set (lucide / SF Symbols / Material Icons). Designed up front so adapters never diverge.",
+  "icon": {
+    "$type": "icon",
+    "check":   { "$value": "check",         "$extensions": { "lucide": "Check",        "sfSymbol": "checkmark",             "material": "Check" } },
+    "close":   { "$value": "close",         "$extensions": { "lucide": "X",            "sfSymbol": "xmark",                 "material": "Close" } },
+    "info":    { "$value": "info",          "$extensions": { "lucide": "Info",         "sfSymbol": "info.circle",           "material": "Info" } },
+    "warning": { "$value": "warning",       "$extensions": { "lucide": "TriangleAlert","sfSymbol": "exclamationmark.triangle","material": "Warning" } },
+    "error":   { "$value": "error",         "$extensions": { "lucide": "CircleAlert",  "sfSymbol": "xmark.octagon",         "material": "Error" } },
+    "success": { "$value": "success",       "$extensions": { "lucide": "CircleCheck",  "sfSymbol": "checkmark.circle",      "material": "CheckCircle" } },
+    "star":    { "$value": "star",          "$extensions": { "lucide": "Star",         "sfSymbol": "star",                  "material": "Star" } },
+    "heart":   { "$value": "heart",         "$extensions": { "lucide": "Heart",        "sfSymbol": "heart",                 "material": "Favorite" } },
+    "chevron": { "$value": "chevron-right", "$extensions": { "lucide": "ChevronRight", "sfSymbol": "chevron.right",         "material": "ChevronRight" } }
+  }
+}

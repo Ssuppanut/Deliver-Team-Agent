@@ -1,0 +1,50 @@
+component: ProductCard
+description: Static product display card with image, title, price, and add-to-cart action.
+category: display
+props:
+  - { name: title, type: string, required: true }
+  - { name: image, type: string, required: true }
+  - { name: price, type: number, required: true }
+  - { name: onAddToCart, type: function, required: true }
+tokens:
+  - color.bg.default
+  - color.fg.default
+  - color.fg.muted
+  - color.accent.default
+  - color.fg.onAccent
+  - space.inset.md
+  - space.stack.sm
+  - radius.surface
+  - radius.control
+root:
+  el: container
+  role: group
+  as: article
+  a11y:
+    label: { kind: ref, value: title }
+  style:
+    background: color.bg.default
+    padding: space.inset.md
+    radius: radius.surface
+  children:
+    - el: media
+      src: { kind: ref, value: image }
+      alt: { kind: ref, value: title }
+      style:
+        radius: radius.control
+    - el: heading
+      level: 3
+      text: { kind: ref, value: title }
+      style:
+        color: color.fg.default
+    - el: text
+      text: { kind: expr, value: "`$${price.toFixed(2)}`" }
+      style:
+        color: color.fg.muted
+    - el: action
+      label: { kind: literal, value: "Add to cart" }
+      onEvent: onAddToCart
+      style:
+        background: color.accent.default
+        color: color.fg.onAccent
+        radius: radius.control

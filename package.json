@@ -1,0 +1,23 @@
+{
+  "name": "deliver-team-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Spec-driven code generation ecosystem for Claude Code: one design spec, production code across 6 platforms, with design intent, a11y, and token contracts kept in sync automatically.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "tokens:build": "node design-system/tokens-dtcg/scripts/build.mjs",
+    "spec:validate": "node _shared/scripts/validate-schema.mjs",
+    "spec:ir": "node _shared/scripts/spec-to-ir.mjs",
+    "e2e": "node _shared/scripts/e2e-multi.mjs",
+    "verify:patches": "node _shared/scripts/verify-patches.mjs",
+    "test": "node _shared/scripts/verify-patches.mjs"
+  },
+  "devDependencies": {
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "yaml": "^2.6.0"
+  }
+}

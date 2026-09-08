@@ -1,0 +1,133 @@
+$schema: "http://json-schema.org/draft-07/schema#"
+$id: "design-spec.schema.yaml"
+title: Design Spec
+description: >
+  Platform-neutral description of a single component. Normalized by
+  spec-to-ir.mjs into an Intermediate Representation, then rendered by each
+  adapter. Elements are classified into 8 kinds; props carry an explicit kind
+  (literal | ref | expr) so adapters know how to emit them.
+type: object
+additionalProperties: false
+required: [component, root]
+properties:
+  component:
+    type: string
+    pattern: "^[A-Z][A-Za-z0-9]*$"
+    description: PascalCase component name.
+  description:
+    type: string
+  category:
+    type: string
+    description: >
+      Optional category hint. The orchestrator refuses "overlay" and
+      "data-table" categories and redirects to headless primitives.
+    enum: [display, feedback, input, navigation, layout, overlay, data-table]
+  props:
+    type: array
+    items: { $ref: "#/definitions/prop" }
+  tokens:
+    type: array
+    description: Semantic token names this component is allowed to consume.
+    items: { type: string }
+  root:
+    $ref: "#/definitions/element"
+
+definitions:
+  prop:
+    type: object
+    additionalProperties: false
+    required: [name, type]
+    properties:
+      name: { type: string, pattern: "^[a-z][A-Za-z0-9]*$" }
+      type:
+        type: string
+        enum: [string, number, boolean, enum, array, function, node]
+      required: { type: boolean }
+      values:
+        type: array
+        description: Allowed values when type is enum.
+        items: { type: string }
+      itemShape:
+        type: object
+        description: Shape of each item when type is array (for iteration).
+        additionalProperties: { type: string }
+
+  valueRef:
+    type: object
+    additionalProperties: false
+    required: [kind, value]
+    properties:
+      kind: { type: string, enum: [literal, ref, expr] }
+      value: {}
+
+  element:
+    type: object
+    additionalProperties: false
+    required: [el]
+    properties:
+      el:
+        type: string
+        enum: [container, media, heading, text, action, link, input, slot]
+      role: { type: string }
+      as: { type: string, description: "Optional semantic tag hint (e.g. section, article)." }
+      a11y:
+        type: object
+        additionalProperties: false
+        properties:
+          label: { $ref: "#/definitions/valueRef" }
+          labelledBy: { type: string }
+          describedBy: { type: string }
+          live: { type: string, enum: [off, polite, assertive] }
+      style:
+        type: object
+        description: Map of style slot -> semantic token name.
+        additionalProperties: { type: string }
+      level:
+        type: integer
+        minimum: 1
+        maximum: 6
+        description: Heading level (el=heading only).
+      text: { $ref: "#/definitions/valueRef" }
+      src: { $ref: "#/definitions/valueRef" }
+      alt: { $ref: "#/definitions/valueRef" }
+      href: { $ref: "#/definitions/valueRef" }
+      icon: { type: string, description: "Icon token name (icon.*)." }
+      label: { $ref: "#/definitions/valueRef" }
+      variant:
+        type: object
+        description: Maps a prop name to a per-value style/attribute table.
+        additionalProperties: false
+        required: [prop, cases]
+        properties:
+          prop: { type: string }
+          cases:
+            type: object
+            additionalProperties:
+              type: object
+              additionalProperties: { type: string }
+      input:
+        type: object
+        description: Controlled input binding (el=input only).
+        additionalProperties: false
+        properties:
+          valueProp: { type: string }
+          changeProp: { type: string }
+          inputType: { type: string, enum: [text, number, email, password, checkbox] }
+      onEvent:
+        type: string
+        description: Prop name of the callback for el=action.
+      when:
+        type: string
+        description: Prop name that gates rendering (conditional child).
+      each:
+        type: object
+        description: Iteration binding (Strategy D single-level).
+        additionalProperties: false
+        required: [items, as]
+        properties:
+          items: { type: string, description: "Array prop to iterate." }
+          as: { type: string, description: "Loop variable name." }
+          key: { type: string, description: "Field of each item used as key." }
+      children:
+        type: array
+        items: { $ref: "#/definitions/element" }

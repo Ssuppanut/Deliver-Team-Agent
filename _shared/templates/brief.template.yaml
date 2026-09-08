@@ -1,0 +1,12 @@
+# Brief template — copy to .claude/artifacts/<feature>/brief.yaml (01-discover).
+component: ""            # PascalCase, e.g. ProductCard
+purpose: ""             # one sentence: what problem it solves
+audience: ""            # who uses it
+platforms: []           # subset of [react, vue, svelte, react-native, swiftui, compose]
+variants: []            # e.g. [primary, secondary]
+states: [default]       # default | loading | error | empty | disabled | selected
+interaction: static     # static | variants | controlled | iteration
+a11y: []                # e.g. ["keyboard operable", "aria-label on icon button"]
+scope:
+  in: []                # explicitly in scope
+  out: []               # explicitly out of scope (route overlays/tables to refusal)

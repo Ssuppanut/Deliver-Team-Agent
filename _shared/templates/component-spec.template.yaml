@@ -1,0 +1,24 @@
+# Design-spec template — copy to .claude/artifacts/<feature>/design-spec.yaml
+# (04-design). Validate: node _shared/scripts/validate-schema.mjs <path>
+component: ""           # PascalCase
+description: ""
+category: display       # display | feedback | input | navigation | layout
+                        # (overlay / data-table are refused by the orchestrator)
+props:
+  - { name: "", type: string, required: true }
+tokens:
+  - color.bg.default    # semantic tokens only
+root:
+  el: container         # container | media | heading | text | action | link | input | slot
+  role: group
+  style:
+    background: color.bg.default
+    padding: space.inset.md
+    radius: radius.surface
+  children:
+    - el: heading
+      level: 3
+      text: { kind: ref, value: "" }      # kind: literal | ref | expr
+      style: { color: color.fg.default }
+    # iteration:  each: { items: <arrayProp>, as: item, key: id }
+    # conditional: when: <booleanProp>

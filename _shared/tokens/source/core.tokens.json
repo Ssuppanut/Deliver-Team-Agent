@@ -1,0 +1,83 @@
+{
+  "$schema": "https://design-tokens.github.io/community-group/format/",
+  "$description": "Primitive (core) design tokens. Raw values only. Never referenced directly by components; semantic tokens alias these.",
+  "color": {
+    "$type": "color",
+    "white": { "$value": "#ffffff" },
+    "black": { "$value": "#0a0a0a" },
+    "slate": {
+      "50":  { "$value": "#f8fafc" },
+      "100": { "$value": "#f1f5f9" },
+      "200": { "$value": "#e2e8f0" },
+      "300": { "$value": "#cbd5e1" },
+      "400": { "$value": "#94a3b8" },
+      "500": { "$value": "#64748b" },
+      "600": { "$value": "#475569" },
+      "700": { "$value": "#334155" },
+      "800": { "$value": "#1e293b" },
+      "900": { "$value": "#0f172a" }
+    },
+    "blue": {
+      "50":  { "$value": "#eff6ff" },
+      "100": { "$value": "#dbeafe" },
+      "500": { "$value": "#3b82f6" },
+      "600": { "$value": "#2563eb" },
+      "700": { "$value": "#1d4ed8" }
+    },
+    "green": {
+      "50":  { "$value": "#f0fdf4" },
+      "500": { "$value": "#22c55e" },
+      "600": { "$value": "#16a34a" }
+    },
+    "amber": {
+      "50":  { "$value": "#fffbeb" },
+      "500": { "$value": "#f59e0b" },
+      "600": { "$value": "#d97706" }
+    },
+    "red": {
+      "50":  { "$value": "#fef2f2" },
+      "500": { "$value": "#ef4444" },
+      "600": { "$value": "#dc2626" }
+    }
+  },
+  "space": {
+    "$type": "dimension",
+    "0": { "$value": "0px" },
+    "1": { "$value": "4px" },
+    "2": { "$value": "8px" },
+    "3": { "$value": "12px" },
+    "4": { "$value": "16px" },
+    "5": { "$value": "20px" },
+    "6": { "$value": "24px" },
+    "8": { "$value": "32px" },
+    "10": { "$value": "40px" },
+    "12": { "$value": "48px" }
+  },
+  "radius": {
+    "$type": "dimension",
+    "none": { "$value": "0px" },
+    "sm": { "$value": "4px" },
+    "md": { "$value": "8px" },
+    "lg": { "$value": "12px" },
+    "full": { "$value": "9999px" }
+  },
+  "font": {
+    "family": {
+      "$type": "fontFamily",
+      "sans": { "$value": "Inter, system-ui, sans-serif" }
+    },
+    "size": {
+      "$type": "dimension",
+      "sm": { "$value": "14px" },
+      "md": { "$value": "16px" },
+      "lg": { "$value": "20px" },
+      "xl": { "$value": "24px" }
+    },
+    "weight": {
+      "$type": "fontWeight",
+      "regular": { "$value": 400 },
+      "medium": { "$value": 500 },
+      "bold": { "$value": 700 }
+    }
+  }
+}

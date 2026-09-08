@@ -1,0 +1,59 @@
+{
+  "$schema": "https://design-tokens.github.io/community-group/format/",
+  "$description": "Semantic tokens. Alias core primitives via {reference} syntax. Components consume ONLY these, never core.",
+  "color": {
+    "$type": "color",
+    "bg": {
+      "default": { "$value": "{color.white}" },
+      "subtle": { "$value": "{color.slate.50}" },
+      "muted": { "$value": "{color.slate.100}" }
+    },
+    "fg": {
+      "default": { "$value": "{color.slate.900}" },
+      "muted": { "$value": "{color.slate.500}" },
+      "onAccent": { "$value": "{color.white}" }
+    },
+    "border": {
+      "default": { "$value": "{color.slate.200}" },
+      "strong": { "$value": "{color.slate.300}" }
+    },
+    "accent": {
+      "default": { "$value": "{color.blue.600}" },
+      "hover": { "$value": "{color.blue.700}" },
+      "subtle": { "$value": "{color.blue.50}" }
+    },
+    "success": {
+      "fg": { "$value": "{color.green.600}" },
+      "bg": { "$value": "{color.green.50}" }
+    },
+    "warning": {
+      "fg": { "$value": "{color.amber.600}" },
+      "bg": { "$value": "{color.amber.50}" }
+    },
+    "danger": {
+      "fg": { "$value": "{color.red.600}" },
+      "bg": { "$value": "{color.red.50}" }
+    },
+    "info": {
+      "fg": { "$value": "{color.blue.600}" },
+      "bg": { "$value": "{color.blue.50}" }
+    }
+  },
+  "space": {
+    "$type": "dimension",
+    "inset": {
+      "sm": { "$value": "{space.2}" },
+      "md": { "$value": "{space.4}" },
+      "lg": { "$value": "{space.6}" }
+    },
+    "stack": {
+      "sm": { "$value": "{space.2}" },
+      "md": { "$value": "{space.4}" }
+    }
+  },
+  "radius": {
+    "$type": "dimension",
+    "control": { "$value": "{radius.md}" },
+    "surface": { "$value": "{radius.lg}" }
+  }
+}

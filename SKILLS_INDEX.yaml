@@ -1,0 +1,82 @@
+# Master registry of the skills ecosystem.
+# 27 skills across 5 layers. Adapter skills are co-located with their code
+# under adapters/<name>/; all others live under .claude/skills/<layer>/<name>/.
+version: 0.1.0
+description: >
+  Spec-driven code generation ecosystem. One design spec -> production code
+  across 6 platforms, with design intent, a11y, and token contracts kept in sync.
+
+layers:
+  _meta:
+    path: .claude/skills/_meta
+    skills:
+      - name: orchestrator
+        role: Entry point; routes the pipeline and enforces scope refusals.
+      - name: context-loader
+        role: Loads the minimal artifacts/skills per pipeline step.
+      - name: critique
+        role: Adversarial self-review before guards.
+
+  _guards:
+    path: .claude/skills/_guards
+    skills:
+      - name: a11y-guard
+        role: Accessibility gate (static IR + source + dynamic axe-core).
+        script: .claude/skills/_guards/a11y-guard/scripts/check.mjs
+      - name: token-guard
+        role: Token contract gate (registry membership + no hardcoded values).
+        script: .claude/skills/_guards/token-guard/scripts/check.mjs
+      - name: perf-guard
+        role: Bloat / dead-import gate (static) + bundle & Web Vitals (verify).
+        script: .claude/skills/_guards/perf-guard/scripts/check.mjs
+
+  workflow:
+    path: .claude/skills/workflow
+    pipeline: [01-discover, 02-research, 03-architect, 04-design, 05-implement, 06-verify, 07-handoff]
+    skills:
+      - { name: 01-discover, role: Request -> brief.yaml }
+      - { name: 02-research, role: Optional pattern/a11y research }
+      - { name: 03-architect, role: API + structure -> architecture.yaml }
+      - { name: 04-design, role: -> design-spec.yaml (source of truth) }
+      - { name: 05-implement, role: spec-to-ir + 6 adapters + guards }
+      - { name: 06-verify, role: dynamic a11y, visual regression, size, vitals }
+      - { name: 07-handoff, role: 8-artifact handoff bundle }
+
+  design-system:
+    path: .claude/skills/design-system
+    skills:
+      - { name: tokens-dtcg, role: DTCG -> registry + 6 platform token outputs }
+      - { name: tokens-sync, role: Figma Variables <-> DTCG source }
+      - { name: component-contract, role: Public API parity contract }
+      - { name: storybook-authoring, role: CSF + MDX stories for verify }
+
+  adapters:
+    path: adapters
+    base: adapters/_shared/renderer-base.mjs
+    skills:
+      - { name: react, platform: web, icons: lucide-react, tokens: css-vars }
+      - { name: vue, platform: web, icons: lucide-vue-next, tokens: css-vars }
+      - { name: svelte, platform: web, icons: lucide-svelte, tokens: css-vars }
+      - { name: react-native, platform: native, icons: lucide-react-native, tokens: tokens-rn.ts }
+      - { name: swiftui, platform: native, icons: sf-symbols, tokens: DesignTokens.swift }
+      - { name: compose, platform: native, icons: material-icons, tokens: DesignTokens.kt }
+
+  knowledge:
+    path: .claude/skills/knowledge
+    skills:
+      - { name: design-principles, role: Visual/structural fundamentals }
+      - { name: universal-design, role: WCAG-aligned a11y reference }
+      - { name: pattern-library, role: Known patterns + refusal boundaries }
+      - { name: interaction-laws, role: Fitts/Hick/Doherty and timing }
+
+shared:
+  path: _shared
+  schemas: _shared/schemas
+  scripts: _shared/scripts
+  templates: _shared/templates
+  tokens: _shared/tokens
+
+entrypoints:
+  build_tokens: node design-system/tokens-dtcg/scripts/build.mjs
+  e2e: node _shared/scripts/e2e-multi.mjs --feature <name>
+  verify_patches: node _shared/scripts/verify-patches.mjs

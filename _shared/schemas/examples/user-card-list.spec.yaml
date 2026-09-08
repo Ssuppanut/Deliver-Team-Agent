@@ -1,0 +1,44 @@
+component: UserCardList
+description: Single-level iteration over users, each rendered as a name + role card.
+category: display
+props:
+  - name: users
+    type: array
+    required: true
+    itemShape:
+      id: string
+      name: string
+      role: string
+tokens:
+  - color.bg.subtle
+  - color.fg.default
+  - color.fg.muted
+  - space.inset.md
+  - space.stack.sm
+  - radius.surface
+root:
+  el: container
+  role: list
+  a11y:
+    label: { kind: literal, value: "User list" }
+  style:
+    padding: space.stack.sm
+  children:
+    - el: container
+      role: listitem
+      as: article
+      each: { items: users, as: user, key: id }
+      style:
+        background: color.bg.subtle
+        padding: space.inset.md
+        radius: radius.surface
+      children:
+        - el: heading
+          level: 3
+          text: { kind: ref, value: "user.name" }
+          style:
+            color: color.fg.default
+        - el: text
+          text: { kind: ref, value: "user.role" }
+          style:
+            color: color.fg.muted

@@ -1,0 +1,40 @@
+$schema: "http://json-schema.org/draft-07/schema#"
+$id: "architecture.schema.yaml"
+title: Component Architecture
+description: Output of 03-architect. Public API + structure decisions.
+type: object
+additionalProperties: false
+required: [component, api]
+properties:
+  component: { type: string, pattern: "^[A-Z][A-Za-z0-9]*$" }
+  api:
+    type: array
+    description: The public prop contract every adapter must expose identically.
+    items:
+      type: object
+      additionalProperties: false
+      required: [name, type]
+      properties:
+        name: { type: string }
+        type: { type: string, enum: [string, number, boolean, enum, array, function, node] }
+        required: { type: boolean }
+        values: { type: array, items: { type: string } }
+        itemShape: { type: object, additionalProperties: { type: string } }
+  variantStrategy:
+    type: object
+    additionalProperties: false
+    properties:
+      prop: { type: string }
+      cases: { type: array, items: { type: string } }
+  iteration:
+    type: object
+    additionalProperties: false
+    properties:
+      enabled: { type: boolean }
+      itemsProp: { type: string }
+  tokenBudget:
+    type: array
+    items: { type: string }
+  adrs:
+    type: array
+    items: { type: string, description: "Path to an ADR under adrs/." }

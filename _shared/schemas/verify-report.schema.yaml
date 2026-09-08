@@ -1,0 +1,35 @@
+$schema: "http://json-schema.org/draft-07/schema#"
+$id: "verify-report.schema.yaml"
+title: Verify Report
+description: Output of 06-verify (and the shape written by e2e-multi).
+type: object
+additionalProperties: true
+required: [feature, component, guards, gatesPass]
+properties:
+  feature: { type: string }
+  component: { type: string }
+  generatedAt: { type: string, format: date-time }
+  adapters:
+    type: object
+    additionalProperties: { type: string }
+  tokens:
+    type: array
+    items: { type: string }
+  guards:
+    type: object
+    additionalProperties:
+      type: object
+      properties:
+        ok: { type: boolean }
+        issues:
+          type: array
+          items:
+            type: object
+            properties:
+              severity: { type: string, enum: [critical, serious, moderate, minor] }
+              rule: { type: string }
+              msg: { type: string }
+  warnings:
+    type: array
+    items: { type: string }
+  gatesPass: { type: boolean }
