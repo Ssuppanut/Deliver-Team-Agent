@@ -1,12 +1,19 @@
 # Artifact registry — agents communicate through structured artifacts, not chat
-# history. Each artifact declares its owner (agent id), the schema that validates
-# it, its upstream inputs (for traceability), and an honest status. Existing
-# schemas are reused; new ones are marked planned rather than duplicated.
-version: 1
+# history. Each artifact declares its owner (agent), the stage that produces it,
+# the schema that validates it, its upstream lineage (`inputs`, for traceability),
+# and an honest status. Existing schemas are reused; new ones are marked planned.
+#
+# required-vs-optional is an EDGE property, not an artifact property: whether an
+# artifact is required or optional depends on WHICH stage consumes it, so it lives
+# on `workflows/ux-ui.workflow.yaml` `consumes[].required` / `.reuse`. `inputs`
+# here is lineage (what informed this artifact), not an execution dependency.
+# `produced_by` must match the workflow stage that emits the artifact (validated).
+version: 2
 
 artifacts:
   - id: brief
     owner: orchestrator
+    produced_by: intake
     inputs: []
     schema: { status: implemented, path: "_shared/schemas/brief.schema.yaml" }
     status: implemented
@@ -14,18 +21,23 @@ artifacts:
 
   - id: product-spec
     owner: product-ux-strategist
+    produced_by: product-strategy
     inputs: [brief]
     schema: { status: planned, path: "artifacts/schemas/product-spec.schema.yaml" }
     status: planned
+    note: "Reusable: if a product strategy already exists it is supplied and product-strategy is skipped."
 
   - id: research-report
     owner: ux-researcher
+    produced_by: research
     inputs: [product-spec, brief]
     schema: { status: planned, path: "artifacts/schemas/research-report.schema.yaml" }
     status: planned
+    note: "Reusable: an existing research report is reused instead of re-running research."
 
   - id: ux-spec
     owner: ux-designer
+    produced_by: ux-design
     inputs: [research-report, product-spec]
     schema: { status: planned, path: "artifacts/schemas/ux-spec.schema.yaml" }
     status: planned
@@ -33,20 +45,23 @@ artifacts:
 
   - id: design-spec
     owner: ui-designer
+    produced_by: ui-design
     inputs: [ux-spec]
     schema: { status: implemented, path: "_shared/schemas/design-spec.schema.yaml" }
     status: implemented
-    note: "The single source of truth that drives all 6 adapters (existing)."
+    note: "Single source of truth driving all 6 adapters. Reusable: a supplied design-spec skips UX/UI design."
 
   - id: design-tokens
     owner: design-system
+    produced_by: design-system
     inputs: []
     schema: { status: implemented, path: "_shared/tokens/registry.json" }
     status: implemented
-    note: "Built by tokens-dtcg; components consume semantic tokens only."
+    note: "Built by tokens-dtcg; components consume semantic tokens only. Reusable from an existing design system."
 
   - id: component-contracts
     owner: design-system
+    produced_by: design-system
     inputs: [design-spec]
     schema: { status: implemented, path: "_shared/schemas/design-spec.schema.yaml" }
     status: implemented
@@ -54,27 +69,31 @@ artifacts:
 
   - id: prototype
     owner: ux-ui-engineer
+    produced_by: engineering
     inputs: [design-spec, design-tokens, component-contracts]
     schema: { status: generated, path: "out/<adapter>/<feature>" }   # runtime output, not a static schema file
     status: implemented
-    note: "Generated code per adapter under out/<adapter>/<feature>/ + e2e report."
+    note: "Generated code per adapter + e2e report. Absent for design-only projects (engineering skipped)."
 
   - id: design-qa-report
     owner: design-qa
+    produced_by: design-qa
     inputs: [prototype, design-spec]
     schema: { status: implemented, path: "_shared/schemas/verify-report.schema.yaml" }
     status: implemented
-    note: "The e2e/verify report (readiness + a11y/token/perf/slop + parity)."
+    note: "The e2e/verify report. Absent for design-only projects (design-qa skipped)."
 
   - id: handoff
     owner: ux-ui-engineer
-    inputs: [prototype, design-qa-report]
+    produced_by: handoff
+    inputs: [design-spec, prototype, design-qa-report]
     schema: { status: planned, path: "artifacts/schemas/handoff.schema.yaml" }
     status: implemented
-    note: "8-file handoff bundle (existing 07-handoff); schema formalisation planned."
+    note: "Handoff bundle. Requires design-spec only; prototype + design-qa-report are optional, so design-only handoff is valid."
 
   - id: project-state
     owner: orchestrator
+    produced_by: orchestrator-state   # cross-cutting orchestrator state, not a pipeline stage output
     inputs: []
     schema: { status: planned, path: "artifacts/schemas/project-state.schema.yaml" }
     status: planned

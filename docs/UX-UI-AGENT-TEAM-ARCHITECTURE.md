@@ -67,11 +67,22 @@ intake → product-strategy → research → ux-design → ui-design
        → design-system → engineering → design-qa → handoff
 ```
 
-Stages carry `condition`s (research skipped for UI-only tasks; design-system
-skipped when reusing an existing system; engineering skipped for design-only
-output; Design QA repeats after every change). Approval gates are opt-in per
-`profile`. The `implemented_slice` (`ui-design → engineering → design-qa →
-handoff`) is what runs today.
+It is a **conditional DAG**, not a rigid pipeline. Each stage has a `run_if`
+(boolean over context flags) and a structured `consumes` list where every edge
+declares `required` and `reuse`:
+
+- `required: true` — the stage is **blocked** if the artifact is unavailable.
+- `required: false` — optional; absence is valid.
+- `reuse: true` — the artifact may be **supplied by an existing/previous** one even
+  when its producer stage is skipped.
+
+So research is skipped for UI-only, an existing design system is reused rather than
+rebuilt, and **design-only** work (engineering + Design QA skipped) still produces a
+valid handoff because handoff requires only `design-spec` — `prototype` and
+`design-qa-report` are optional. Skipping a stage is a correct outcome, not an
+error. Full semantics and the CASE A–H scenarios: [`workflows/README.md`](../workflows/README.md).
+Approval gates are opt-in per `profile`. The `implemented_slice`
+(`ui-design → engineering → design-qa → handoff`) is what runs today.
 
 ## 6. Artifact-first communication
 
@@ -146,5 +157,10 @@ schemas, examples, and handoff.
 `_shared/scripts/validate-architecture.mjs` checks that every agent→skill,
 agent→artifact, workflow→agent/artifact, and artifact→input reference resolves,
 that every `implemented` claim points at a real path, and that the router plans a
-route honestly. It runs in CI (`_shared/scripts/ci.mjs`) alongside the token
-build, every feature, and the regression harness.
+route honestly. It also lints the **conditional-dependency discipline** (via
+`workflow-eval.mjs`): a `required` non-`reuse` artifact whose producer can be
+skipped, a required artifact with no producer that is not external, unknown
+references, and `produced_by` drift — and it evaluates the declared workflow
+scenarios (CASE A–H) to their expected outcomes, without rejecting legitimate
+conditional workflows. It runs in CI (`_shared/scripts/ci.mjs`) alongside the
+token build, every feature, and the regression harness.
