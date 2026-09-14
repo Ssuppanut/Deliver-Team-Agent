@@ -32,8 +32,18 @@ surfaces a warning where it cannot, rather than emitting code that silently does
 nothing. Design implication: put foreground color on text elements when Compose/RN
 parity matters; container-level color is a web/SwiftUI convenience.
 
+## Update — per-severity icon (resolves the slop advisory)
+
+`slop-guard` flagged the severity variant as `status-color-only` (state by color
+alone). Resolved by adding a per-severity `icon` to each variant case
+(`icon.info/success/warning/error`) and rendering it as a leading icon that
+switches on `severity`: a spread lookup on web/RN, an SF Symbol dictionary on
+SwiftUI, a `when` expression on Compose. State now survives grayscale/CVD, and
+the advisory clears (P21 pins it). This also exercised the IR `iconCases` path
+that `variantData` produced but no adapter had consumed yet.
+
 ## Result
 
-98%-equivalent: all guards + cross-adapter parity pass on all 6 platforms. The one
-documented divergence (Compose container color) is surfaced as a warning, not a
-silent gap.
+All guards + cross-adapter parity pass on all 6 platforms with no advisories. The
+one documented divergence (Compose container color) is surfaced as a warning, not
+a silent gap.

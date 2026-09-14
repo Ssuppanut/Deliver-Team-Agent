@@ -35,10 +35,14 @@ node _shared/scripts/e2e-multi.mjs --feature product-card
 
 # 3. Run the regression harness
 node _shared/scripts/verify-patches.mjs
+
+# …or run the whole thing (tokens + every feature + regression) as CI does
+node _shared/scripts/ci.mjs
 ```
 
 Outputs land in `out/<adapter>/<feature>/` and a report in
-`out/_reports/<feature>.json`.
+`out/_reports/<feature>.json`. `.github/workflows/ci.yml` runs `ci.mjs` on
+Node 20 and 22 for every push and PR.
 
 ## The pipeline
 
@@ -81,8 +85,10 @@ controlled input, unified icon + token systems, single-level iteration (`each`,
 Strategy D), API parity, a11y contracts, automated gates.
 
 **Out of scope (refused, with redirects):** overlays (→ Radix / native), complex
-data tables (→ TanStack), charts, rich-text, drag-and-drop. See
-[`.claude/skills/knowledge/pattern-library`](.claude/skills/knowledge/pattern-library/SKILL.md).
+data tables (→ TanStack), charts, rich-text, drag-and-drop. The refusal is
+executable — a spec whose `category` is `overlay` or `data-table` is refused with
+a redirect and generates no code (see `orchestrator/scripts/refusal.mjs` and
+[`knowledge/pattern-library`](.claude/skills/knowledge/pattern-library/SKILL.md)).
 
 ## Design tokens
 

@@ -59,8 +59,18 @@ class SwiftUIRenderer extends RendererBase {
     const v = l.kind === 'literal' ? JSON.stringify(String(l.value)) : safe(l.value);
     return `\n  .accessibilityLabel(${v})`;
   }
+  variantIcon(node) {
+    const v = this.variantData(node);
+    if (!v || !Object.keys(v.iconCases).length) return '';
+    const dict = Object.entries(v.iconCases)
+      .map(([val, tok]) => `${JSON.stringify(val)}: ${JSON.stringify(this.icon(tok))}`)
+      .join(', ');
+    return `Image(systemName: ([${dict}][${safe(v.prop)}] ?? ""))\n  .accessibilityHidden(true)`;
+  }
   visitContainer(node, children) {
-    return `VStack(alignment: .leading, spacing: 8) {\n${indent(children, 2)}\n}${this.modifiers(node)}${this.a11y(node)}`;
+    const lead = this.variantIcon(node);
+    const inner = lead ? `${lead}\n${children}` : children;
+    return `VStack(alignment: .leading, spacing: 8) {\n${indent(inner, 2)}\n}${this.modifiers(node)}${this.a11y(node)}`;
   }
   visitMedia(node) {
     const url = node.src.kind === 'literal' ? JSON.stringify(String(node.src.value)) : safe(node.src.value);

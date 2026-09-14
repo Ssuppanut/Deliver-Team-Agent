@@ -37,6 +37,10 @@ purpose-built primitives instead of emitting a poor cross-platform imitation:
 See `knowledge/pattern-library/references/overlays.md` and `.../data-tables.md`
 for the full rationale and the exact redirect snippets.
 
+This check is executable: `scripts/refusal.mjs` (`checkRefusal(spec)`) runs inside
+`e2e-multi` before generation — a refused spec prints its redirect and emits no
+code, which is the correct outcome, not a failure.
+
 ## In scope
 
 Static composition, variants + conditional children (`when`), controlled input

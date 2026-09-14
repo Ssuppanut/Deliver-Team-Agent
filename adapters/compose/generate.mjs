@@ -67,10 +67,20 @@ class ComposeRenderer extends RendererBase {
     const v = l.kind === 'literal' ? JSON.stringify(String(l.value)) : l.value;
     return `.semantics { contentDescription = ${v} }`;
   }
+  variantIcon(node) {
+    const v = this.variantData(node);
+    if (!v || !Object.keys(v.iconCases).length) return '';
+    const entries = Object.entries(v.iconCases).map(([val, tok]) => [val, this.icon(tok)]);
+    const arms = entries.map(([val, sym]) => `${JSON.stringify(val)} -> Icons.Default.${sym}`).join('; ');
+    const fallback = `Icons.Default.${entries[0][1]}`;
+    return `Icon(when (${v.prop}) { ${arms}; else -> ${fallback} }, contentDescription = null)`;
+  }
   visitContainer(node, children) {
     const mod = this.modifier(node);
     const modArg = mod ? `modifier = ${mod}${this.semantics(node)}` : (node.a11y?.label ? `modifier = Modifier${this.semantics(node)}` : '');
-    return `Column(${modArg}) {\n${indent(children, 2)}\n}`;
+    const lead = this.variantIcon(node);
+    const inner = lead ? `${lead}\n${children}` : children;
+    return `Column(${modArg}) {\n${indent(inner, 2)}\n}`;
   }
   visitMedia(node) {
     return `AsyncImage(model = ${this.strExpr(node.src)}, contentDescription = ${this.strExpr(node.alt ?? { kind: 'literal', value: '' })}${this._mod(node)})`;

@@ -18,7 +18,9 @@ import { checkTokens } from '../../.claude/skills/_guards/token-guard/scripts/ch
 import { checkPerf } from '../../.claude/skills/_guards/perf-guard/scripts/check.mjs';
 import { checkSlop } from '../../.claude/skills/_guards/slop-guard/scripts/check.mjs';
 import { checkTbd } from '../../.claude/skills/_meta/critique/scripts/check-tbd.mjs';
-import { readFileSync } from 'node:fs';
+import { checkRefusal } from '../../.claude/skills/_meta/orchestrator/scripts/refusal.mjs';
+import { loadSpec } from './validate-schema.mjs';
+import { readFileSync, existsSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -227,13 +229,20 @@ check('P17', 'slop-guard: emoji in output is a blocking finding', () => {
   assert(clean.ok, 'clean output should pass slop-guard');
 });
 
-// --- P18: slop-guard flags color-only state (advisory, non-blocking) -------
-check('P18', 'slop-guard: color-only variant is advisory, does not block', () => {
-  const ir = specToIrFromFile(ALERT);
-  const res = { react: generateReact(ALERT, '_verify') };
-  const { ok, issues } = checkSlop(ir, res);
-  assert(ok, 'a minor status-color-only finding must not block the gate');
-  assert(issues.some((i) => i.rule === 'status-color-only'), 'expected status-color-only advisory');
+// --- P18: slop-guard color-only detection (advisory) + icon resolves it ----
+check('P18', 'slop-guard: color-only variant is an advisory; a per-state icon clears it', () => {
+  // Alert now carries a per-severity icon, so it must NOT be flagged.
+  const alert = checkSlop(specToIrFromFile(ALERT), { react: generateReact(ALERT, '_verify') });
+  assert(alert.ok, 'alert with icons must pass slop-guard');
+  assert(!alert.issues.some((i) => i.rule === 'status-color-only'), 'icon should clear the color-only advisory');
+  // A synthetic color-only variant (no icon) is flagged, but only as advisory.
+  const colorOnly = {
+    tokens: [],
+    root: { kind: 'container', variant: { prop: 'sev', cases: { a: { background: 'color.info.bg' }, b: { background: 'color.danger.bg' } } } },
+  };
+  const syn = checkSlop(colorOnly, {});
+  assert(syn.ok, 'a minor status-color-only finding must not block');
+  assert(syn.issues.some((i) => i.rule === 'status-color-only'), 'expected the advisory for a color-only variant');
 });
 
 // --- P19: readiness — TBD sentinel blocks, clean spec passes ---------------
@@ -255,6 +264,39 @@ check('P20', 'routing: every SKILL.md description says "Do NOT use"', () => {
   assert(files.length === 29, `expected 29 SKILL.md, found ${files.length}`);
   const missing = files.filter((f) => !/Do NOT use/i.test(readFileSync(resolve(ROOT, f), 'utf8').split('---')[1] ?? ''));
   assert(missing.length === 0, `missing routing line: ${missing.join(', ')}`);
+});
+
+// --- P21: variant iconCases render a per-state icon on every adapter -------
+check('P21', 'variant: a per-severity icon is emitted on every adapter', () => {
+  const expect = [
+    [generateReact, /"info": <Info aria-hidden="true" \/>/],
+    [generateVue, /"info": Info/],
+    [generateSvelte, /svelte:component this=\{\(\{ "info": Info/],
+    [generateReactNative, /"info": <Info \/>/],
+    [generateSwiftUI, /"info": "info\.circle"/],
+    [generateCompose, /"info" -> Icons\.Default\.Info/],
+  ];
+  for (const [gen, re] of expect) {
+    const { code } = gen(ALERT, '_verify');
+    assert(re.test(code), `${gen.name} missing per-severity icon`);
+  }
+});
+
+// --- P22: orchestrator refuses out-of-scope categories with a redirect -----
+check('P22', 'refusal: overlay and data-table are refused with a redirect', () => {
+  const overlay = checkRefusal({ category: 'overlay' });
+  assert(overlay && /Radix|sheet|Dialog/.test(overlay.redirect), 'overlay not refused with redirect');
+  const table = checkRefusal({ category: 'data-table' });
+  assert(table && /TanStack|AG Grid/.test(table.redirect), 'data-table not refused with redirect');
+  assert(checkRefusal({ category: 'display' }) === null, 'in-scope category must not be refused');
+});
+
+// --- P23: a refused spec generates no code ---------------------------------
+check('P23', 'refusal: e2e produces a refusal report and no adapter output', () => {
+  execSync('node _shared/scripts/e2e-multi.mjs --feature modal', { cwd: ROOT, stdio: 'ignore' });
+  const report = JSON.parse(readFileSync(resolve(ROOT, 'out/_reports/modal.json'), 'utf8'));
+  assert(report.refused === true, 'modal report should be marked refused');
+  assert(!existsSync(resolve(ROOT, 'out/react/modal')), 'refused spec must not emit code');
 });
 
 console.log('\n=== verify-patches ===');

@@ -40,9 +40,19 @@ class RNRenderer extends RendererBase {
     const inner = [...base, spread].filter(Boolean).join(', ');
     return inner ? ` style={{ ${inner} }}` : '';
   }
+  variantIcon(node) {
+    const v = this.variantData(node);
+    if (!v || !Object.keys(v.iconCases).length) return '';
+    const cases = Object.entries(v.iconCases)
+      .map(([val, tok]) => `${JSON.stringify(val)}: <${this.icon(tok)} />`)
+      .join(', ');
+    return `{({ ${cases} })[${v.prop}]}`;
+  }
   visitContainer(node, children) {
     const label = node.a11y?.label ? ` accessibilityLabel={${this.attr(node.a11y.label)}}` : '';
-    return `<View accessible${label}${this.style(node)}>\n${indent(children, 2)}\n</View>`;
+    const lead = this.variantIcon(node);
+    const inner = lead ? `${lead}\n${children}` : children;
+    return `<View accessible${label}${this.style(node)}>\n${indent(inner, 2)}\n</View>`;
   }
   visitMedia(node) {
     const label = node.alt ? ` accessibilityLabel={${this.attr(node.alt)}}` : '';

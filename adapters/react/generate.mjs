@@ -60,10 +60,21 @@ class ReactRenderer extends RendererBase {
     return out.join('');
   }
 
+  variantIcon(node) {
+    const v = this.variantData(node);
+    if (!v || !Object.keys(v.iconCases).length) return '';
+    const cases = Object.entries(v.iconCases)
+      .map(([val, tok]) => `${JSON.stringify(val)}: <${this.icon(tok)} aria-hidden="true" />`)
+      .join(', ');
+    return `{({ ${cases} })[${v.prop}]}`;
+  }
+
   visitContainer(node, children) {
     const tag = node.as || 'div';
     const open = `<${tag}${this.idAttr(node)}${this.a11yAttrs(node)}${this.styleAttr(node)}>`;
-    return `${open}\n${indent(children, 2)}\n</${tag}>`;
+    const lead = this.variantIcon(node);
+    const inner = lead ? `${lead}\n${children}` : children;
+    return `${open}\n${indent(inner, 2)}\n</${tag}>`;
   }
 
   visitMedia(node) {

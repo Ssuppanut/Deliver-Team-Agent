@@ -53,9 +53,19 @@ class VueRenderer extends RendererBase {
   idAttr(node) {
     return node.id ? ` id="${node.id}"` : '';
   }
+  variantIcon(node) {
+    const v = this.variantData(node);
+    if (!v || !Object.keys(v.iconCases).length) return '';
+    const cases = Object.entries(v.iconCases)
+      .map(([val, tok]) => `${JSON.stringify(val)}: ${this.icon(tok)}`)
+      .join(', ');
+    return `<component :is="({ ${cases} })[${v.prop}]" aria-hidden="true" />`;
+  }
   visitContainer(node, children) {
     const tag = node.as || 'div';
-    return `<${tag}${this.idAttr(node)}${this.a11y(node)}${this.styleAttr(node)}>\n${indent(children, 2)}\n</${tag}>`;
+    const lead = this.variantIcon(node);
+    const inner = lead ? `${lead}\n${children}` : children;
+    return `<${tag}${this.idAttr(node)}${this.a11y(node)}${this.styleAttr(node)}>\n${indent(inner, 2)}\n</${tag}>`;
   }
   visitMedia(node) {
     return `<img${this.bind('src', node.src)}${this.bind('alt', node.alt ?? { kind: 'literal', value: '' })}${this.styleAttr(node)} />`;

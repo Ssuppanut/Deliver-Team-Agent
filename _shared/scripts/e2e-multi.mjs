@@ -16,6 +16,8 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { specToIrFromFile } from './spec-to-ir.mjs';
+import { loadSpec } from './validate-schema.mjs';
+import { checkRefusal } from '../../.claude/skills/_meta/orchestrator/scripts/refusal.mjs';
 import { generateReact } from '../../adapters/react/generate.mjs';
 import { generateVue } from '../../adapters/vue/generate.mjs';
 import { generateSvelte } from '../../adapters/svelte/generate.mjs';
@@ -82,6 +84,21 @@ function main() {
 
   console.log(`\n=== e2e-multi: ${feature} ===`);
   console.log(`spec: ${specPath.replace(ROOT + '/', '')}`);
+
+  // Orchestrator Step 2.5 — refuse out-of-scope categories before generating.
+  const refusal = checkRefusal(loadSpec(specPath));
+  if (refusal) {
+    console.log(`\nREFUSED: category "${refusal.category}" is out of scope`);
+    console.log(`  why:      ${refusal.reason}`);
+    console.log(`  instead:  ${refusal.redirect}`);
+    console.log(`  see:      ${refusal.reference}`);
+    console.log(`\nNo code generated (this is the correct outcome, not a failure).\n`);
+    const reportDir = resolve(ROOT, 'out/_reports');
+    mkdirSync(reportDir, { recursive: true });
+    writeFileSync(resolve(reportDir, `${feature}.json`),
+      JSON.stringify({ feature, refused: true, ...refusal }, null, 2) + '\n');
+    return;
+  }
 
   const ir = specToIrFromFile(specPath);
   console.log(`IR: ${ir.component} (${ir.props.length} props, ${ir.tokens.length} tokens)`);
