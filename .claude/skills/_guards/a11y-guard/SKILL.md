@@ -5,6 +5,7 @@ description: >
   Non-negotiable accessibility gate. Static tier walks the IR for baseline
   contracts (alt text, button names, labels, heading levels); dynamic tier runs
   axe-core via Playwright in 06-verify. Use on every generated output.
+  Do NOT use it for the token contract, performance, or design quality — those are the token-guard, perf-guard, and slop-guard skills.
 ---
 
 # a11y-guard

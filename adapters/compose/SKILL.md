@@ -6,6 +6,7 @@ description: >
   Jetpack Compose adapter. Renders the IR to a @Composable function using
   DesignTokens.kt and Material Icons. Use to generate Compose components. Note
   native limits on JS expr values.
+  Do NOT use it for any platform other than Compose — each platform has its own adapter (react, vue, svelte, react-native, swiftui).
 ---
 
 # adapter-compose

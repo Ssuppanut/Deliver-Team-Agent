@@ -6,6 +6,7 @@ description: >
   loads only the skills a step needs, and enforces scope refusals before any
   generation happens. Use when a request asks to build, generate, or ship a
   component across platforms.
+  Do NOT use it to do the pipeline work itself — that is the workflow skills (01-discover through 07-handoff).
 ---
 
 # orchestrator

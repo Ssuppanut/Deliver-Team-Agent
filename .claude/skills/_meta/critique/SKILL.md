@@ -5,6 +5,7 @@ description: >
   Adversarial self-review pass over a design-spec or generated output before it
   reaches guards. Mentally traces the pipeline to surface bugs early. Use after
   design and before implement, or when output looks suspicious.
+  Do NOT use it to enforce gates automatically — those are the _guards skills; critique is the manual read before them.
 ---
 
 # critique
@@ -29,6 +30,14 @@ the pipeline finds ~30% of bugs before anything runs.
 **A11y tier**
 - Icon-only actions carry a label.
 - Media carries alt. Inputs carry a label. Live regions where state changes.
+
+## Readiness — never invent what you do not know
+
+An undecided value is written as the sentinel `TBD`, never guessed. This skill
+owns the executable readiness check `scripts/check-tbd.mjs` (`checkTbd(ir)`),
+run inside `e2e-multi`: any `TBD` in a token name or a literal value fails the
+gate. A blank is visible and gets filled; a fabricated value is invisible and
+gets built on.
 
 ## Contract
 

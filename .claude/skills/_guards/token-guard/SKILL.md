@@ -5,6 +5,7 @@ description: >
   Enforces the token contract: every referenced token exists in the built
   registry, and no generated web output contains hardcoded colors or dimensions.
   Use on every generated output.
+  Do NOT use it for accessibility, performance, or slop — those are the a11y-guard, perf-guard, and slop-guard skills.
 ---
 
 # token-guard

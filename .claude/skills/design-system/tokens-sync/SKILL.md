@@ -5,6 +5,7 @@ description: >
   Bidirectional sync between Figma Variables and the DTCG source, via the Figma
   REST API and Tokens Studio JSON. Use to import tokens from Figma or export the
   source back to Figma.
+  Do NOT use it to build platform token outputs — that is the tokens-dtcg skill.
 ---
 
 # tokens-sync

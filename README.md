@@ -54,18 +54,20 @@ Outputs land in `out/<adapter>/<feature>/` and a report in
 - **06-verify** adds dynamic a11y (axe-core), visual regression, bundle size,
   and Web Vitals.
 
-## Architecture — 27 skills, 5 layers
+## Architecture — 29 skills, 5 layers
 
-See [`SKILLS_INDEX.yaml`](SKILLS_INDEX.yaml) for the full registry.
+See [`SKILLS_INDEX.yaml`](SKILLS_INDEX.yaml) for the full registry. Every skill
+description ends with a `Do NOT use it for X — that is the Y skill` line, so a
+request routes to the same skill every time.
 
 | layer | count | what |
 |-------|-------|------|
 | `_meta` | 3 | orchestrator, context-loader, critique |
-| `_guards` | 3 | a11y-guard, token-guard, perf-guard |
+| `_guards` | 4 | a11y-guard, token-guard, perf-guard, slop-guard |
 | `workflow` | 7 | 01-discover … 07-handoff |
 | `design-system` | 4 | tokens-dtcg, tokens-sync, component-contract, storybook-authoring |
 | `adapters` | 6 | react, vue, svelte, react-native, swiftui, compose |
-| `knowledge` | 4 | design-principles, universal-design, pattern-library, interaction-laws |
+| `knowledge` | 5 | design-principles, universal-design, pattern-library, interaction-laws, anti-slop |
 
 ## The visitor pattern
 
@@ -91,9 +93,13 @@ Tokens Studio JSON), both directions.
 
 ## Guards are non-negotiable
 
-Every generated output passes a11y / token / perf guards plus a cross-adapter
-parity check. A serious finding fails the gate. Waivers require an explicit
-expiry and approver.
+Every generated output passes a readiness check (no unresolved `TBD` — never
+invent what you do not know) plus a11y / token / perf / slop guards and a
+cross-adapter parity check. A serious finding fails the gate. Waivers require an
+explicit expiry and approver.
+
+`slop-guard` is the design-quality gate (no emoji; state not by color alone);
+its checklist lives in [`knowledge/anti-slop`](.claude/skills/knowledge/anti-slop/SKILL.md).
 
 ## Worked examples
 
@@ -103,7 +109,7 @@ expiry and approver.
 ## Layout
 
 ```
-.claude/skills/       21 skills (_meta, _guards, workflow, design-system, knowledge)
+.claude/skills/       23 skills (_meta, _guards, workflow, design-system, knowledge)
 adapters/             6 adapters + _shared/renderer-base.mjs (code + co-located SKILL.md)
 design-system/        tokens-dtcg build
 _shared/

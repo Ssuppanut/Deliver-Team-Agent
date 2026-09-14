@@ -16,6 +16,10 @@ import { generateReactNative } from '../../adapters/react-native/generate.mjs';
 import { checkA11y } from '../../.claude/skills/_guards/a11y-guard/scripts/check.mjs';
 import { checkTokens } from '../../.claude/skills/_guards/token-guard/scripts/check.mjs';
 import { checkPerf } from '../../.claude/skills/_guards/perf-guard/scripts/check.mjs';
+import { checkSlop } from '../../.claude/skills/_guards/slop-guard/scripts/check.mjs';
+import { checkTbd } from '../../.claude/skills/_meta/critique/scripts/check-tbd.mjs';
+import { readFileSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '../..');
@@ -210,6 +214,47 @@ check('P16', 'native: optional String is String? and null/nil-checked, not a Boo
   assert(/error: String\?/.test(cp), 'compose error not nullable');
   assert(/if \(error != null\) \{/.test(cp), 'compose error not null-checked');
   assert(!/if \(error\) \{/.test(cp), 'compose used nullable String as Boolean');
+});
+
+// --- P17: slop-guard blocks emoji, passes clean output ---------------------
+check('P17', 'slop-guard: emoji in output is a blocking finding', () => {
+  const ir = specToIrFromFile(PRODUCT);
+  const dirty = { react: { code: 'const x = "Add to cart 🛒";' } };
+  const bad = checkSlop(ir, dirty);
+  assert(!bad.ok, 'emoji should block the gate');
+  assert(bad.issues.some((i) => i.rule === 'no-emoji'), 'missing no-emoji issue');
+  const clean = checkSlop(ir, { react: generateReact(PRODUCT, '_verify') });
+  assert(clean.ok, 'clean output should pass slop-guard');
+});
+
+// --- P18: slop-guard flags color-only state (advisory, non-blocking) -------
+check('P18', 'slop-guard: color-only variant is advisory, does not block', () => {
+  const ir = specToIrFromFile(ALERT);
+  const res = { react: generateReact(ALERT, '_verify') };
+  const { ok, issues } = checkSlop(ir, res);
+  assert(ok, 'a minor status-color-only finding must not block the gate');
+  assert(issues.some((i) => i.rule === 'status-color-only'), 'expected status-color-only advisory');
+});
+
+// --- P19: readiness — TBD sentinel blocks, clean spec passes ---------------
+check('P19', 'readiness: an unresolved TBD blocks generation', () => {
+  const ir = {
+    tokens: [],
+    root: { kind: 'container', children: [{ kind: 'text', text: { kind: 'literal', value: 'TBD — ต้องการ copy' } }] },
+  };
+  const bad = checkTbd(ir);
+  assert(!bad.ok, 'TBD should block');
+  assert(bad.issues.some((i) => i.rule === 'unresolved-tbd'), 'missing unresolved-tbd issue');
+  assert(checkTbd(specToIrFromFile(PRODUCT)).ok, 'a resolved spec should pass readiness');
+});
+
+// --- P20: every SKILL.md carries a negative-routing line -------------------
+check('P20', 'routing: every SKILL.md description says "Do NOT use"', () => {
+  const files = execSync('find .claude/skills adapters -name SKILL.md', { cwd: ROOT, encoding: 'utf8' })
+    .trim().split('\n').filter(Boolean);
+  assert(files.length === 29, `expected 29 SKILL.md, found ${files.length}`);
+  const missing = files.filter((f) => !/Do NOT use/i.test(readFileSync(resolve(ROOT, f), 'utf8').split('---')[1] ?? ''));
+  assert(missing.length === 0, `missing routing line: ${missing.join(', ')}`);
 });
 
 console.log('\n=== verify-patches ===');

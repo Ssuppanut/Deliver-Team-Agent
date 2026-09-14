@@ -5,11 +5,12 @@ description: >
   Loads the minimal set of artifacts and skills for the current pipeline step
   so context stays small. Use when a step needs the brief, architecture,
   design-spec, token registry, or a specific adapter without pulling the rest.
+  Do NOT use it to decide what to build or how to route — that is the orchestrator skill.
 ---
 
 # context-loader
 
-Keeps working context lean. Instead of loading all 27 skills, each pipeline
+Keeps working context lean. Instead of loading all 29 skills, each pipeline
 step declares what it needs and this skill resolves it.
 
 ## What it loads, per step

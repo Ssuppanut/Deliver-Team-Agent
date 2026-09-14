@@ -5,6 +5,7 @@ description: >
   Authors the platform-neutral design-spec.yaml that drives all 6 adapters.
   Every element classified, every value given a kind, every style bound to a
   token. Use after architecture is settled.
+  Do NOT use it to generate code — that is the 05-implement skill.
 ---
 
 # 04-design
@@ -20,6 +21,11 @@ Write the single source of truth: `design-spec.yaml`, validated against
   `expr`; `expr` degrades on native (documented limitation).
 - Bind every visual style to a **semantic** token (never core, never raw).
 - Iteration via `each: { items, as, key }`. Conditionals via `when`.
+- **Never invent what you do not know.** If a value, token, or copy string is
+  undecided, write the sentinel `TBD` (e.g. `{ kind: literal, value: "TBD — ต้องการ copy" }`)
+  rather than guessing. The readiness check (`critique/scripts/check-tbd.mjs`,
+  run in `e2e-multi`) fails the gate while any `TBD` remains, so a blank is
+  visible and gets filled — a fabricated value is invisible and gets shipped.
 
 ## Validate + preview IR
 

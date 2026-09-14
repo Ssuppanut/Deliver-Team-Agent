@@ -6,6 +6,7 @@ description: >
   Svelte adapter. Renders the IR to a <script lang="ts"> component, tokens as
   CSS custom properties, icons from lucide-svelte. Use to generate Svelte
   components.
+  Do NOT use it for any platform other than Svelte — each platform has its own adapter (react, vue, react-native, swiftui, compose).
 ---
 
 # adapter-svelte

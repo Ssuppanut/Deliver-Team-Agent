@@ -5,6 +5,7 @@ description: >
   Decides component structure, public API (props), variant strategy, and token
   budget before any spec is written. Produces architecture.yaml. Use after
   discovery, before design.
+  Do NOT use it to author spec elements or bind tokens — that is the 04-design skill.
 ---
 
 # 03-architect

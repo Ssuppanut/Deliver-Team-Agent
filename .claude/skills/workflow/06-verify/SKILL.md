@@ -5,6 +5,7 @@ description: >
   Deep verification tier — dynamic a11y (axe-core), visual regression
   (pixelmatch), bundle size (esbuild), Web Vitals (Playwright), and cross-adapter
   parity. Produces verify-report.yaml. Use before handoff.
+  Do NOT use it to assemble the handoff bundle — that is the 07-handoff skill.
 ---
 
 # 06-verify

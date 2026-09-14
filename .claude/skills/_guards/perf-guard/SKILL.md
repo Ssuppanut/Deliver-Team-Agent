@@ -5,6 +5,7 @@ description: >
   Guards against output bloat and dead imports. Static tier is a cheap
   structural heuristic; bundle-size (esbuild) and Web Vitals (Playwright) tiers
   run in 06-verify. Use on every generated output.
+  Do NOT use it for accessibility, the token contract, or design quality — those are the a11y-guard, token-guard, and slop-guard skills.
 ---
 
 # perf-guard

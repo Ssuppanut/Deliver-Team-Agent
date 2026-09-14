@@ -5,6 +5,7 @@ description: >
   Quantitative interaction principles — Fitts, Hick, Miller, Doherty, and
   feedback-timing thresholds — used to justify sizing, grouping, and feedback
   decisions. Consult during design.
+  Do NOT use it for visual design fundamentals — that is the design-principles skill.
 ---
 
 # interaction-laws

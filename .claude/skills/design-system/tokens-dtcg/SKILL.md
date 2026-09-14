@@ -5,6 +5,7 @@ description: >
   Builds DTCG token sources (core -> semantic -> icons) into a resolved registry
   and 6 platform outputs (CSS, Tailwind, TS, Swift, Kotlin, RN). Use to
   (re)generate design tokens for all platforms.
+  Do NOT use it to sync tokens with Figma — that is the tokens-sync skill.
 ---
 
 # tokens-dtcg

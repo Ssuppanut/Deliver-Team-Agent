@@ -5,6 +5,7 @@ description: >
   Defines and enforces the public API contract for a component — the prop set
   every adapter must expose identically. Use when defining or auditing a
   component's cross-platform API.
+  Do NOT use it to author the visual spec — that is the 04-design skill.
 ---
 
 # component-contract
