@@ -1,0 +1,30 @@
+# Default routing policy. There is NO hard-coded universal provider priority.
+# Preference is data here and is meant to be overridden per project/operator.
+# An empty provider_preference means "no preference" — the router then orders by
+# cost, then latency, then registry order, never by a baked-in vendor ranking.
+version: 1
+policy:
+  # Ordered provider ids. Empty = no preference. The router NEVER invents an order.
+  provider_preference: []
+  # How to treat a model whose required capability is "unknown".
+  allow_unknown_capabilities: true   # allowed, but flagged in the route result
+  # Access modes the operator permits at all (subscription and/or api and/or local).
+  allowed_access_modes: [api, subscription, local]
+  cost_preference: balanced          # cheapest | balanced | best
+  latency_preference: balanced       # fastest | balanced
+  privacy: standard                  # standard | sensitive (sensitive prefers local runtimes)
+  # What to do when nothing is configured/available.
+  on_unavailable: report             # report (never fabricate a selection)
+  # Fallback is an ordered list the router walks if the top pick is unavailable.
+  # Entries are provider ids; empty = fall back by the same ordering rules.
+  fallback: []
+  # Absolute, non-negotiable constraints. The router refuses to plan a route that
+  # would require any of these, and marks it unavailable instead.
+  never:
+    - bypass-authentication
+    - bypass-subscription-limits
+    - bypass-rate-limits
+    - bypass-quotas
+    - scrape-private-apis
+    - reverse-engineer-endpoints
+    - violate-terms-of-service

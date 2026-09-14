@@ -20,6 +20,7 @@ import { checkSlop } from '../../.claude/skills/_guards/slop-guard/scripts/check
 import { checkTbd } from '../../.claude/skills/_meta/critique/scripts/check-tbd.mjs';
 import { checkRefusal } from '../../.claude/skills/_meta/orchestrator/scripts/refusal.mjs';
 import { loadSpec } from './validate-schema.mjs';
+import { route, loadContext } from '../../.ai/router/route.mjs';
 import { readFileSync, existsSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 
@@ -297,6 +298,22 @@ check('P23', 'refusal: e2e produces a refusal report and no adapter output', () 
   const report = JSON.parse(readFileSync(resolve(ROOT, 'out/_reports/modal.json'), 'utf8'));
   assert(report.refused === true, 'modal report should be marked refused');
   assert(!existsSync(resolve(ROOT, 'out/react/modal')), 'refused spec must not emit code');
+});
+
+// --- P24: AI Router is provider-agnostic and honest ------------------------
+check('P24', 'ai-router: no fabricated selection when unconfigured; guardrails surfaced', () => {
+  const ctx = loadContext();
+  const plan = route({ capabilities: ['code'] }, ctx);
+  assert(plan.status === 'needs_configuration', `expected needs_configuration, got ${plan.status}`);
+  assert(plan.selection === null, 'must not fabricate a selection while unconfigured');
+  assert(plan.guardrails.includes('violate-terms-of-service'), 'ToS guardrail must be surfaced');
+  const nope = route({ capabilities: ['time-travel'] }, ctx);
+  assert(nope.status === 'unavailable', 'out-of-vocabulary capability must be unavailable, not faked');
+});
+
+// --- P25: architecture manifests are internally consistent -----------------
+check('P25', 'architecture: validate-architecture passes', () => {
+  execSync('node _shared/scripts/validate-architecture.mjs', { cwd: ROOT, stdio: 'ignore' });
 });
 
 console.log('\n=== verify-patches ===');

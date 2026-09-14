@@ -1,0 +1,42 @@
+# AI providers — the ecosystems the system CAN target.
+# A provider here is an ecosystem, never a professional role. Professional roles
+# live in agents/; they declare AI *capability requirements*, and the AI Router
+# maps those to a provider + runtime + model.
+#
+# `status` is honest by default: "unknown" until the operator configures access
+# through the provider's own official/authorized mechanism. We never assert a
+# provider is available, and never fabricate capabilities.
+version: 1
+providers:
+  - id: anthropic
+    display: Anthropic (Claude)
+    status: unknown           # configured by the operator; Claude is ONE provider, not the root
+    access_modes: [api, subscription]
+    notes: >
+      Includes Claude Code as an authorized subscription runtime. Access only
+      through official API keys or an authorized subscription — never bypass auth.
+  - id: openai
+    display: OpenAI (ChatGPT)
+    status: unknown
+    access_modes: [api, subscription]
+    notes: Official API or authorized subscription only.
+  - id: google
+    display: Google (Gemini)
+    status: unknown
+    access_modes: [api, subscription]
+    notes: Official API or authorized subscription only.
+  - id: xai
+    display: xAI (Grok)
+    status: unknown
+    access_modes: [api, subscription]
+    notes: Official API or authorized subscription only.
+  - id: qwen
+    display: Alibaba (Qwen)
+    status: unknown
+    access_modes: [api, local]
+    notes: Official API, or local weights where licensed.
+  - id: local
+    display: Local / self-hosted models
+    status: unknown
+    access_modes: [local]
+    notes: Runtimes such as Ollama / llama.cpp for licensed local weights.

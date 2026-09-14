@@ -45,9 +45,13 @@ function main() {
   console.log('## 1. build tokens');
   run('node design-system/tokens-dtcg/scripts/build.mjs');
 
+  console.log('\n## 1b. validate architecture (agents / skills / artifacts / workflow / AI)');
+  let failures = 0;
+  try { run('node _shared/scripts/validate-architecture.mjs'); }
+  catch { console.error('FAIL: validate-architecture'); failures++; }
+
   console.log('\n## 2. run every feature');
   const feats = discoverFeatures();
-  let failures = 0;
   for (const [name, info] of feats) {
     const refusedExpected = REFUSED.has(info.category);
     try {

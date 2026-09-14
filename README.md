@@ -1,9 +1,64 @@
 # Deliver Team Agent
 
-A **spec-driven code generation ecosystem** for Claude Code. Author one
+> **Current scope: the UX/UI Agent Team.**
+> **Future: one division of a larger AI Software Company Agent.**
+> The full software company does **not** exist yet — this repo builds a strong
+> UX/UI foundation designed to become one division of it later.
+
+A team of **professional-role agents** that compose **reusable skills**,
+communicate through **structured artifacts**, are validated by **reusable quality
+guards**, and run on a **provider-agnostic** AI layer (Claude is one provider,
+not the root). At its core is a **spec-driven code generation engine**: author one
 platform-neutral design specification and generate production components across
-**6 platforms** — while keeping design intent, accessibility, and the design-token
+**6 platforms** — keeping design intent, accessibility, and the design-token
 contract in sync automatically.
+
+**Read next:** [`docs/UX-UI-AGENT-TEAM-ARCHITECTURE.md`](docs/UX-UI-AGENT-TEAM-ARCHITECTURE.md)
+· [`docs/UX-UI-ARCHITECTURE-MIGRATION.md`](docs/UX-UI-ARCHITECTURE-MIGRATION.md)
+
+## The team
+
+| Layer | Means | Where |
+|---|---|---|
+| **Agent** — a professional role | WHO does the work | [`agents/`](agents/) |
+| **Skill** — a reusable capability | WHAT it can do | [`skills/INDEX.yaml`](skills/INDEX.yaml) |
+| **Workflow** — a conditional, gated process | WHEN | [`workflows/`](workflows/) |
+| **Artifact** — a structured deliverable | the output | [`artifacts/`](artifacts/) |
+| **Guard** — a reusable quality check | HOW quality is validated | [`guards/`](guards/) |
+| **AI Router** — provider/runtime/model selection | which AI runs it | [`.ai/`](.ai/) |
+
+Agents (UX/UI team): `orchestrator`, `product-ux-strategist`, `ux-researcher`,
+`ux-designer`, `ui-designer`, `design-system`, `ux-ui-engineer`, `design-qa`.
+`design-system`, `ux-ui-engineer`, and `design-qa` are backed by working code
+today; the upstream strategy/research/UX roles are defined extension points.
+
+## Multi-AI (provider-agnostic)
+
+An agent declares **AI capability requirements**; the **AI Router** maps them to a
+provider → runtime → model:
+
+```
+Agent → Skill → required AI capabilities → AI Router → Provider → Runtime → Model
+```
+
+Supported providers: Anthropic (Claude), OpenAI, Google, xAI, Qwen, local — all
+`unknown` until configured through official/authorized access. Both **API** and
+**authorized subscription** runtimes are modelled. The router only *plans* — it
+never authenticates or calls anything, so it cannot bypass auth, quotas,
+subscription limits, or Terms of Service; support is never faked. Try it:
+`node .ai/router/route.mjs --caps code,structured-output`.
+
+## Not included (by design)
+
+Current scope is **UX/UI only**. Extension points exist but are **not**
+implemented: full backend/engineering, software QA org, security, DevOps/SRE,
+data/AI engineering, release operations. **Graphic design** (banner, advertising,
+infographic, Photoshop/Illustrator) is intentionally a **separate** future
+project, not part of this repo.
+
+---
+
+## The engine (UX/UI Engineering + Design QA)
 
 ```
 one design-spec.yaml

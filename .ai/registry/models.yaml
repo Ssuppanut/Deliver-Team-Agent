@@ -1,0 +1,47 @@
+# Model registry — provider/model/capabilities/runtimes/access.
+#
+# Capabilities are declared as: supported | unsupported | unknown.
+# We NEVER invent capability flags or quality scores. "unknown" is the honest
+# default and is preferable to an unsupported claim. Operators fill these in from
+# the provider's official documentation for the models they have configured.
+#
+# Nothing here asserts availability — availability is resolved at route time from
+# providers.yaml status plus the operator's configuration.
+version: 1
+capabilities_vocabulary: [text, long-context, vision, structured-output, tool-use, code, reasoning]
+models:
+  - provider: anthropic
+    model: claude-latest            # operator pins the concrete id they configured
+    capabilities: { text: unknown, vision: unknown, structured-output: unknown, tool-use: unknown, code: unknown, reasoning: unknown }
+    runtimes: [api, official-sdk, official-cli, subscription-authorized]
+    access_modes: [api, subscription]
+    availability: unknown
+    constraints: {}
+  - provider: openai
+    model: openai-latest
+    capabilities: { text: unknown, vision: unknown, structured-output: unknown, tool-use: unknown, code: unknown, reasoning: unknown }
+    runtimes: [api, official-sdk]
+    access_modes: [api, subscription]
+    availability: unknown
+    constraints: {}
+  - provider: google
+    model: gemini-latest
+    capabilities: { text: unknown, vision: unknown, structured-output: unknown, tool-use: unknown, code: unknown, reasoning: unknown }
+    runtimes: [api, official-sdk]
+    access_modes: [api, subscription]
+    availability: unknown
+    constraints: {}
+  - provider: xai
+    model: grok-latest
+    capabilities: { text: unknown, structured-output: unknown, tool-use: unknown, code: unknown, reasoning: unknown }
+    runtimes: [api]
+    access_modes: [api, subscription]
+    availability: unknown
+    constraints: {}
+  - provider: qwen
+    model: qwen-latest
+    capabilities: { text: unknown, code: unknown, reasoning: unknown }
+    runtimes: [api, local-model]
+    access_modes: [api, local]
+    availability: unknown
+    constraints: {}

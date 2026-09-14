@@ -1,0 +1,37 @@
+# Runtimes — HOW an AI provider is executed. Separate from provider (WHICH
+# ecosystem) and model (WHICH weights). A runtime describes the access mechanism
+# and its authentication model.
+#
+# Hard rule, enforced by policy and never overridden: only official or
+# authorized mechanisms. NEVER bypass authentication, subscription limits, rate
+# limits, quotas, or Terms of Service; never scrape private APIs or reverse
+# engineer undocumented endpoints. If a runtime cannot serve a capability, it is
+# marked unavailable/unknown — support is never faked.
+version: 1
+runtimes:
+  - id: api
+    kind: api
+    auth: api-key
+    notes: Documented HTTP API with an official key.
+  - id: official-sdk
+    kind: sdk
+    auth: api-key
+    notes: Vendor-published SDK over the official API.
+  - id: official-cli
+    kind: cli
+    auth: api-key-or-login
+    notes: Vendor-published CLI (e.g. an official coding CLI).
+  - id: subscription-authorized
+    kind: subscription
+    auth: authorized-login
+    notes: >
+      An authorized, logged-in subscription runtime (e.g. Claude Code under a
+      valid subscription). Used only within the subscription's own terms.
+  - id: local-model
+    kind: local
+    auth: none
+    notes: Locally hosted, licensed weights (Ollama / llama.cpp / vLLM).
+  - id: desktop-app
+    kind: desktop
+    auth: authorized-login
+    notes: An official desktop application driven only through supported means.

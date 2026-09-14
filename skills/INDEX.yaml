@@ -1,0 +1,94 @@
+# Capability catalogue — Skill = a reusable capability, NOT an agent.
+#
+# A capability is owned by no single agent; `used_by` lists every agent that may
+# compose it. `status` is honest:
+#   implemented — backed by real code/knowledge in this repo (see `impl`)
+#   planned     — a defined extension point with no implementation yet
+#
+# This is the capability-oriented successor view of SKILLS_INDEX.yaml (which
+# still describes the Claude-runtime skill surface under .claude/skills). Nothing
+# here is duplicated per agent; agents reference these ids.
+version: 1
+
+domains:
+  orchestration:
+    - { id: routing,            status: implemented, impl: ".claude/skills/_meta/orchestrator/scripts/refusal.mjs", purpose: "Route/refuse a request by scope", used_by: [orchestrator] }
+    - { id: context-loading,    status: implemented, impl: ".claude/skills/_meta/context-loader/SKILL.md",          purpose: "Load only the artifacts a step needs", used_by: [orchestrator] }
+    - { id: readiness-check,    status: implemented, impl: ".claude/skills/_meta/critique/scripts/check-tbd.mjs",   purpose: "Refuse unresolved TBD before work proceeds", used_by: [orchestrator, design-qa] }
+    - { id: ai-routing,         status: implemented, impl: ".ai/router/route.mjs",                                  purpose: "Select provider/runtime/model for a capability need", used_by: [orchestrator] }
+
+  product:
+    - { id: requirement-analysis, status: planned, purpose: "Turn a TOR/request into structured requirements", used_by: [product-ux-strategist] }
+    - { id: stakeholder-analysis, status: planned, purpose: "Identify stakeholders and their goals", used_by: [product-ux-strategist] }
+    - { id: problem-framing,      status: planned, purpose: "Frame the problem before solutioning", used_by: [product-ux-strategist] }
+    - { id: product-discovery,    status: planned, purpose: "Discover product opportunities", used_by: [product-ux-strategist] }
+    - { id: product-strategy,     status: planned, purpose: "Define product strategy and scope", used_by: [product-ux-strategist] }
+    - { id: scope-definition,     status: planned, purpose: "Define in/out of scope", used_by: [product-ux-strategist, orchestrator] }
+    - { id: success-metrics,      status: planned, purpose: "Define measurable success metrics", used_by: [product-ux-strategist] }
+    - { id: product-critique,     status: planned, purpose: "Critique product decisions", used_by: [product-ux-strategist] }
+
+  research:
+    - { id: research-planning,    status: planned, purpose: "Plan research approach", used_by: [ux-researcher] }
+    - { id: competitor-analysis,  status: planned, purpose: "Analyse competitors", used_by: [ux-researcher, product-ux-strategist] }
+    - { id: market-research,      status: planned, purpose: "Market research", used_by: [ux-researcher, product-ux-strategist] }
+    - { id: user-research,        status: planned, purpose: "Interviews, surveys, observation", used_by: [ux-researcher] }
+    - { id: persona,              status: planned, purpose: "Synthesise personas", used_by: [ux-researcher] }
+    - { id: jtbd,                 status: planned, purpose: "Jobs-to-be-done", used_by: [ux-researcher] }
+    - { id: pain-point-analysis,  status: planned, purpose: "Identify pain points", used_by: [ux-researcher] }
+    - { id: opportunity-mapping,  status: planned, purpose: "Map opportunities", used_by: [ux-researcher] }
+    - { id: research-synthesis,   status: planned, purpose: "Synthesise findings into insight", used_by: [ux-researcher] }
+
+  ux:
+    - { id: information-architecture, status: planned, purpose: "Structure content/navigation", used_by: [ux-designer] }
+    - { id: user-journey,     status: planned, purpose: "Map user journeys", used_by: [ux-designer] }
+    - { id: user-flow,        status: planned, purpose: "Define user/task flows", used_by: [ux-designer] }
+    - { id: interaction-design, status: implemented, impl: ".claude/skills/knowledge/interaction-laws/SKILL.md", purpose: "Interaction laws (Fitts/Hick/Doherty)", used_by: [ux-designer, ui-designer] }
+    - { id: wireframing,      status: planned, purpose: "Low-fi wireframes", used_by: [ux-designer] }
+    - { id: usability,        status: implemented, impl: ".claude/skills/knowledge/universal-design/SKILL.md", purpose: "Usability + inclusive/WCAG semantics", used_by: [ux-designer, design-qa] }
+    - { id: ux-patterns,      status: implemented, impl: ".claude/skills/knowledge/pattern-library/SKILL.md", purpose: "Known patterns + refusal boundaries", used_by: [ux-designer, orchestrator] }
+    - { id: ux-states,        status: planned, purpose: "Empty/loading/error/success states", used_by: [ux-designer, ui-designer] }
+    - { id: ux-critique,      status: planned, purpose: "Critique UX decisions", used_by: [ux-designer] }
+
+  ui:
+    - { id: visual-design,     status: implemented, impl: ".claude/skills/knowledge/design-principles/SKILL.md", purpose: "Hierarchy, proximity, contrast, rhythm", used_by: [ui-designer] }
+    - { id: layout,            status: planned, purpose: "Layout composition", used_by: [ui-designer] }
+    - { id: typography,        status: planned, purpose: "Type system", used_by: [ui-designer, design-system] }
+    - { id: color-system,      status: planned, purpose: "Color roles/ramps", used_by: [ui-designer, design-system] }
+    - { id: spacing,           status: planned, purpose: "Spacing scale", used_by: [ui-designer, design-system] }
+    - { id: responsive-design, status: planned, purpose: "Responsive behaviour", used_by: [ui-designer, ux-ui-engineer] }
+    - { id: component-design,  status: planned, purpose: "Design components", used_by: [ui-designer, design-system] }
+    - { id: ui-states,         status: planned, purpose: "Component visual states", used_by: [ui-designer, design-system] }
+    - { id: visual-hierarchy,  status: implemented, impl: ".claude/skills/knowledge/design-principles/SKILL.md", purpose: "Visual hierarchy", used_by: [ui-designer] }
+    - { id: anti-slop,         status: implemented, impl: ".claude/skills/knowledge/anti-slop/SKILL.md", purpose: "De-slop design-quality checklist", used_by: [ui-designer, design-qa] }
+    - { id: ui-critique,       status: planned, purpose: "Critique UI decisions", used_by: [ui-designer] }
+
+  design-system:
+    - { id: design-tokens,       status: implemented, impl: "design-system/tokens-dtcg/scripts/build.mjs", purpose: "Compile DTCG tokens to 7 platform outputs", used_by: [design-system, ui-designer, ux-ui-engineer, design-qa] }
+    - { id: semantic-tokens,     status: implemented, impl: "_shared/tokens/source/semantic.tokens.json", purpose: "Semantic token layer components consume", used_by: [design-system, ui-designer, ux-ui-engineer, design-qa] }
+    - { id: component-contract,  status: implemented, impl: ".claude/skills/design-system/component-contract/SKILL.md", purpose: "Public cross-platform API contract", used_by: [design-system, ux-ui-engineer, design-qa] }
+    - { id: component-variants,  status: implemented, impl: "adapters/_shared/renderer-base.mjs", purpose: "Enum variant resolution", used_by: [design-system, ui-designer, ux-ui-engineer] }
+    - { id: component-states,    status: planned, purpose: "Component state matrix", used_by: [design-system, ui-designer] }
+    - { id: design-patterns,     status: implemented, impl: ".claude/skills/knowledge/pattern-library/SKILL.md", purpose: "Reusable design patterns", used_by: [design-system, ux-designer] }
+    - { id: figma-sync,          status: implemented, impl: ".claude/skills/design-system/tokens-sync/SKILL.md", purpose: "Figma Variables <-> DTCG", used_by: [design-system] }
+    - { id: dtcg,                status: implemented, impl: "_shared/tokens/source/", purpose: "DTCG token sources", used_by: [design-system] }
+    - { id: storybook-authoring, status: implemented, impl: ".claude/skills/design-system/storybook-authoring/SKILL.md", purpose: "CSF/MDX stories for verification", used_by: [design-system, ux-ui-engineer] }
+    - { id: design-system-governance, status: planned, purpose: "Consistency governance", used_by: [design-system] }
+
+  engineering:   # UX/UI Engineer only — NOT the future Software Development Team
+    - { id: design-to-code,        status: implemented, impl: "_shared/scripts/spec-to-ir.mjs", purpose: "Design spec -> IR", used_by: [ux-ui-engineer] }
+    - { id: component-implementation, status: implemented, impl: "adapters/", purpose: "IR -> platform components (6 adapters)", used_by: [ux-ui-engineer] }
+    - { id: design-system-implementation, status: implemented, impl: "adapters/_shared/renderer-base.mjs", purpose: "Shared traversal over design intent", used_by: [ux-ui-engineer] }
+    - { id: responsive-implementation, status: planned, purpose: "Responsive code output", used_by: [ux-ui-engineer] }
+    - { id: prototype-implementation,  status: planned, purpose: "Interactive prototype output", used_by: [ux-ui-engineer] }
+    - { id: design-code-parity,    status: implemented, impl: "_shared/scripts/e2e-multi.mjs", purpose: "Cross-adapter public-API parity", used_by: [ux-ui-engineer, design-qa] }
+
+  qa:
+    - { id: accessibility-qa,   status: implemented, impl: ".claude/skills/_guards/a11y-guard/scripts/check.mjs", purpose: "Accessibility gate", used_by: [design-qa] }
+    - { id: token-compliance,   status: implemented, impl: ".claude/skills/_guards/token-guard/scripts/check.mjs", purpose: "Token-contract gate", used_by: [design-qa] }
+    - { id: performance-qa,     status: implemented, impl: ".claude/skills/_guards/perf-guard/scripts/check.mjs", purpose: "Bloat/dead-import gate", used_by: [design-qa] }
+    - { id: design-quality-qa,  status: implemented, impl: ".claude/skills/_guards/slop-guard/scripts/check.mjs", purpose: "De-slop / design-quality gate", used_by: [design-qa] }
+    - { id: visual-qa,          status: implemented, impl: ".claude/skills/workflow/06-verify/SKILL.md", purpose: "Visual regression + dynamic a11y tiers", used_by: [design-qa] }
+    - { id: responsive-qa,      status: planned, purpose: "Responsive QA", used_by: [design-qa] }
+    - { id: interaction-qa,     status: planned, purpose: "Interaction QA", used_by: [design-qa] }
+    - { id: requirements-coverage, status: planned, purpose: "Trace requirement -> component -> test", used_by: [design-qa] }
+    - { id: handoff-qa,         status: implemented, impl: ".claude/skills/workflow/07-handoff/SKILL.md", purpose: "Handoff completeness", used_by: [design-qa, ux-ui-engineer] }
