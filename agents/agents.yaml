@@ -1,0 +1,93 @@
+# Agent registry — Agent = a professional ROLE that COMPOSES reusable skills.
+# Skills are never duplicated per agent; `skills` lists capability ids from
+# skills/INDEX.yaml. `owns` lists artifact ids from artifacts/registry.yaml.
+# `ai_capabilities` are capability needs from the model registry vocabulary that
+# the AI Router resolves to a provider/runtime/model.
+#
+# Scope: UX/UI Agent Team only. `future_company_role` records how each maps into
+# the larger AI Software Company later — an extension point, not implemented now.
+version: 1
+scope: ux-ui-agent-team
+
+agents:
+  - id: orchestrator
+    role: PM / Design Orchestrator
+    responsibilities: [receive-request, initialize-workflow, route-to-agents, manage-dependencies, manage-artifacts, track-state, manage-approval-gates, coordinate-ai-providers, resolve-transitions, enforce-role-boundaries]
+    skills: [routing, context-loading, readiness-check, ai-routing, scope-definition]
+    owns: [project-state]
+    ai_capabilities: [reasoning, structured-output]
+    boundaries: "Coordinates; does not perform an agent's specialist work itself."
+    future_company_role: company-level PM / Orchestrator
+
+  - id: product-ux-strategist
+    role: Product / UX Strategist
+    responsibilities: [requirement-analysis, stakeholder-analysis, problem-framing, product-discovery, product-strategy, scope-definition, success-metrics, product-critique]
+    skills: [requirement-analysis, stakeholder-analysis, problem-framing, product-discovery, product-strategy, scope-definition, success-metrics, product-critique, competitor-analysis, market-research]
+    owns: [product-spec]
+    ai_capabilities: [reasoning, long-context]
+    boundaries: "Defines what/why; does not run user studies (UX Researcher) or design (UX/UI Designers)."
+    future_company_role: Product Owner / Business Analyst
+
+  - id: ux-researcher
+    role: UX Researcher
+    responsibilities: [research-planning, competitor-research, user-research, synthesis, persona, jtbd, pain-points, opportunity-mapping]
+    skills: [research-planning, competitor-analysis, market-research, user-research, persona, jtbd, pain-point-analysis, opportunity-mapping, research-synthesis]
+    owns: [research-report]
+    ai_capabilities: [reasoning, long-context]
+    boundaries: "Produces evidence and insight; does not decide product strategy or design solutions."
+    future_company_role: UX Researcher
+
+  - id: ux-designer
+    role: UX Designer
+    responsibilities: [information-architecture, user-journey, user-flow, interaction-design, wireframing, usability, ux-states, ux-critique]
+    skills: [information-architecture, user-journey, user-flow, interaction-design, wireframing, usability, ux-patterns, ux-states, ux-critique]
+    owns: [ux-spec]
+    ai_capabilities: [reasoning]
+    boundaries: "Owns structure and behaviour; hands visual styling to UI Designer."
+    future_company_role: UX Designer
+
+  - id: ui-designer
+    role: UI Designer
+    responsibilities: [visual-design, layout, typography, color, spacing, responsive-design, component-design, ui-states, visual-hierarchy, ui-critique]
+    skills: [visual-design, layout, typography, color-system, spacing, responsive-design, component-design, ui-states, visual-hierarchy, anti-slop, ui-critique, interaction-design]
+    owns: [design-spec]
+    ai_capabilities: [reasoning, vision]
+    boundaries: "Owns look and feel over UX structure; consumes semantic tokens, never raw values."
+    future_company_role: UI Designer
+
+  - id: design-system
+    role: Design System Agent
+    responsibilities: [design-tokens, semantic-tokens, component-contracts, variants, states, patterns, governance, figma-sync, dtcg, storybook]
+    skills: [design-tokens, semantic-tokens, component-contract, component-variants, component-states, design-patterns, design-system-governance, figma-sync, dtcg, storybook-authoring]
+    owns: [design-tokens, component-contracts]
+    ai_capabilities: [structured-output]
+    boundaries: "Owns shared design infrastructure; reuse an existing system before creating one."
+    future_company_role: Design System Designer
+
+  - id: ux-ui-engineer
+    role: UX/UI Engineer
+    responsibilities: [design-to-code, component-implementation, design-system-implementation, responsive-implementation, prototype-implementation, parity]
+    skills: [design-to-code, component-implementation, design-system-implementation, responsive-implementation, prototype-implementation, design-code-parity, storybook-authoring]
+    owns: [prototype]
+    ai_capabilities: [code, structured-output]
+    boundaries: "Implements design intent only. NOT the future Software Development Team — no app architecture, backend, business logic, databases, or infrastructure."
+    future_company_role: Frontend Engineer (design-facing slice)
+
+  - id: design-qa
+    role: Design QA Agent
+    responsibilities: [ux-qa, ui-qa, accessibility-qa, visual-qa, responsive-qa, token-compliance, component-state-qa, interaction-qa, handoff-qa, requirements-coverage]
+    skills: [accessibility-qa, token-compliance, performance-qa, design-quality-qa, visual-qa, responsive-qa, interaction-qa, requirements-coverage, handoff-qa, usability, anti-slop, readiness-check]
+    owns: [design-qa-report]
+    ai_capabilities: [reasoning, vision]
+    boundaries: "Validates against spec/requirements; does not author features or redesign."
+    future_company_role: Design QA (feeds the future QA Engineering org)
+
+# Clean extension points — represented, NOT implemented now.
+future_teams:
+  - { team: engineering, note: "application architecture, backend, business logic, databases, infrastructure" }
+  - { team: qa-engineering, note: "full software test organisation beyond Design QA" }
+  - { team: security, note: "security engineering" }
+  - { team: devops-sre, note: "DevOps / SRE / release operations" }
+  - { team: data-ai, note: "data + AI engineering" }
+excluded:
+  - { area: graphic-design, note: "Banner / advertising / infographic / Photoshop / Illustrator — a separate future project, intentionally NOT in this repo." }

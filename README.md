@@ -1,9 +1,64 @@
 # Deliver Team Agent
 
-A **spec-driven code generation ecosystem** for Claude Code. Author one
+> **Current scope: the UX/UI Agent Team.**
+> **Future: one division of a larger AI Software Company Agent.**
+> The full software company does **not** exist yet — this repo builds a strong
+> UX/UI foundation designed to become one division of it later.
+
+A team of **professional-role agents** that compose **reusable skills**,
+communicate through **structured artifacts**, are validated by **reusable quality
+guards**, and run on a **provider-agnostic** AI layer (Claude is one provider,
+not the root). At its core is a **spec-driven code generation engine**: author one
 platform-neutral design specification and generate production components across
-**6 platforms** — while keeping design intent, accessibility, and the design-token
+**6 platforms** — keeping design intent, accessibility, and the design-token
 contract in sync automatically.
+
+**Read next:** [`docs/UX-UI-AGENT-TEAM-ARCHITECTURE.md`](docs/UX-UI-AGENT-TEAM-ARCHITECTURE.md)
+· [`docs/UX-UI-ARCHITECTURE-MIGRATION.md`](docs/UX-UI-ARCHITECTURE-MIGRATION.md)
+
+## The team
+
+| Layer | Means | Where |
+|---|---|---|
+| **Agent** — a professional role | WHO does the work | [`agents/`](agents/) |
+| **Skill** — a reusable capability | WHAT it can do | [`skills/INDEX.yaml`](skills/INDEX.yaml) |
+| **Workflow** — a conditional, gated process | WHEN | [`workflows/`](workflows/) |
+| **Artifact** — a structured deliverable | the output | [`artifacts/`](artifacts/) |
+| **Guard** — a reusable quality check | HOW quality is validated | [`guards/`](guards/) |
+| **AI Router** — provider/runtime/model selection | which AI runs it | [`.ai/`](.ai/) |
+
+Agents (UX/UI team): `orchestrator`, `product-ux-strategist`, `ux-researcher`,
+`ux-designer`, `ui-designer`, `design-system`, `ux-ui-engineer`, `design-qa`.
+`design-system`, `ux-ui-engineer`, and `design-qa` are backed by working code
+today; the upstream strategy/research/UX roles are defined extension points.
+
+## Multi-AI (provider-agnostic)
+
+An agent declares **AI capability requirements**; the **AI Router** maps them to a
+provider → runtime → model:
+
+```
+Agent → Skill → required AI capabilities → AI Router → Provider → Runtime → Model
+```
+
+Supported providers: Anthropic (Claude), OpenAI, Google, xAI, Qwen, local — all
+`unknown` until configured through official/authorized access. Both **API** and
+**authorized subscription** runtimes are modelled. The router only *plans* — it
+never authenticates or calls anything, so it cannot bypass auth, quotas,
+subscription limits, or Terms of Service; support is never faked. Try it:
+`node .ai/router/route.mjs --caps code,structured-output`.
+
+## Not included (by design)
+
+Current scope is **UX/UI only**. Extension points exist but are **not**
+implemented: full backend/engineering, software QA org, security, DevOps/SRE,
+data/AI engineering, release operations. **Graphic design** (banner, advertising,
+infographic, Photoshop/Illustrator) is intentionally a **separate** future
+project, not part of this repo.
+
+---
+
+## The engine (UX/UI Engineering + Design QA)
 
 ```
 one design-spec.yaml
@@ -35,10 +90,14 @@ node _shared/scripts/e2e-multi.mjs --feature product-card
 
 # 3. Run the regression harness
 node _shared/scripts/verify-patches.mjs
+
+# …or run the whole thing (tokens + every feature + regression) as CI does
+node _shared/scripts/ci.mjs
 ```
 
 Outputs land in `out/<adapter>/<feature>/` and a report in
-`out/_reports/<feature>.json`.
+`out/_reports/<feature>.json`. `.github/workflows/ci.yml` runs `ci.mjs` on
+Node 20 and 22 for every push and PR.
 
 ## The pipeline
 
@@ -54,18 +113,20 @@ Outputs land in `out/<adapter>/<feature>/` and a report in
 - **06-verify** adds dynamic a11y (axe-core), visual regression, bundle size,
   and Web Vitals.
 
-## Architecture — 27 skills, 5 layers
+## Architecture — 29 skills, 5 layers
 
-See [`SKILLS_INDEX.yaml`](SKILLS_INDEX.yaml) for the full registry.
+See [`SKILLS_INDEX.yaml`](SKILLS_INDEX.yaml) for the full registry. Every skill
+description ends with a `Do NOT use it for X — that is the Y skill` line, so a
+request routes to the same skill every time.
 
 | layer | count | what |
 |-------|-------|------|
 | `_meta` | 3 | orchestrator, context-loader, critique |
-| `_guards` | 3 | a11y-guard, token-guard, perf-guard |
+| `_guards` | 4 | a11y-guard, token-guard, perf-guard, slop-guard |
 | `workflow` | 7 | 01-discover … 07-handoff |
 | `design-system` | 4 | tokens-dtcg, tokens-sync, component-contract, storybook-authoring |
 | `adapters` | 6 | react, vue, svelte, react-native, swiftui, compose |
-| `knowledge` | 4 | design-principles, universal-design, pattern-library, interaction-laws |
+| `knowledge` | 5 | design-principles, universal-design, pattern-library, interaction-laws, anti-slop |
 
 ## The visitor pattern
 
@@ -79,8 +140,10 @@ controlled input, unified icon + token systems, single-level iteration (`each`,
 Strategy D), API parity, a11y contracts, automated gates.
 
 **Out of scope (refused, with redirects):** overlays (→ Radix / native), complex
-data tables (→ TanStack), charts, rich-text, drag-and-drop. See
-[`.claude/skills/knowledge/pattern-library`](.claude/skills/knowledge/pattern-library/SKILL.md).
+data tables (→ TanStack), charts, rich-text, drag-and-drop. The refusal is
+executable — a spec whose `category` is `overlay` or `data-table` is refused with
+a redirect and generates no code (see `orchestrator/scripts/refusal.mjs` and
+[`knowledge/pattern-library`](.claude/skills/knowledge/pattern-library/SKILL.md)).
 
 ## Design tokens
 
@@ -91,9 +154,13 @@ Tokens Studio JSON), both directions.
 
 ## Guards are non-negotiable
 
-Every generated output passes a11y / token / perf guards plus a cross-adapter
-parity check. A serious finding fails the gate. Waivers require an explicit
-expiry and approver.
+Every generated output passes a readiness check (no unresolved `TBD` — never
+invent what you do not know) plus a11y / token / perf / slop guards and a
+cross-adapter parity check. A serious finding fails the gate. Waivers require an
+explicit expiry and approver.
+
+`slop-guard` is the design-quality gate (no emoji; state not by color alone);
+its checklist lives in [`knowledge/anti-slop`](.claude/skills/knowledge/anti-slop/SKILL.md).
 
 ## Worked examples
 
@@ -103,7 +170,7 @@ expiry and approver.
 ## Layout
 
 ```
-.claude/skills/       21 skills (_meta, _guards, workflow, design-system, knowledge)
+.claude/skills/       23 skills (_meta, _guards, workflow, design-system, knowledge)
 adapters/             6 adapters + _shared/renderer-base.mjs (code + co-located SKILL.md)
 design-system/        tokens-dtcg build
 _shared/

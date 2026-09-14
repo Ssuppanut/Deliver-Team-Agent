@@ -25,13 +25,32 @@ class ComposeRenderer extends RendererBase {
   interp(vr) { return this.strExpr(vr); }
   /** Build a Modifier chain from style slots, excluding color (a Text param). */
   modifier(node) {
-    if (!node.style) return '';
     const chain = [];
-    for (const [slot, token] of Object.entries(node.style)) {
-      const t = mapToken(token);
-      if (slot === 'background') chain.push(`.background(${t})`);
-      else if (slot === 'padding') chain.push(`.padding(${t})`);
-      else if (slot === 'radius') chain.push(`.clip(RoundedCornerShape(${t}))`);
+    if (node.style) {
+      for (const [slot, token] of Object.entries(node.style)) {
+        const t = mapToken(token);
+        if (slot === 'background') chain.push(`.background(${t})`);
+        else if (slot === 'padding') chain.push(`.padding(${t})`);
+        else if (slot === 'radius') chain.push(`.clip(RoundedCornerShape(${t}))`);
+      }
+    }
+    const v = this.variantData(node);
+    if (v) {
+      const whenExpr = (slot, fallback) => {
+        const arms = Object.entries(v.styleCases)
+          .filter(([, s]) => s[slot])
+          .map(([val, s]) => `${JSON.stringify(val)} -> ${mapToken(s[slot])}`)
+          .join('; ');
+        return `when (${v.prop}) { ${arms}; else -> ${fallback} }`;
+      };
+      const slots = new Set();
+      for (const s of Object.values(v.styleCases)) for (const k of Object.keys(s)) slots.add(k);
+      if (slots.has('background')) chain.push(`.background(${whenExpr('background', 'Color.Transparent')})`);
+      // Column has no cascading text color, so a container-level `color` variant
+      // cannot be honored here — set text color on the Text children instead.
+      if (slots.has('color')) {
+        this.warnings.push('container `color` variant not applied on Compose (Column does not cascade text color); set it on Text children');
+      }
     }
     return chain.length ? `Modifier${chain.join('')}` : '';
   }
@@ -48,10 +67,20 @@ class ComposeRenderer extends RendererBase {
     const v = l.kind === 'literal' ? JSON.stringify(String(l.value)) : l.value;
     return `.semantics { contentDescription = ${v} }`;
   }
+  variantIcon(node) {
+    const v = this.variantData(node);
+    if (!v || !Object.keys(v.iconCases).length) return '';
+    const entries = Object.entries(v.iconCases).map(([val, tok]) => [val, this.icon(tok)]);
+    const arms = entries.map(([val, sym]) => `${JSON.stringify(val)} -> Icons.Default.${sym}`).join('; ');
+    const fallback = `Icons.Default.${entries[0][1]}`;
+    return `Icon(when (${v.prop}) { ${arms}; else -> ${fallback} }, contentDescription = null)`;
+  }
   visitContainer(node, children) {
     const mod = this.modifier(node);
     const modArg = mod ? `modifier = ${mod}${this.semantics(node)}` : (node.a11y?.label ? `modifier = Modifier${this.semantics(node)}` : '');
-    return `Column(${modArg}) {\n${indent(children, 2)}\n}`;
+    const lead = this.variantIcon(node);
+    const inner = lead ? `${lead}\n${children}` : children;
+    return `Column(${modArg}) {\n${indent(inner, 2)}\n}`;
   }
   visitMedia(node) {
     return `AsyncImage(model = ${this.strExpr(node.src)}, contentDescription = ${this.strExpr(node.alt ?? { kind: 'literal', value: '' })}${this._mod(node)})`;
@@ -80,26 +109,44 @@ class ComposeRenderer extends RendererBase {
   visitLink(node, children) {
     return `Text(text = ${node.label ? this.strExpr(node.label) : `"${'link'}"`}, modifier = Modifier.clickable { /* open ${node.href?.value ?? ''} */ })`;
   }
+  plain(vr) {
+    if (!vr) return null;
+    return vr.kind === 'literal' ? JSON.stringify(String(vr.value)) : vr.value;
+  }
   visitInput(node) {
     const i = node.input ?? {};
-    return `TextField(value = ${i.valueProp ?? 'value'}, onValueChange = ${i.changeProp ?? '{}'}${this._mod(node)})`;
+    const parts = [`value = ${i.valueProp ?? 'value'}`, `onValueChange = ${i.changeProp ?? '{}'}`];
+    const label = this.plain(node.label ?? node.a11y?.label);
+    if (label) parts.push(`label = { Text(${label}) }`);
+    if (node.a11y?.invalid) parts.push(`isError = ${node.a11y.invalid} != null`);
+    const mod = this.modifierArg(node);
+    if (mod) parts.push(mod);
+    return `TextField(${parts.join(', ')})`;
   }
   visitSlot() { return 'content()'; }
   wrapConditional(node, rendered) {
-    return `if (${node.when}) {\n${indent(rendered, 2)}\n}`;
+    const prop = this.ir.props.find((p) => p.name === node.when);
+    // A nullable value (String?, lambda?, ...) can't be a Boolean; null-check
+    // it. Kotlin smart-casts it to non-null inside the block.
+    const test = prop && prop.required === false ? `${node.when} != null` : node.when;
+    return `if (${test}) {\n${indent(rendered, 2)}\n}`;
   }
   wrapIteration(node, rendered) {
     const { items, as } = node.each;
     return `${items}.forEach { ${as} ->\n${indent(rendered, 2)}\n}`;
   }
   ktType(prop) {
+    const opt = prop.required === false;
     switch (prop.type) {
-      case 'number': return 'Double';
-      case 'boolean': return 'Boolean';
-      case 'function': return '() -> Unit';
-      case 'enum': return 'String';
+      case 'number': return opt ? 'Double?' : 'Double';
+      case 'boolean': return opt ? 'Boolean?' : 'Boolean';
+      case 'function': {
+        const base = /change/i.test(prop.name) ? '(String) -> Unit' : '() -> Unit';
+        return opt ? `(${base})?` : base;
+      }
+      case 'enum': return opt ? 'String?' : 'String';
       case 'array': return `List<${this.ir.component}Item>`;
-      default: return 'String';
+      default: return opt ? 'String?' : 'String';
     }
   }
   renderComponent(root) {
@@ -121,6 +168,7 @@ class ComposeRenderer extends RendererBase {
       + `import androidx.compose.runtime.Composable\n`
       + `import androidx.compose.ui.Modifier\n`
       + `import androidx.compose.ui.draw.clip\n`
+      + `import androidx.compose.ui.graphics.Color\n`
       + `import androidx.compose.ui.semantics.contentDescription\n`
       + `import androidx.compose.ui.semantics.semantics\n`
       + `import androidx.compose.foundation.clickable\n`
@@ -138,7 +186,7 @@ export function generateCompose(specPath, feature) {
   mkdirSync(outDir, { recursive: true });
   const file = resolve(outDir, `${ir.component}.kt`);
   writeFileSync(file, code);
-  return { file, code, warnings: renderer.warnings, component: ir.component };
+  return { file, code, warnings: renderer.warnings, component: ir.component, usedIconsCount: renderer.usedIcons.size };
 }
 
 function main() {

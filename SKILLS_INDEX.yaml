@@ -1,6 +1,12 @@
-# Master registry of the skills ecosystem.
-# 27 skills across 5 layers. Adapter skills are co-located with their code
+# Master registry of the CLAUDE-RUNTIME skill surface.
+# 29 skills across 5 layers. Adapter skills are co-located with their code
 # under adapters/<name>/; all others live under .claude/skills/<layer>/<name>/.
+# Every skill description ends with a "Do NOT use it for X — that is the Y skill"
+# line so routing to the orchestrator is deterministic.
+#
+# CAPABILITY VIEW: for the provider-agnostic, agent-oriented view — Skill = a
+# reusable capability composed by professional-role agents — see skills/INDEX.yaml
+# and agents/agents.yaml. This file remains the Claude-runtime discovery surface.
 version: 0.1.0
 description: >
   Spec-driven code generation ecosystem. One design spec -> production code
@@ -12,10 +18,12 @@ layers:
     skills:
       - name: orchestrator
         role: Entry point; routes the pipeline and enforces scope refusals.
+        script: .claude/skills/_meta/orchestrator/scripts/refusal.mjs
       - name: context-loader
         role: Loads the minimal artifacts/skills per pipeline step.
       - name: critique
-        role: Adversarial self-review before guards.
+        role: Adversarial self-review before guards; owns the TBD readiness check.
+        script: .claude/skills/_meta/critique/scripts/check-tbd.mjs
 
   _guards:
     path: .claude/skills/_guards
@@ -29,6 +37,9 @@ layers:
       - name: perf-guard
         role: Bloat / dead-import gate (static) + bundle & Web Vitals (verify).
         script: .claude/skills/_guards/perf-guard/scripts/check.mjs
+      - name: slop-guard
+        role: Design-quality gate — no emoji (blocking), state not by color alone.
+        script: .claude/skills/_guards/slop-guard/scripts/check.mjs
 
   workflow:
     path: .claude/skills/workflow
@@ -68,6 +79,7 @@ layers:
       - { name: universal-design, role: WCAG-aligned a11y reference }
       - { name: pattern-library, role: Known patterns + refusal boundaries }
       - { name: interaction-laws, role: Fitts/Hick/Doherty and timing }
+      - { name: anti-slop, role: De-slop checklist behind slop-guard }
 
 shared:
   path: _shared
@@ -80,3 +92,4 @@ entrypoints:
   build_tokens: node design-system/tokens-dtcg/scripts/build.mjs
   e2e: node _shared/scripts/e2e-multi.mjs --feature <name>
   verify_patches: node _shared/scripts/verify-patches.mjs
+  ci: node _shared/scripts/ci.mjs   # tokens + every feature + regression

@@ -5,6 +5,7 @@ description: >
   WCAG-aligned accessibility reference — roles, names, keyboard models, and
   inclusive defaults. Consult during research, design, and when resolving
   a11y-guard findings.
+  Do NOT use it for visual or aesthetic quality — those are the design-principles and anti-slop skills.
 ---
 
 # universal-design

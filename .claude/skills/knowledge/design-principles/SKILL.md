@@ -5,6 +5,7 @@ description: >
   Reference for visual and structural design fundamentals — hierarchy,
   proximity, contrast, rhythm, and token discipline. Consult during architecture
   and design steps.
+  Do NOT use it for accessibility specifics — that is the universal-design skill.
 ---
 
 # design-principles

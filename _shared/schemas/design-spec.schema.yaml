@@ -70,13 +70,19 @@ definitions:
         enum: [container, media, heading, text, action, link, input, slot]
       role: { type: string }
       as: { type: string, description: "Optional semantic tag hint (e.g. section, article)." }
+      id:
+        type: string
+        description: >
+          Stable element id used to wire label/description associations
+          (e.g. an error text referenced by an input's describedBy).
       a11y:
         type: object
         additionalProperties: false
         properties:
           label: { $ref: "#/definitions/valueRef" }
           labelledBy: { type: string }
-          describedBy: { type: string }
+          describedBy: { type: string, description: "Element id (or ids) to reference via aria-describedby." }
+          invalid: { type: string, description: "Prop name whose truthiness toggles aria-invalid (el=input)." }
           live: { type: string, enum: [off, polite, assertive] }
       style:
         type: object

@@ -6,6 +6,7 @@ description: >
   loads only the skills a step needs, and enforces scope refusals before any
   generation happens. Use when a request asks to build, generate, or ship a
   component across platforms.
+  Do NOT use it to do the pipeline work itself — that is the workflow skills (01-discover through 07-handoff).
 ---
 
 # orchestrator
@@ -35,6 +36,10 @@ purpose-built primitives instead of emitting a poor cross-platform imitation:
 
 See `knowledge/pattern-library/references/overlays.md` and `.../data-tables.md`
 for the full rationale and the exact redirect snippets.
+
+This check is executable: `scripts/refusal.mjs` (`checkRefusal(spec)`) runs inside
+`e2e-multi` before generation — a refused spec prints its redirect and emits no
+code, which is the correct outcome, not a failure.
 
 ## In scope
 

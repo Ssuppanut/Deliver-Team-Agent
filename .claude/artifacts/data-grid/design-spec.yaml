@@ -1,0 +1,11 @@
+component: DataGrid
+description: A sortable, paginated table of rows with dynamic columns.
+category: data-table
+props:
+  - { name: rows, type: array, required: true, itemShape: { id: string, name: string } }
+root:
+  el: container
+  role: table
+  children:
+    - el: text
+      text: { kind: literal, value: "rows" }

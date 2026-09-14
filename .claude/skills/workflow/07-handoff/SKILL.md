@@ -5,6 +5,7 @@ description: >
   Assembles the developer handoff bundle — README, API, examples, decisions,
   a11y notes, changelog, ADRs, and Storybook MDX. Final pipeline step. Use once
   verification passes.
+  Do NOT use it to run the pipeline or gates — those are the orchestrator and 06-verify skills.
 ---
 
 # 07-handoff

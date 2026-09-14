@@ -38,6 +38,7 @@ function visit(node, tokens) {
 
   if (node.role) ir.role = node.role;
   if (node.as) ir.as = node.as;
+  if (node.id) ir.id = node.id;
   if (node.level) ir.level = node.level;
   if (node.icon) { ir.icon = node.icon; tokens.add(node.icon); }
 

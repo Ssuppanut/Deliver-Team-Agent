@@ -1,0 +1,13 @@
+component: Modal
+description: A dialog overlay with a title, body, and dismiss action.
+category: overlay
+props:
+  - { name: title, type: string, required: true }
+  - { name: onClose, type: function, required: true }
+root:
+  el: container
+  role: dialog
+  children:
+    - el: heading
+      level: 2
+      text: { kind: ref, value: title }

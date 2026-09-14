@@ -5,6 +5,7 @@ description: >
   Optional step. Researches established patterns, a11y semantics, and platform
   conventions for an unfamiliar component before architecting. Use when the
   pattern is novel or the correct ARIA/interaction model is unclear.
+  Do NOT use it to write the spec — that is the 04-design skill.
 ---
 
 # 02-research

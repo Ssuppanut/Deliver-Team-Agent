@@ -28,11 +28,30 @@ class SwiftUIRenderer extends RendererBase {
   }
   interp(vr) { return this.textExpr(vr); }
   modifiers(node) {
-    if (!node.style) return '';
-    return Object.entries(node.style)
-      .filter(([slot]) => MODIFIER[slot])
-      .map(([slot, token]) => `\n  ${MODIFIER[slot](mapToken(token))}`)
-      .join('');
+    const out = [];
+    if (node.style) {
+      for (const [slot, token] of Object.entries(node.style)) {
+        if (MODIFIER[slot]) out.push(`\n  ${MODIFIER[slot](mapToken(token))}`);
+      }
+    }
+    const v = this.variantData(node);
+    if (v) {
+      // .foregroundColor cascades to child Text in SwiftUI, so a container-level
+      // color variant is honored natively here.
+      const slots = new Set();
+      for (const s of Object.values(v.styleCases)) for (const k of Object.keys(s)) slots.add(k);
+      const fallback = { background: 'Color.clear', color: 'Color.primary' };
+      for (const slot of slots) {
+        if (!MODIFIER[slot]) continue;
+        const dict = Object.entries(v.styleCases)
+          .filter(([, s]) => s[slot])
+          .map(([val, s]) => `${JSON.stringify(val)}: ${mapToken(s[slot])}`)
+          .join(', ');
+        const expr = `([${dict}][${safe(v.prop)}] ?? ${fallback[slot] ?? 'Color.clear'})`;
+        out.push(`\n  ${MODIFIER[slot](expr)}`);
+      }
+    }
+    return out.join('');
   }
   a11y(node) {
     if (!node.a11y?.label) return '';
@@ -40,8 +59,18 @@ class SwiftUIRenderer extends RendererBase {
     const v = l.kind === 'literal' ? JSON.stringify(String(l.value)) : safe(l.value);
     return `\n  .accessibilityLabel(${v})`;
   }
+  variantIcon(node) {
+    const v = this.variantData(node);
+    if (!v || !Object.keys(v.iconCases).length) return '';
+    const dict = Object.entries(v.iconCases)
+      .map(([val, tok]) => `${JSON.stringify(val)}: ${JSON.stringify(this.icon(tok))}`)
+      .join(', ');
+    return `Image(systemName: ([${dict}][${safe(v.prop)}] ?? ""))\n  .accessibilityHidden(true)`;
+  }
   visitContainer(node, children) {
-    return `VStack(alignment: .leading, spacing: 8) {\n${indent(children, 2)}\n}${this.modifiers(node)}${this.a11y(node)}`;
+    const lead = this.variantIcon(node);
+    const inner = lead ? `${lead}\n${children}` : children;
+    return `VStack(alignment: .leading, spacing: 8) {\n${indent(inner, 2)}\n}${this.modifiers(node)}${this.a11y(node)}`;
   }
   visitMedia(node) {
     const url = node.src.kind === 'literal' ? JSON.stringify(String(node.src.value)) : safe(node.src.value);
@@ -66,27 +95,46 @@ class SwiftUIRenderer extends RendererBase {
     const label = node.label ? JSON.stringify(String(node.label.value)) : '""';
     return `Link(${label}, destination: URL(string: ${url})!)${this.modifiers(node)}`;
   }
+  plain(vr, fallback = '""') {
+    if (!vr) return fallback;
+    return vr.kind === 'literal' ? JSON.stringify(String(vr.value)) : safe(vr.value);
+  }
   visitInput(node) {
     const i = node.input ?? {};
-    const label = node.a11y?.label?.value ?? '';
-    return `TextField(${JSON.stringify(String(label))}, text: $${safe(i.valueProp ?? 'value')})${this.modifiers(node)}`;
+    const title = this.plain(node.label ?? node.a11y?.label);
+    // Wire the controlled value+onChange contract through a custom Binding.
+    const binding = i.changeProp
+      ? `Binding(get: { ${safe(i.valueProp ?? 'value')} }, set: { ${safe(i.changeProp)}($0) })`
+      : `$${safe(i.valueProp ?? 'value')}`;
+    return `TextField(${title}, text: ${binding})${this.modifiers(node)}`;
   }
   visitSlot() { return 'content'; }
   wrapConditional(node, rendered) {
-    return `if ${safe(node.when)} {\n${indent(rendered, 2)}\n}`;
+    const prop = this.ir.props.find((p) => p.name === node.when);
+    const w = safe(node.when);
+    // An optional value (String?, closure?, ...) can't be used as a Bool;
+    // bind-unwrap it. The bound name shadows the optional inside the block.
+    if (prop && prop.required === false) {
+      return `if let ${w} = ${w} {\n${indent(rendered, 2)}\n}`;
+    }
+    return `if ${w} {\n${indent(rendered, 2)}\n}`;
   }
   wrapIteration(node, rendered) {
     const { items, as, key } = node.each;
     return `ForEach(${safe(items)}, id: \\.${key}) { ${safe(as)} in\n${indent(rendered, 2)}\n}`;
   }
   swiftType(prop) {
+    const opt = prop.required === false;
     switch (prop.type) {
-      case 'number': return 'Double';
-      case 'boolean': return 'Bool';
-      case 'function': return '() -> Void';
-      case 'enum': return 'String';
+      case 'number': return opt ? 'Double?' : 'Double';
+      case 'boolean': return opt ? 'Bool?' : 'Bool';
+      case 'function': {
+        const base = /change/i.test(prop.name) ? '(String) -> Void' : '() -> Void';
+        return opt ? `(${base})?` : base;
+      }
+      case 'enum': return opt ? 'String?' : 'String';
       case 'array': return `[${this.ir.component}Item]`;
-      default: return 'String';
+      default: return opt ? 'String?' : 'String';
     }
   }
   renderComponent(root) {
@@ -116,7 +164,7 @@ export function generateSwiftUI(specPath, feature) {
   mkdirSync(outDir, { recursive: true });
   const file = resolve(outDir, `${ir.component}.swift`);
   writeFileSync(file, code);
-  return { file, code, warnings: renderer.warnings, component: ir.component };
+  return { file, code, warnings: renderer.warnings, component: ir.component, usedIconsCount: renderer.usedIcons.size };
 }
 
 function main() {

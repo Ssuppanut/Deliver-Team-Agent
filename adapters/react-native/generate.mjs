@@ -23,14 +23,36 @@ class RNRenderer extends RendererBase {
     return vr.value;
   }
   style(node) {
-    if (!node.style) return '';
-    const entries = Object.entries(node.style)
-      .map(([slot, token]) => `${STYLE_PROP[slot] ?? slot}: ${mapToken(token)}`);
-    return ` style={{ ${entries.join(', ')} }}`;
+    const base = node.style
+      ? Object.entries(node.style).map(([slot, token]) => `${STYLE_PROP[slot] ?? slot}: ${mapToken(token)}`)
+      : [];
+    let spread = '';
+    const v = this.variantData(node);
+    if (v) {
+      const cases = Object.entries(v.styleCases)
+        .map(([value, slots]) => {
+          const inner = Object.entries(slots).map(([s, t]) => `${STYLE_PROP[s] ?? s}: ${mapToken(t)}`).join(', ');
+          return `${JSON.stringify(value)}: { ${inner} }`;
+        })
+        .join(', ');
+      spread = `...({ ${cases} })[${v.prop}]`;
+    }
+    const inner = [...base, spread].filter(Boolean).join(', ');
+    return inner ? ` style={{ ${inner} }}` : '';
+  }
+  variantIcon(node) {
+    const v = this.variantData(node);
+    if (!v || !Object.keys(v.iconCases).length) return '';
+    const cases = Object.entries(v.iconCases)
+      .map(([val, tok]) => `${JSON.stringify(val)}: <${this.icon(tok)} />`)
+      .join(', ');
+    return `{({ ${cases} })[${v.prop}]}`;
   }
   visitContainer(node, children) {
     const label = node.a11y?.label ? ` accessibilityLabel={${this.attr(node.a11y.label)}}` : '';
-    return `<View accessible${label}${this.style(node)}>\n${indent(children, 2)}\n</View>`;
+    const lead = this.variantIcon(node);
+    const inner = lead ? `${lead}\n${children}` : children;
+    return `<View accessible${label}${this.style(node)}>\n${indent(inner, 2)}\n</View>`;
   }
   visitMedia(node) {
     const label = node.alt ? ` accessibilityLabel={${this.attr(node.alt)}}` : '';
@@ -55,8 +77,12 @@ class RNRenderer extends RendererBase {
     const i = node.input ?? {};
     const value = i.valueProp ? ` value={${i.valueProp}}` : '';
     const change = i.changeProp ? ` onChangeText={${i.changeProp}}` : '';
-    const label = node.a11y?.label ? ` accessibilityLabel={${this.attr(node.a11y.label)}}` : '';
-    return `<TextInput${value}${change}${label}${this.style(node)} />`;
+    // A visible label also serves as the accessible name (no htmlFor on native).
+    const labelSource = node.label ?? node.a11y?.label;
+    const labelEl = node.label ? `<Text>${this.interp(node.label)}</Text>\n` : '';
+    const a11yLabel = labelSource ? ` accessibilityLabel={${this.attr(labelSource)}}` : '';
+    const invalid = node.a11y?.invalid ? ` aria-invalid={!!${node.a11y.invalid}}` : '';
+    return `${labelEl}<TextInput${value}${change}${a11yLabel}${invalid}${this.style(node)} />`;
   }
   visitSlot(node) {
     const name = node.label?.value ?? 'children';
@@ -108,7 +134,7 @@ export function generateReactNative(specPath, feature) {
   mkdirSync(outDir, { recursive: true });
   const file = resolve(outDir, `${ir.component}.tsx`);
   writeFileSync(file, code);
-  return { file, code, warnings: renderer.warnings, component: ir.component };
+  return { file, code, warnings: renderer.warnings, component: ir.component, usedIconsCount: renderer.usedIcons.size };
 }
 
 function main() {

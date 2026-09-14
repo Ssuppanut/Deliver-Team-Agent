@@ -6,6 +6,7 @@ description: >
   React adapter (reference implementation). Renders the IR to typed, accessible
   .tsx, tokens as CSS custom properties, icons from lucide-react. Use to
   generate React components.
+  Do NOT use it for any platform other than React — each platform has its own adapter (vue, svelte, react-native, swiftui, compose).
 ---
 
 # adapter-react

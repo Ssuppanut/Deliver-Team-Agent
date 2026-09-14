@@ -5,6 +5,7 @@ description: >
   Generates Storybook stories (CSF + MDX docs) for web adapters, wired for the
   visual-regression and dynamic-a11y tiers in 06-verify. Use when a component
   needs stories or docs.
+  Do NOT use it to run the verification tiers — that is the 06-verify skill.
 ---
 
 # storybook-authoring

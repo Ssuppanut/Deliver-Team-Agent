@@ -1,0 +1,87 @@
+# Artifact registry — agents communicate through structured artifacts, not chat
+# history. Each artifact declares its owner (agent id), the schema that validates
+# it, its upstream inputs (for traceability), and an honest status. Existing
+# schemas are reused; new ones are marked planned rather than duplicated.
+version: 1
+
+artifacts:
+  - id: brief
+    owner: orchestrator
+    inputs: []
+    schema: { status: implemented, path: "_shared/schemas/brief.schema.yaml" }
+    status: implemented
+    note: "Request -> structured brief (existing 01-discover output)."
+
+  - id: product-spec
+    owner: product-ux-strategist
+    inputs: [brief]
+    schema: { status: planned, path: "artifacts/schemas/product-spec.schema.yaml" }
+    status: planned
+
+  - id: research-report
+    owner: ux-researcher
+    inputs: [product-spec, brief]
+    schema: { status: planned, path: "artifacts/schemas/research-report.schema.yaml" }
+    status: planned
+
+  - id: ux-spec
+    owner: ux-designer
+    inputs: [research-report, product-spec]
+    schema: { status: planned, path: "artifacts/schemas/ux-spec.schema.yaml" }
+    status: planned
+    note: "May extend _shared/schemas/architecture.schema.yaml rather than a new format."
+
+  - id: design-spec
+    owner: ui-designer
+    inputs: [ux-spec]
+    schema: { status: implemented, path: "_shared/schemas/design-spec.schema.yaml" }
+    status: implemented
+    note: "The single source of truth that drives all 6 adapters (existing)."
+
+  - id: design-tokens
+    owner: design-system
+    inputs: []
+    schema: { status: implemented, path: "_shared/tokens/registry.json" }
+    status: implemented
+    note: "Built by tokens-dtcg; components consume semantic tokens only."
+
+  - id: component-contracts
+    owner: design-system
+    inputs: [design-spec]
+    schema: { status: implemented, path: "_shared/schemas/design-spec.schema.yaml" }
+    status: implemented
+    note: "The prop set every adapter must expose identically (parity contract)."
+
+  - id: prototype
+    owner: ux-ui-engineer
+    inputs: [design-spec, design-tokens, component-contracts]
+    schema: { status: generated, path: "out/<adapter>/<feature>" }   # runtime output, not a static schema file
+    status: implemented
+    note: "Generated code per adapter under out/<adapter>/<feature>/ + e2e report."
+
+  - id: design-qa-report
+    owner: design-qa
+    inputs: [prototype, design-spec]
+    schema: { status: implemented, path: "_shared/schemas/verify-report.schema.yaml" }
+    status: implemented
+    note: "The e2e/verify report (readiness + a11y/token/perf/slop + parity)."
+
+  - id: handoff
+    owner: ux-ui-engineer
+    inputs: [prototype, design-qa-report]
+    schema: { status: planned, path: "artifacts/schemas/handoff.schema.yaml" }
+    status: implemented
+    note: "8-file handoff bundle (existing 07-handoff); schema formalisation planned."
+
+  - id: project-state
+    owner: orchestrator
+    inputs: []
+    schema: { status: planned, path: "artifacts/schemas/project-state.schema.yaml" }
+    status: planned
+    note: "current_stage, completed_stages, pending/blocked tasks, artifacts, approvals, decisions, open_questions, risks, quality_results."
+
+# Traceability chain the registry is designed to support:
+#   stakeholder-requirement -> product-requirement -> research-insight ->
+#   ux-decision -> ui-decision -> design-component -> design-spec -> handoff
+traceability:
+  chain: [brief, product-spec, research-report, ux-spec, design-spec, component-contracts, prototype, design-qa-report, handoff]

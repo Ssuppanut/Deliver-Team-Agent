@@ -5,6 +5,7 @@ description: >
   First pipeline step. Turns a vague request into a structured brief.yaml —
   intent, audience, platforms, states, a11y needs, and scope boundaries. Use at
   the start of any new component.
+  Do NOT use it to decide structure or the public API — that is the 03-architect skill.
 ---
 
 # 01-discover

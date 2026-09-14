@@ -6,6 +6,7 @@ description: >
   SwiftUI adapter. Renders the IR to a View struct using DesignTokens.swift and
   SF Symbols. Use to generate SwiftUI components. Note native limits on JS expr
   values.
+  Do NOT use it for any platform other than SwiftUI — each platform has its own adapter (react, vue, svelte, react-native, compose).
 ---
 
 # adapter-swiftui

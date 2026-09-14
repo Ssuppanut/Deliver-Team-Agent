@@ -23,10 +23,25 @@ class VueRenderer extends RendererBase {
     return ` :${attr}="${vr.value}"`;
   }
   styleAttr(node) {
-    if (!node.style) return '';
-    const entries = Object.entries(node.style)
-      .map(([slot, token]) => `${STYLE_PROP[slot] ?? slot}: ${mapToken(token)}`);
-    return ` style="${entries.join('; ')}"`;
+    const v = this.variantData(node);
+    if (!node.style && !v) return '';
+    if (!v) {
+      const entries = Object.entries(node.style)
+        .map(([slot, token]) => `${STYLE_PROP[slot] ?? slot}: ${mapToken(token)}`);
+      return ` style="${entries.join('; ')}"`;
+    }
+    // Dynamic :style object binding so the variant resolves at runtime.
+    const base = node.style
+      ? Object.entries(node.style).map(([slot, token]) => `'${STYLE_PROP[slot] ?? slot}': '${mapToken(token)}'`)
+      : [];
+    const cases = Object.entries(v.styleCases)
+      .map(([value, slots]) => {
+        const inner = Object.entries(slots).map(([s, t]) => `'${STYLE_PROP[s] ?? s}': '${mapToken(t)}'`).join(', ');
+        return `${JSON.stringify(value)}: { ${inner} }`;
+      })
+      .join(', ');
+    const inner = [...base, `...({ ${cases} })[${v.prop}]`].filter(Boolean).join(', ');
+    return ` :style="{ ${inner} }"`;
   }
   a11y(node) {
     const out = [];
@@ -35,9 +50,22 @@ class VueRenderer extends RendererBase {
     if (node.a11y?.live) out.push(` aria-live="${node.a11y.live}"`);
     return out.join('');
   }
+  idAttr(node) {
+    return node.id ? ` id="${node.id}"` : '';
+  }
+  variantIcon(node) {
+    const v = this.variantData(node);
+    if (!v || !Object.keys(v.iconCases).length) return '';
+    const cases = Object.entries(v.iconCases)
+      .map(([val, tok]) => `${JSON.stringify(val)}: ${this.icon(tok)}`)
+      .join(', ');
+    return `<component :is="({ ${cases} })[${v.prop}]" aria-hidden="true" />`;
+  }
   visitContainer(node, children) {
     const tag = node.as || 'div';
-    return `<${tag}${this.a11y(node)}${this.styleAttr(node)}>\n${indent(children, 2)}\n</${tag}>`;
+    const lead = this.variantIcon(node);
+    const inner = lead ? `${lead}\n${children}` : children;
+    return `<${tag}${this.idAttr(node)}${this.a11y(node)}${this.styleAttr(node)}>\n${indent(inner, 2)}\n</${tag}>`;
   }
   visitMedia(node) {
     return `<img${this.bind('src', node.src)}${this.bind('alt', node.alt ?? { kind: 'literal', value: '' })}${this.styleAttr(node)} />`;
@@ -45,10 +73,10 @@ class VueRenderer extends RendererBase {
   visitHeading(node, children) {
     const tag = `h${node.level ?? 2}`;
     const body = node.text ? this.interp(node.text) : children;
-    return `<${tag}${this.styleAttr(node)}>${body}</${tag}>`;
+    return `<${tag}${this.idAttr(node)}${this.styleAttr(node)}>${body}</${tag}>`;
   }
   visitText(node) {
-    return `<span${this.styleAttr(node)}>${this.interp(node.text)}</span>`;
+    return `<span${this.idAttr(node)}${this.a11y(node)}${this.styleAttr(node)}>${this.interp(node.text)}</span>`;
   }
   visitAction(node) {
     const handler = node.onEvent ? ` @click="${node.onEvent}"` : '';
@@ -60,9 +88,16 @@ class VueRenderer extends RendererBase {
   }
   visitInput(node) {
     const i = node.input ?? {};
+    const id = node.id || `${this.ir.component.toLowerCase()}-${i.valueProp ?? 'input'}`;
+    const labelEl = node.label ? `<label for="${id}">${this.interp(node.label)}</label>\n` : '';
     const model = i.valueProp ? ` :value="${i.valueProp}"` : '';
     const change = i.changeProp ? ` @input="${i.changeProp}(($event.target as HTMLInputElement).value)"` : '';
-    return `<input type="${i.inputType ?? 'text'}"${model}${change}${this.a11y(node)}${this.styleAttr(node)} />`;
+    const invalid = node.a11y?.invalid;
+    const desc = node.a11y?.describedBy;
+    let aria = '';
+    if (invalid) aria += ` :aria-invalid="!!${invalid}"`;
+    if (desc) aria += invalid ? ` :aria-describedby="${invalid} ? '${desc}' : undefined"` : ` aria-describedby="${desc}"`;
+    return `${labelEl}<input id="${id}" type="${i.inputType ?? 'text'}"${model}${change}${aria}${this.a11y(node)}${this.styleAttr(node)} />`;
   }
   visitSlot(node) {
     const name = node.label?.value;
@@ -80,7 +115,7 @@ class VueRenderer extends RendererBase {
     switch (prop.type) {
       case 'number': return 'number';
       case 'boolean': return 'boolean';
-      case 'function': return '() => void';
+      case 'function': return /change/i.test(prop.name) ? '(value: string) => void' : '() => void';
       case 'enum': return (prop.values ?? []).map((v) => `'${v}'`).join(' | ') || 'string';
       case 'array': {
         const shape = prop.itemShape
@@ -110,7 +145,7 @@ export function generateVue(specPath, feature) {
   mkdirSync(outDir, { recursive: true });
   const file = resolve(outDir, `${ir.component}.vue`);
   writeFileSync(file, code);
-  return { file, code, warnings: renderer.warnings, component: ir.component };
+  return { file, code, warnings: renderer.warnings, component: ir.component, usedIconsCount: renderer.usedIcons.size };
 }
 
 function main() {

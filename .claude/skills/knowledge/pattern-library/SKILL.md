@@ -5,6 +5,7 @@ description: >
   Catalog of known component patterns and the explicit refusal boundaries. Holds
   the rationale and redirects for out-of-scope categories (overlays, data tables,
   etc). Consulted by the orchestrator's refusal check.
+  Do NOT use it for accessibility semantics — that is the universal-design skill.
 ---
 
 # pattern-library

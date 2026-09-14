@@ -30,10 +30,26 @@ class ReactRenderer extends RendererBase {
   }
 
   styleAttr(node) {
-    if (!node.style) return '';
-    const entries = Object.entries(node.style)
-      .map(([slot, token]) => `${STYLE_PROP[slot] ?? slot}: '${mapToken(token)}'`);
-    return ` style={{ ${entries.join(', ')} }}`;
+    const base = node.style
+      ? Object.entries(node.style).map(([slot, token]) => `${STYLE_PROP[slot] ?? slot}: '${mapToken(token)}'`)
+      : [];
+    let spread = '';
+    const v = this.variantData(node);
+    if (v) {
+      const cases = Object.entries(v.styleCases)
+        .map(([value, slots]) => {
+          const inner = Object.entries(slots).map(([s, t]) => `${STYLE_PROP[s] ?? s}: '${mapToken(t)}'`).join(', ');
+          return `${JSON.stringify(value)}: { ${inner} }`;
+        })
+        .join(', ');
+      spread = `...({ ${cases} })[${v.prop}]`;
+    }
+    const inner = [...base, spread].filter(Boolean).join(', ');
+    return inner ? ` style={{ ${inner} }}` : '';
+  }
+
+  idAttr(node) {
+    return node.id ? ` id="${node.id}"` : '';
   }
 
   a11yAttrs(node) {
@@ -44,10 +60,21 @@ class ReactRenderer extends RendererBase {
     return out.join('');
   }
 
+  variantIcon(node) {
+    const v = this.variantData(node);
+    if (!v || !Object.keys(v.iconCases).length) return '';
+    const cases = Object.entries(v.iconCases)
+      .map(([val, tok]) => `${JSON.stringify(val)}: <${this.icon(tok)} aria-hidden="true" />`)
+      .join(', ');
+    return `{({ ${cases} })[${v.prop}]}`;
+  }
+
   visitContainer(node, children) {
     const tag = node.as || 'div';
-    const open = `<${tag}${this.a11yAttrs(node)}${this.styleAttr(node)}>`;
-    return `${open}\n${indent(children, 2)}\n</${tag}>`;
+    const open = `<${tag}${this.idAttr(node)}${this.a11yAttrs(node)}${this.styleAttr(node)}>`;
+    const lead = this.variantIcon(node);
+    const inner = lead ? `${lead}\n${children}` : children;
+    return `${open}\n${indent(inner, 2)}\n</${tag}>`;
   }
 
   visitMedia(node) {
@@ -57,11 +84,11 @@ class ReactRenderer extends RendererBase {
   visitHeading(node, children) {
     const tag = `h${node.level ?? 2}`;
     const body = node.text ? this.interp(node.text) : children;
-    return `<${tag}${this.styleAttr(node)}>${body}</${tag}>`;
+    return `<${tag}${this.idAttr(node)}${this.styleAttr(node)}>${body}</${tag}>`;
   }
 
   visitText(node) {
-    return `<span${this.styleAttr(node)}>${this.interp(node.text)}</span>`;
+    return `<span${this.idAttr(node)}${this.a11yAttrs(node)}${this.styleAttr(node)}>${this.interp(node.text)}</span>`;
   }
 
   visitAction(node) {
@@ -76,11 +103,26 @@ class ReactRenderer extends RendererBase {
     return `<a href=${this.attr(node.href)}${this.styleAttr(node)}>${label}</a>`;
   }
 
+  inputId(node) {
+    const i = node.input ?? {};
+    return node.id || `${this.ir.component.toLowerCase()}-${i.valueProp ?? 'input'}`;
+  }
+
   visitInput(node) {
     const i = node.input ?? {};
+    const id = this.inputId(node);
+    const labelEl = node.label ? `<label htmlFor="${id}">${this.interp(node.label)}</label>\n` : '';
     const value = i.valueProp ? ` value={${i.valueProp}}` : '';
     const change = i.changeProp ? ` onChange={(e) => ${i.changeProp}(e.target.value)}` : '';
-    return `<input type="${i.inputType ?? 'text'}"${value}${change}${this.a11yAttrs(node)}${this.styleAttr(node)} />`;
+    const invalid = node.a11y?.invalid;
+    const desc = node.a11y?.describedBy;
+    let aria = '';
+    if (invalid) aria += ` aria-invalid={!!${invalid}}`;
+    if (desc) {
+      // Only point at the description while it is actually rendered.
+      aria += invalid ? ` aria-describedby={${invalid} ? "${desc}" : undefined}` : ` aria-describedby="${desc}"`;
+    }
+    return `${labelEl}<input id="${id}" type="${i.inputType ?? 'text'}"${value}${change}${aria}${this.a11yAttrs(node)}${this.styleAttr(node)} />`;
   }
 
   visitSlot(node) {
@@ -104,7 +146,7 @@ class ReactRenderer extends RendererBase {
       case 'string': return 'string';
       case 'number': return 'number';
       case 'boolean': return 'boolean';
-      case 'function': return '() => void';
+      case 'function': return /change/i.test(prop.name) ? '(value: string) => void' : '() => void';
       case 'enum': return (prop.values ?? []).map((v) => `'${v}'`).join(' | ') || 'string';
       case 'node': return 'React.ReactNode';
       case 'array': {
@@ -144,7 +186,7 @@ export function generateReact(specPath, feature) {
   mkdirSync(outDir, { recursive: true });
   const file = resolve(outDir, `${ir.component}.tsx`);
   writeFileSync(file, code);
-  return { file, code, warnings: renderer.warnings, component: ir.component };
+  return { file, code, warnings: renderer.warnings, component: ir.component, usedIconsCount: renderer.usedIcons.size };
 }
 
 function main() {

@@ -6,6 +6,7 @@ description: >
   React Native adapter. Renders the IR to View/Text/Image/Pressable with JS
   design tokens (tokens-rn.ts) and lucide-react-native icons. Use to generate RN
   components.
+  Do NOT use it for any platform other than React Native — each platform has its own adapter (react, vue, svelte, swiftui, compose).
 ---
 
 # adapter-react-native

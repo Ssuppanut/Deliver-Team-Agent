@@ -5,6 +5,7 @@ platform: web
 description: >
   Vue 3 adapter. Renders the IR to a <script setup lang="ts"> SFC, tokens as CSS
   custom properties, icons from lucide-vue-next. Use to generate Vue components.
+  Do NOT use it for any platform other than Vue — each platform has its own adapter (react, svelte, react-native, swiftui, compose).
 ---
 
 # adapter-vue

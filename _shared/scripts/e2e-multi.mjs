@@ -16,6 +16,8 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { specToIrFromFile } from './spec-to-ir.mjs';
+import { loadSpec } from './validate-schema.mjs';
+import { checkRefusal } from '../../.claude/skills/_meta/orchestrator/scripts/refusal.mjs';
 import { generateReact } from '../../adapters/react/generate.mjs';
 import { generateVue } from '../../adapters/vue/generate.mjs';
 import { generateSvelte } from '../../adapters/svelte/generate.mjs';
@@ -25,6 +27,8 @@ import { generateCompose } from '../../adapters/compose/generate.mjs';
 import { checkA11y } from '../../.claude/skills/_guards/a11y-guard/scripts/check.mjs';
 import { checkTokens } from '../../.claude/skills/_guards/token-guard/scripts/check.mjs';
 import { checkPerf } from '../../.claude/skills/_guards/perf-guard/scripts/check.mjs';
+import { checkSlop } from '../../.claude/skills/_guards/slop-guard/scripts/check.mjs';
+import { checkTbd } from '../../.claude/skills/_meta/critique/scripts/check-tbd.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '../..');
@@ -81,6 +85,21 @@ function main() {
   console.log(`\n=== e2e-multi: ${feature} ===`);
   console.log(`spec: ${specPath.replace(ROOT + '/', '')}`);
 
+  // Orchestrator Step 2.5 — refuse out-of-scope categories before generating.
+  const refusal = checkRefusal(loadSpec(specPath));
+  if (refusal) {
+    console.log(`\nREFUSED: category "${refusal.category}" is out of scope`);
+    console.log(`  why:      ${refusal.reason}`);
+    console.log(`  instead:  ${refusal.redirect}`);
+    console.log(`  see:      ${refusal.reference}`);
+    console.log(`\nNo code generated (this is the correct outcome, not a failure).\n`);
+    const reportDir = resolve(ROOT, 'out/_reports');
+    mkdirSync(reportDir, { recursive: true });
+    writeFileSync(resolve(reportDir, `${feature}.json`),
+      JSON.stringify({ feature, refused: true, ...refusal }, null, 2) + '\n');
+    return;
+  }
+
   const ir = specToIrFromFile(specPath);
   console.log(`IR: ${ir.component} (${ir.props.length} props, ${ir.tokens.length} tokens)`);
 
@@ -90,21 +109,27 @@ function main() {
   }
   console.log(`generated ${Object.keys(results).length} adapters -> out/<adapter>/${feature}/`);
 
+  const tbd = checkTbd(ir);
   const a11y = checkA11y(ir);
   const tokens = checkTokens(ir, results);
   const perf = checkPerf(ir, results);
+  const slop = checkSlop(ir, results);
   const parity = checkParity(results, ir);
 
   console.log('\nguards:');
+  console.log(`  readiness    ${fmt(tbd.ok)}  (${tbd.issues.length} unresolved TBD)`);
   console.log(`  a11y-guard   ${fmt(a11y.ok)}  (${a11y.issues.length} issues)`);
   console.log(`  token-guard  ${fmt(tokens.ok)}  (${tokens.issues.length} issues)`);
   console.log(`  perf-guard   ${fmt(perf.ok)}  (${perf.issues.length} issues)`);
+  console.log(`  slop-guard   ${fmt(slop.ok)}  (${slop.issues.length} issues)`);
   console.log(`  parity       ${fmt(parity.ok)}  (${parity.issues.length} issues)`);
 
   const allIssues = [
+    ...tbd.issues.map((i) => ({ guard: 'readiness', ...i })),
     ...a11y.issues.map((i) => ({ guard: 'a11y', ...i })),
     ...tokens.issues.map((i) => ({ guard: 'token', ...i })),
     ...perf.issues.map((i) => ({ guard: 'perf', ...i })),
+    ...slop.issues.map((i) => ({ guard: 'slop', ...i })),
     ...parity.issues.map((msg) => ({ guard: 'parity', severity: 'serious', msg })),
   ];
   const warnings = Object.entries(results).flatMap(([a, r]) => (r.warnings ?? []).map((w) => `${a}: ${w}`));
@@ -118,7 +143,7 @@ function main() {
     for (const w of warnings) console.log(`  ${w}`);
   }
 
-  const gatesPass = a11y.ok && tokens.ok && perf.ok && parity.ok;
+  const gatesPass = tbd.ok && a11y.ok && tokens.ok && perf.ok && slop.ok && parity.ok;
   const report = {
     feature,
     component: ir.component,
@@ -126,9 +151,11 @@ function main() {
     adapters: Object.fromEntries(Object.entries(results).map(([a, r]) => [a, r.file.replace(ROOT + '/', '')])),
     tokens: ir.tokens,
     guards: {
+      readiness: { ok: tbd.ok, issues: tbd.issues },
       a11y: { ok: a11y.ok, issues: a11y.issues },
       token: { ok: tokens.ok, issues: tokens.issues },
       perf: { ok: perf.ok, issues: perf.issues },
+      slop: { ok: slop.ok, issues: slop.issues },
       parity: { ok: parity.ok, issues: parity.issues },
     },
     warnings,
