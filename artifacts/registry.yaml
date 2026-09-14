@@ -55,7 +55,7 @@ artifacts:
   - id: prototype
     owner: ux-ui-engineer
     inputs: [design-spec, design-tokens, component-contracts]
-    schema: { status: implemented, path: "out/_reports" }
+    schema: { status: generated, path: "out/<adapter>/<feature>" }   # runtime output, not a static schema file
     status: implemented
     note: "Generated code per adapter under out/<adapter>/<feature>/ + e2e report."
 

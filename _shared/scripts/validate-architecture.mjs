@@ -58,6 +58,8 @@ for (const a of agentsDoc.agents) {
 for (const art of artifactsDoc.artifacts) {
   if (!agentIds.has(art.owner)) bad(`artifact ${art.id}: unknown owner "${art.owner}"`);
   for (const i of art.inputs ?? []) if (!artifactIds.has(i)) bad(`artifact ${art.id}: unknown input "${i}"`);
+  // Only static schema files are existence-checked; `generated` output paths
+  // (e.g. out/) do not exist until the pipeline runs, and `planned` are future.
   if (art.schema?.status === 'implemented' && !has(art.schema.path)) bad(`artifact ${art.id}: implemented schema missing (${art.schema.path})`);
 }
 
