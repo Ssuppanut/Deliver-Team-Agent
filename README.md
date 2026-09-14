@@ -99,9 +99,14 @@ Outputs land in `out/<adapter>/<feature>/` and a report in
 `out/_reports/<feature>.json`. `.github/workflows/ci.yml` runs `ci.mjs` on
 Node 20 and 22 for every push and PR.
 
-## The pipeline
+## The engine pipeline (implemented slice of the conditional workflow)
 
-`orchestrator` routes every request (and refuses out-of-scope categories), then:
+The primary workflow is a **conditional DAG** — see
+[`workflows/`](workflows/README.md); stages run only when their `run_if` holds,
+existing artifacts are reused, and skipping a stage is a correct outcome, not an
+error. The steps below are the linear engine slice that the code implements today
+(`ui-design → engineering → design-qa → handoff`); `orchestrator` routes every
+request (and refuses out-of-scope categories):
 
 ```
 01-discover → 02-research? → 03-architect → 04-design → 05-implement → 06-verify → 07-handoff
@@ -113,20 +118,42 @@ Node 20 and 22 for every push and PR.
 - **06-verify** adds dynamic a11y (axe-core), visual regression, bundle size,
   and Web Vitals.
 
-## Architecture — 29 skills, 5 layers
+## Primary architecture vs runtime surfaces
 
-See [`SKILLS_INDEX.yaml`](SKILLS_INDEX.yaml) for the full registry. Every skill
-description ends with a `Do NOT use it for X — that is the Y skill` line, so a
-request routes to the same skill every time.
+The repository's **primary architecture is the UX/UI Agent Team** — roles that
+compose reusable skills, a conditional workflow, structured artifacts, reusable
+guards, and a provider-agnostic AI layer. It is **not** a "29 skills / 5 layers"
+system; that layering describes one runtime surface, not the architecture.
 
-| layer | count | what |
-|-------|-------|------|
-| `_meta` | 3 | orchestrator, context-loader, critique |
-| `_guards` | 4 | a11y-guard, token-guard, perf-guard, slop-guard |
-| `workflow` | 7 | 01-discover … 07-handoff |
-| `design-system` | 4 | tokens-dtcg, tokens-sync, component-contract, storybook-authoring |
-| `adapters` | 6 | react, vue, svelte, react-native, swiftui, compose |
-| `knowledge` | 5 | design-principles, universal-design, pattern-library, interaction-laws, anti-slop |
+**Primary architecture**
+
+| dir | what |
+|-----|------|
+| [`agents/`](agents/) | 8 professional-role agents (`agents.yaml`) |
+| [`skills/`](skills/INDEX.yaml) | capability catalogue — the Skill **source of truth** |
+| [`workflows/`](workflows/) | the conditional, gated process (a DAG, not a linear pipeline) |
+| [`artifacts/`](artifacts/) | artifact registry + traceability |
+| [`guards/`](guards/) | reusable quality validations |
+| [`.ai/`](.ai/) | providers / runtimes / registry / policies / **AI Router** |
+
+**Runtime / implementation surfaces** (kept, not the architectural root)
+
+| dir | what |
+|-----|------|
+| `.claude/` | the **Claude-runtime skill surface** — 29 SKILL.md across `_meta`, `_guards`, `workflow`, `design-system`, `knowledge`, plus per-feature artifacts. Claude is **one provider/runtime**, not the root. |
+| `adapters/` | the 6 platform adapters over the shared `renderer-base.mjs` |
+| `design-system/` | the DTCG token build |
+| `_shared/` | schemas, scripts (spec-to-ir, e2e, guards runner, validators), templates, tokens |
+
+**Skill registries — one source of truth.** [`skills/INDEX.yaml`](skills/INDEX.yaml)
+is the capability-oriented **source of truth** (Skill = a reusable capability,
+composed by agents, with honest `implemented`/`planned` status pointing at real
+code). [`SKILLS_INDEX.yaml`](SKILLS_INDEX.yaml) is the **Claude-runtime
+compatibility surface** that lets Claude Code discover skills under `.claude/skills`;
+each of its descriptions ends with a `Do NOT use it for X — that is the Y skill`
+routing line. When they disagree, `skills/INDEX.yaml` wins;
+`validate-architecture` fails if a capability's declared implementation path is
+missing (obvious-drift detection).
 
 ## The visitor pattern
 
