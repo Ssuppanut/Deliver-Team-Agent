@@ -50,6 +50,10 @@ function main() {
   try { run('node _shared/scripts/validate-architecture.mjs'); }
   catch { console.error('FAIL: validate-architecture'); failures++; }
 
+  console.log('\n## 1c. conditional workflow scenarios (A–H)');
+  try { run('node _shared/scripts/workflow-eval.mjs'); }
+  catch { console.error('FAIL: workflow-eval'); failures++; }
+
   console.log('\n## 2. run every feature');
   const feats = discoverFeatures();
   for (const [name, info] of feats) {

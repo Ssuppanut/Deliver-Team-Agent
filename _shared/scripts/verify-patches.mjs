@@ -21,6 +21,8 @@ import { checkTbd } from '../../.claude/skills/_meta/critique/scripts/check-tbd.
 import { checkRefusal } from '../../.claude/skills/_meta/orchestrator/scripts/refusal.mjs';
 import { loadSpec } from './validate-schema.mjs';
 import { route, loadContext } from '../../.ai/router/route.mjs';
+import { loadWorkflow, evaluateWorkflow, runScenarios, lintWorkflow } from './workflow-eval.mjs';
+import { skillRegistryDrift } from './skill-registry.mjs';
 import { readFileSync, existsSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 
@@ -314,6 +316,51 @@ check('P24', 'ai-router: no fabricated selection when unconfigured; guardrails s
 // --- P25: architecture manifests are internally consistent -----------------
 check('P25', 'architecture: validate-architecture passes', () => {
   execSync('node _shared/scripts/validate-architecture.mjs', { cwd: ROOT, stdio: 'ignore' });
+});
+
+// --- P26: conditional workflow scenarios behave correctly ------------------
+check('P26', 'workflow: conditional scenarios (design-only valid, required-missing blocked)', () => {
+  const wf = loadWorkflow();
+  const byId = Object.fromEntries(runScenarios(wf).map((r) => [r.id, r]));
+  for (const r of Object.values(byId)) assert(r.ok, `scenario ${r.id} failed: ${r.problems.join('; ')}`);
+  // design-only: engineering + design-qa skipped, handoff still runs (not blocked)
+  const f = byId['F-design-only'];
+  assert(f.res.runs.includes('handoff') && !f.res.runs.includes('engineering'), 'design-only handoff must run without engineering');
+  assert(f.res.blocked.length === 0, 'design-only must not block');
+  // invalid required dependency is blocked
+  assert(byId['H-invalid-required'].res.blocked.length > 0, 'missing required artifact must block');
+});
+
+// --- P27: static workflow lint catches impossible deps, allows reuse -------
+check('P27', 'workflow-lint: flags required non-reuse skippable producer; allows reuse; real workflow clean', () => {
+  const ids = new Set(['x', 'y']);
+  const r1 = lintWorkflow({ stages: [
+    { id: 'p', run_if: 'flag', produces: ['x'] },
+    { id: 'c', run_if: 'always', consumes: [{ artifact: 'x', required: true, reuse: false }] },
+  ] }, { artifactIds: ids });
+  assert(r1.length === 1, 'R1 (required non-reuse, skippable producer) must be flagged');
+  const r4 = lintWorkflow({ stages: [{ id: 'c', consumes: [{ artifact: 'y', required: true }] }] }, { artifactIds: ids });
+  assert(r4.length === 1, 'R4 (required, no producer, not reuse) must be flagged');
+  const ok = lintWorkflow({ stages: [{ id: 'c', consumes: [{ artifact: 'y', required: true, reuse: true }] }] }, { artifactIds: ids });
+  assert(ok.length === 0, 'reuse:true supplies the artifact externally — must be allowed');
+  const real = evaluateWorkflow(loadWorkflow(), { flags: { ui_only: true, requirements_clear: true } });
+  assert(real.blocked.length === 0, 'a valid UI-only run must not block');
+});
+
+// --- P28: skill-registry drift detection (SKILLS_INDEX <-> on-disk <-> INDEX) --
+check('P28', 'skill-drift: flags both directions + dangling capability ref; clean matches', () => {
+  const surface = new Set(['a11y-guard', 'anti-slop']);
+  const disk = new Set(['a11y-guard', 'anti-slop']);
+  assert(skillRegistryDrift(surface, disk).length === 0, 'matching registries must be clean');
+  // surface lists a skill with no SKILL.md on disk
+  assert(skillRegistryDrift(new Set(['a11y-guard', 'ghost']), disk).some((p) => /ghost/.test(p)),
+    'must flag a SKILLS_INDEX skill missing from disk');
+  // disk has a skill missing from the surface
+  assert(skillRegistryDrift(new Set(['a11y-guard']), disk).some((p) => /anti-slop/.test(p)),
+    'must flag an on-disk skill missing from SKILLS_INDEX');
+  // a capability impl references a runtime skill that is not on disk
+  assert(skillRegistryDrift(surface, disk, [['accessibility-qa', 'renamed-guard']]).some((p) => /renamed-guard/.test(p)),
+    'must flag a capability impl referencing a runtime skill not on disk');
 });
 
 console.log('\n=== verify-patches ===');

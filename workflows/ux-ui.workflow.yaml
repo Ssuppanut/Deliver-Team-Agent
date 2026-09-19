@@ -1,83 +1,155 @@
-# UX/UI workflow — the process (WHEN/in what sequence), declarative and
-# conditional. Stages map to agents (WHO) and artifacts (WHAT). Gates are
-# configurable per project; `condition` allows skipping stages. This is NOT a
-# rigid single pipeline — a small UI-only task skips research; an existing design
-# system is reused rather than rebuilt.
-version: 1
+# UX/UI workflow — the process (WHEN / in what sequence), declarative and
+# CONDITIONAL. It is a DAG, not a rigid linear pipeline: only the stages a
+# project needs run, existing artifacts are reused, and unnecessary stages are
+# skipped. Skipping a stage is a correct outcome, never an error.
+#
+# Dependency semantics (see workflows/README.md for the full contract):
+#   run_if            boolean expression over context flags; `always` = unconditional.
+#   consumes[].required  true  -> stage cannot run unless the artifact is available.
+#                        false -> optional; its absence is valid.
+#   consumes[].reuse     true  -> may be supplied by an existing/previous artifact
+#                                 even when its producer stage is skipped (reuse/external).
+#   produces          artifacts the stage emits WHEN it runs.
+# An artifact is "available" if a run stage produced it, or it was supplied as an
+# existing input. A required artifact that is unavailable BLOCKS the stage.
+version: 2
 id: ux-ui
-description: UX/UI Agent Team delivery process, from request to handoff.
+description: UX/UI Agent Team delivery process — a conditional DAG from request to handoff.
 
-# Approval gates are opt-in per stage via `gate:`; a project profile below turns
-# them on/off. A gate that is enabled blocks progression until approved.
+# Context flags a project sets; stage run_if is evaluated against them.
+context_flags: [new_product, requirements_clear, research_requested, design_spec_provided, reuse_design_system, design_only, ui_only]
+
+# Approval gates are opt-in per stage via `gate:`; a project profile turns them
+# on/off. A gate that is enabled blocks progression until approved. Profiles set
+# gates only — which stages RUN is decided by run_if, not by the profile.
 profiles:
   full-product:   { gates: [requirement, research, ux, ui, design-system, prototype, handoff] }
   ui-only:        { gates: [ui, handoff] }
-  design-only:    { gates: [ui, design-system] }   # no engineering/QA of code
+  design-only:    { gates: [ui, design-system] }   # no engineering / code QA
   default:        { gates: [ui, handoff] }
 
 stages:
   - id: intake
     agent: orchestrator
+    run_if: always
     produces: [brief]
-    condition: always
 
   - id: product-strategy
     agent: product-ux-strategist
-    consumes: [brief]
+    run_if: "new_product or not requirements_clear"
+    consumes:
+      - { artifact: brief, required: true }
     produces: [product-spec]
     gate: requirement
-    condition: "new-product or unclear-requirements"
 
   - id: research
     agent: ux-researcher
-    consumes: [product-spec, brief]
+    run_if: "(new_product or research_requested) and not ui_only"   # skipped for UI-only
+    consumes:
+      - { artifact: product-spec, required: false, reuse: true }
+      - { artifact: brief, required: false }
     produces: [research-report]
     gate: research
-    condition: "new-product or research-requested"     # skipped for small UI-only tasks
 
   - id: ux-design
     agent: ux-designer
-    consumes: [research-report, product-spec]
+    run_if: "not design_spec_provided and not ui_only"              # skipped if a design-spec is supplied, or UI-only
+    consumes:
+      - { artifact: research-report, required: false, reuse: true }
+      - { artifact: product-spec, required: false, reuse: true }
     produces: [ux-spec]
     gate: ux
-    condition: "not design-spec-provided"
 
   - id: ui-design
     agent: ui-designer
-    consumes: [ux-spec]
+    run_if: "not design_spec_provided"                              # skipped when the design-spec already exists (reused)
+    consumes:
+      - { artifact: ux-spec, required: false, reuse: true }
     produces: [design-spec]
     gate: ui
-    condition: always
 
   - id: design-system
     agent: design-system
-    consumes: [design-spec]
+    run_if: "not reuse_design_system"                              # reuse an existing system instead of rebuilding
+    consumes:
+      - { artifact: design-spec, required: true, reuse: true }
     produces: [design-tokens, component-contracts]
     gate: design-system
-    condition: "not reuse-existing-design-system"      # reuse first, extend only if needed
 
   - id: engineering
     agent: ux-ui-engineer
-    consumes: [design-spec, design-tokens, component-contracts]
+    run_if: "not design_only"                                      # skipped for design-only output
+    consumes:
+      - { artifact: design-spec, required: true, reuse: true }
+      - { artifact: design-tokens, required: true, reuse: true }        # reused when design-system was skipped
+      - { artifact: component-contracts, required: true, reuse: true }
     produces: [prototype]
     gate: prototype
-    condition: "not design-only"                       # skipped when output is design-only
 
   - id: design-qa
     agent: design-qa
-    consumes: [prototype, design-spec]
+    run_if: "not design_only"                                      # runs whenever engineering ran; repeatable after changes
+    consumes:
+      - { artifact: prototype, required: true, reuse: true }
+      - { artifact: design-spec, required: true, reuse: true }
     produces: [design-qa-report]
-    condition: "engineering-ran"
-    repeatable: true                                   # re-runs after every change
+    repeatable: true
 
   - id: handoff
     agent: ux-ui-engineer
-    consumes: [prototype, design-qa-report]
+    run_if: always
+    consumes:
+      - { artifact: design-spec, required: true, reuse: true }          # always present (produced or reused)
+      - { artifact: prototype, required: false }                        # only for engineering-enabled projects
+      - { artifact: design-qa-report, required: false }                 # only when design-qa ran
     produces: [handoff]
     gate: handoff
-    condition: always
 
 # The existing engine (spec-to-ir -> 6 adapters -> guards -> parity) implements
 # the ui-design -> engineering -> design-qa slice today. Upstream stages
-# (strategy/research/ux) are defined extension points with owners and artifacts.
+# (strategy / research / ux) are defined extension points with owners and artifacts.
 implemented_slice: [ui-design, engineering, design-qa, handoff]
+
+# Deterministic scenarios evaluated by validate-architecture (workflow-eval.mjs).
+# `expect.runs` names stages that MUST run; `expect.skipped` stages that MUST be
+# skipped; `expect.blocked` whether a required artifact is legitimately missing.
+scenarios:
+  - id: A-full-product
+    flags: { new_product: true, requirements_clear: false, research_requested: true }
+    existing: []
+    expect: { runs: [intake, product-strategy, research, ux-design, ui-design, design-system, engineering, design-qa, handoff], blocked: false }
+
+  - id: B-existing-product-strategy
+    flags: { new_product: false, requirements_clear: true }
+    existing: [product-spec]
+    expect: { runs: [ui-design, engineering, design-qa, handoff], skipped: [product-strategy], blocked: false }
+
+  - id: C-no-research
+    flags: { new_product: false, requirements_clear: true, research_requested: false }
+    existing: [product-spec]
+    expect: { skipped: [research], blocked: false }
+
+  - id: D-ui-only
+    flags: { ui_only: true, requirements_clear: true }
+    existing: []
+    expect: { runs: [ui-design, engineering, design-qa, handoff], skipped: [product-strategy, research, ux-design], blocked: false }
+
+  - id: E-existing-design-system
+    flags: { reuse_design_system: true, requirements_clear: true, ui_only: true }
+    existing: [design-tokens, component-contracts]
+    expect: { runs: [engineering, handoff], skipped: [design-system], blocked: false }
+
+  - id: F-design-only
+    flags: { design_only: true, requirements_clear: true }
+    existing: []
+    expect: { runs: [ui-design, design-system, handoff], skipped: [engineering, design-qa], blocked: false }
+
+  - id: G-engineering
+    flags: { design_spec_provided: true, reuse_design_system: true, requirements_clear: true }
+    existing: [design-spec, design-tokens, component-contracts]
+    expect: { runs: [engineering, design-qa, handoff], skipped: [ux-design, ui-design, design-system], blocked: false }
+
+  - id: H-invalid-required
+    flags: { design_spec_provided: true, requirements_clear: true }   # design-spec claimed provided but NOT supplied
+    existing: []
+    expect: { blocked: true, blocked_artifact: design-spec }

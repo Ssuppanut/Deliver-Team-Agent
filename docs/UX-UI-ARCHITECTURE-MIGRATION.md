@@ -97,5 +97,7 @@ Each is independent and can land without touching the engine.
 ## 8. Testing
 
 `node _shared/scripts/ci.mjs` runs: token build → architecture validation →
-every feature (in-scope pass gates, refused categories refuse) → regression
-harness (25 checks, incl. P24 router honesty and P25 architecture consistency).
+conditional workflow scenarios (CASE A–H) → every feature (in-scope pass gates,
+refused categories refuse) → regression harness (27 checks, incl. P24 router
+honesty, P25 architecture consistency, and P26/P27 conditional-workflow
+semantics).

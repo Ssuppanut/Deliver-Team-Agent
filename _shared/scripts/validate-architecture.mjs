@@ -9,6 +9,8 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
 import { route, loadContext } from '../../.ai/router/route.mjs';
+import { runScenarios, lintWorkflow } from './workflow-eval.mjs';
+import { collectDiskSkills, collectSurfaceSkills, capabilityRuntimeRefs, skillRegistryDrift } from './skill-registry.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '../..');
@@ -63,11 +65,22 @@ for (const art of artifactsDoc.artifacts) {
   if (art.schema?.status === 'implemented' && !has(art.schema.path)) bad(`artifact ${art.id}: implemented schema missing (${art.schema.path})`);
 }
 
-// 5. workflow stages reference real agents + artifacts
+// 5. workflow stages reference real agents.
 for (const st of workflow.stages) {
   if (!agentIds.has(st.agent)) bad(`workflow stage ${st.id}: unknown agent "${st.agent}"`);
-  for (const a of [...(st.consumes ?? []), ...(st.produces ?? [])]) if (!artifactIds.has(a)) bad(`workflow stage ${st.id}: unknown artifact "${a}"`);
 }
+
+// 5b. conditional-dependency discipline (structured consumes, reuse rules,
+// producer/produced_by consistency) — shared with the workflow evaluator.
+for (const p of lintWorkflow(workflow, { artifactIds, artifacts: artifactsDoc.artifacts })) bad(p);
+
+// 5c. Skill-registry drift (P1.1): SKILLS_INDEX (runtime surface) and
+// skills/INDEX (capability impls) must both agree with the on-disk SKILL.md set.
+// Keyed on the runtime skill name. Allowlist: none.
+const diskSkills = collectDiskSkills(ROOT);
+const surfaceSkills = collectSurfaceSkills(y('SKILLS_INDEX.yaml'));
+const capRefs = capabilityRuntimeRefs([...capById.values()]);
+for (const p of skillRegistryDrift(surfaceSkills, diskSkills, capRefs)) bad(p);
 
 // 6. every agent appears in at least one workflow stage
 const stagedAgents = new Set(workflow.stages.map((s) => s.agent));
@@ -80,9 +93,13 @@ if (plan.status === 'selected' && !plan.selection) bad('router: selected without
 if (plan.status !== 'selected' && plan.selection) bad('router: fabricated a selection while not selected');
 if (!Array.isArray(plan.guardrails) || plan.guardrails.length === 0) bad('router: policy guardrails not surfaced in the plan');
 
+// 8. conditional workflow scenarios (A-H) evaluate to their expected outcomes.
+const scenarios = runScenarios(workflow);
+for (const r of scenarios) if (!r.ok) bad(`workflow scenario ${r.id}: ${r.problems.join('; ')}`);
+
 if (fail) {
   console.error(`validate-architecture: ${fail} problem(s)`);
   for (const p of problems) console.error(`  - ${p}`);
   process.exit(1);
 }
-console.log(`validate-architecture: OK (${agentIds.size} agents, ${capIds.size} capabilities, ${artifactIds.size} artifacts, ${workflow.stages.length} stages; router ${plan.status})`);
+console.log(`validate-architecture: OK (${agentIds.size} agents, ${capIds.size} capabilities, ${artifactIds.size} artifacts, ${workflow.stages.length} stages, ${scenarios.length} scenarios, ${diskSkills.size} skills; router ${plan.status})`);
