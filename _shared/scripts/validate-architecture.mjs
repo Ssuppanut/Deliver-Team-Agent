@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
 import { route, loadContext } from '../../.ai/router/route.mjs';
 import { runScenarios, lintWorkflow } from './workflow-eval.mjs';
+import { collectDiskSkills, collectSurfaceSkills, capabilityRuntimeRefs, skillRegistryDrift } from './skill-registry.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '../..');
@@ -73,6 +74,14 @@ for (const st of workflow.stages) {
 // producer/produced_by consistency) — shared with the workflow evaluator.
 for (const p of lintWorkflow(workflow, { artifactIds, artifacts: artifactsDoc.artifacts })) bad(p);
 
+// 5c. Skill-registry drift (P1.1): SKILLS_INDEX (runtime surface) and
+// skills/INDEX (capability impls) must both agree with the on-disk SKILL.md set.
+// Keyed on the runtime skill name. Allowlist: none.
+const diskSkills = collectDiskSkills(ROOT);
+const surfaceSkills = collectSurfaceSkills(y('SKILLS_INDEX.yaml'));
+const capRefs = capabilityRuntimeRefs([...capById.values()]);
+for (const p of skillRegistryDrift(surfaceSkills, diskSkills, capRefs)) bad(p);
+
 // 6. every agent appears in at least one workflow stage
 const stagedAgents = new Set(workflow.stages.map((s) => s.agent));
 for (const a of agentIds) if (!stagedAgents.has(a)) bad(`agent ${a}: not referenced by any workflow stage`);
@@ -93,4 +102,4 @@ if (fail) {
   for (const p of problems) console.error(`  - ${p}`);
   process.exit(1);
 }
-console.log(`validate-architecture: OK (${agentIds.size} agents, ${capIds.size} capabilities, ${artifactIds.size} artifacts, ${workflow.stages.length} stages, ${scenarios.length} scenarios; router ${plan.status})`);
+console.log(`validate-architecture: OK (${agentIds.size} agents, ${capIds.size} capabilities, ${artifactIds.size} artifacts, ${workflow.stages.length} stages, ${scenarios.length} scenarios, ${diskSkills.size} skills; router ${plan.status})`);

@@ -22,6 +22,7 @@ import { checkRefusal } from '../../.claude/skills/_meta/orchestrator/scripts/re
 import { loadSpec } from './validate-schema.mjs';
 import { route, loadContext } from '../../.ai/router/route.mjs';
 import { loadWorkflow, evaluateWorkflow, runScenarios, lintWorkflow } from './workflow-eval.mjs';
+import { skillRegistryDrift } from './skill-registry.mjs';
 import { readFileSync, existsSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 
@@ -344,6 +345,22 @@ check('P27', 'workflow-lint: flags required non-reuse skippable producer; allows
   assert(ok.length === 0, 'reuse:true supplies the artifact externally — must be allowed');
   const real = evaluateWorkflow(loadWorkflow(), { flags: { ui_only: true, requirements_clear: true } });
   assert(real.blocked.length === 0, 'a valid UI-only run must not block');
+});
+
+// --- P28: skill-registry drift detection (SKILLS_INDEX <-> on-disk <-> INDEX) --
+check('P28', 'skill-drift: flags both directions + dangling capability ref; clean matches', () => {
+  const surface = new Set(['a11y-guard', 'anti-slop']);
+  const disk = new Set(['a11y-guard', 'anti-slop']);
+  assert(skillRegistryDrift(surface, disk).length === 0, 'matching registries must be clean');
+  // surface lists a skill with no SKILL.md on disk
+  assert(skillRegistryDrift(new Set(['a11y-guard', 'ghost']), disk).some((p) => /ghost/.test(p)),
+    'must flag a SKILLS_INDEX skill missing from disk');
+  // disk has a skill missing from the surface
+  assert(skillRegistryDrift(new Set(['a11y-guard']), disk).some((p) => /anti-slop/.test(p)),
+    'must flag an on-disk skill missing from SKILLS_INDEX');
+  // a capability impl references a runtime skill that is not on disk
+  assert(skillRegistryDrift(surface, disk, [['accessibility-qa', 'renamed-guard']]).some((p) => /renamed-guard/.test(p)),
+    'must flag a capability impl referencing a runtime skill not on disk');
 });
 
 console.log('\n=== verify-patches ===');

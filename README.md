@@ -151,9 +151,12 @@ composed by agents, with honest `implemented`/`planned` status pointing at real
 code). [`SKILLS_INDEX.yaml`](SKILLS_INDEX.yaml) is the **Claude-runtime
 compatibility surface** that lets Claude Code discover skills under `.claude/skills`;
 each of its descriptions ends with a `Do NOT use it for X — that is the Y skill`
-routing line. When they disagree, `skills/INDEX.yaml` wins;
-`validate-architecture` fails if a capability's declared implementation path is
-missing (obvious-drift detection).
+routing line. When they disagree, `skills/INDEX.yaml` wins. **Drift detection**
+runs in `validate-architecture` (keyed on the on-disk `SKILL.md` set, the shared
+identity): it fails if `SKILLS_INDEX.yaml` lists a skill with no `SKILL.md` on
+disk, if an on-disk `SKILL.md` is missing from `SKILLS_INDEX.yaml`, or if a
+`skills/INDEX.yaml` capability's `impl` references a runtime skill that no longer
+exists — so an added, removed, or renamed skill cannot silently desync the two.
 
 ## The visitor pattern
 
