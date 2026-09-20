@@ -1,0 +1,18 @@
+component: Badge
+purpose: Label a status with a color treatment paired with a per-state icon.
+audience: End users of the product surface.
+platforms: [react, vue, svelte, react-native, swiftui, compose]
+variants: [default, success, warning, error]
+states: [default]
+interaction: variants
+a11y:
+  - "role=status so the label is exposed as a status region"
+  - "per-state icon so state survives grayscale / color-blindness (not color alone)"
+scope:
+  in:
+    - "4-way status enum driving background + foreground tokens"
+    - "per-state leading icon (default state is neutral, no icon)"
+    - "text label"
+  out:
+    - "per-instance icon on/off toggle (variant icon is bound to the state, not a free prop — logged as a gap)"
+    - "removable / dismissible badge (that is the Chip pattern, out of scope)"

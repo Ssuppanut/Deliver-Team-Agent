@@ -1,0 +1,28 @@
+component: Badge
+description: Status label with a 4-way variant and a per-state icon.
+category: display
+props:
+  - { name: label, type: string, required: true }
+  - { name: status, type: enum, required: true, values: [default, success, warning, error] }
+tokens:
+  - color.bg.muted
+  - color.fg.muted
+  - color.fg.default
+  - space.inset.sm
+  - radius.control
+root:
+  el: container
+  role: status
+  variant:
+    prop: status
+    cases:
+      default: { background: color.bg.muted,    color: color.fg.default }
+      success: { background: color.success.bg,  color: color.success.fg, icon: icon.success }
+      warning: { background: color.warning.bg,  color: color.warning.fg, icon: icon.warning }
+      error:   { background: color.danger.bg,   color: color.danger.fg,  icon: icon.error }
+  style:
+    padding: space.inset.sm
+    radius: radius.control
+  children:
+    - el: text
+      text: { kind: ref, value: label }

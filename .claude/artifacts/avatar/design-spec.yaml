@@ -1,0 +1,31 @@
+component: Avatar
+description: User image with an initials fallback (two independently-gated children).
+category: display
+props:
+  - { name: name, type: string, required: true }
+  - { name: src, type: string, required: false }
+  - { name: initials, type: string, required: false }
+tokens:
+  - color.bg.muted
+  - color.fg.muted
+  - radius.full
+root:
+  el: container
+  role: img
+  a11y:
+    label: { kind: ref, value: name }
+  style:
+    background: color.bg.muted
+    radius: radius.full
+  children:
+    - el: media
+      when: src
+      src: { kind: ref, value: src }
+      alt: { kind: ref, value: name }
+      style:
+        radius: radius.full
+    - el: text
+      when: initials
+      text: { kind: ref, value: initials }
+      style:
+        color: color.fg.muted

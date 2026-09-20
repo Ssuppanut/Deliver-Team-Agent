@@ -1,0 +1,10 @@
+component: Divider
+description: Horizontal separator rule drawn from a border-color token.
+category: layout
+tokens:
+  - color.border.default
+root:
+  el: container
+  role: separator
+  style:
+    background: color.border.default

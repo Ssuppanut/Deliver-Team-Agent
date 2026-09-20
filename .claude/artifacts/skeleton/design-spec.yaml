@@ -1,0 +1,14 @@
+component: Skeleton
+description: Static placeholder block filled with a muted surface token.
+category: feedback
+tokens:
+  - color.bg.muted
+  - space.inset.lg
+  - radius.control
+root:
+  el: container
+  role: presentation
+  style:
+    background: color.bg.muted
+    padding: space.inset.lg
+    radius: radius.control

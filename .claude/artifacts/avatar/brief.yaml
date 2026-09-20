@@ -1,0 +1,18 @@
+component: Avatar
+purpose: Show a user's picture, falling back to their initials when no image is available.
+audience: End users of the product surface.
+platforms: [react, vue, svelte, react-native, swiftui, compose]
+variants: []
+states: [with-image, initials-fallback]
+interaction: conditional
+a11y:
+  - "role=img with an accessible label carrying the person's name"
+  - "the image element carries alt text = name"
+scope:
+  in:
+    - "circular image bound to a src prop, rendered when src is present"
+    - "initials text rendered when an initials prop is present"
+  out:
+    - "TRUE automatic fallback (show initials WHEN src absent). The schema has no"
+    - "if/else and no `not` operator, so the two children are gated independently"
+    - "on separate props and the CALLER must supply exactly one — logged as a gap."
