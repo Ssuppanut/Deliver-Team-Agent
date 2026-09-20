@@ -1,104 +1,149 @@
-# Breadth Matrix — Batch 1 (leaf primitives)
+# Breadth Matrix — Batch 1 (leaf primitives) + Batch 1.1 (gate hardening)
 
 Six leaf-primitive components run end-to-end through the full pipeline
-(`spec → IR → 6 adapters → 5 gates → cross-adapter parity`) as a breadth test
-**and** a post-merge regression sanity check on `main`.
+(`spec → IR → 6 adapters → 5 gates → cross-adapter parity`).
 
-**Definition of PASS** (strict): all 6 adapters generate **and** the output is
-semantically correct on each **and** all 5 gates pass **and** cross-adapter
-parity holds. React compiling is *not* sufficient.
+**Batch 1** surfaced 2 PASS / 4 PARTIAL / 0 FAIL — and, more importantly, two
+defects that passed **every gate** while the output was wrong (semantic
+false-green). **Batch 1.1** fixed both defects *and* hardened the two gates that
+let them through, then proved the hardened gates actually fire.
+
+**Definition of PASS** (strict): all 6 adapters generate, all 5 gates pass, and
+cross-adapter parity holds — under the **hardened** gates (a11y output tier +
+the F-1 parity lint), not just the IR-level ones. A row is PASS only if it
+passes those; schema-expressiveness gaps that remain (F-3/F-4/F-5/F-7) are
+tracked separately below and do **not** vanish because a row is PASS.
 
 Runner: `node _shared/scripts/e2e-multi.mjs --feature <name>` · specs under
-`.claude/artifacts/<name>/` (schema + tokens reused, nothing hardcoded).
+`.claude/artifacts/<name>/`. Cell legend: `✓` correct · `⚠` correct with a
+**documented divergence warning** (a platform that cannot express a trait says
+so — never a silent drop).
 
-Cell legend: `✓` correct · `⚠` correct but with a documented native limitation
-(surfaced as a warning) · `✗` generates but the output is **wrong** on that
-adapter.
-
-| Component | React | Vue | Svelte | RN | SwiftUI | Compose | Gates | Outcome | Notes |
+| Component | React | Vue | Svelte | RN | SwiftUI | Compose | Gates (hardened) | Outcome | Notes |
 |---|---|---|---|---|---|---|---|---|---|
-| **Button** | ✓ | ✓ | ✓ | ✓ | ✗ | ⚠ | 5/5 pass | **PARTIAL** | **F-1**: SwiftUI renders a *ref* label + leading icon as the literal string `"label"` (the prop name), not the bound variable. `variant` bg/fg + leading icon correct on the other five. Compose emits a documented "color variant not cascaded" warning. Capability gap: no `disabled` binding (**F-5**). |
-| **Badge** | ✓ | ✓ | ✓ | ✓ | ✓ | ⚠ | 5/5 pass | **PASS** | 4-way status variant + per-state icon; state never by color alone (slop-guard clean). Native adapters drop the `role=status` region (**F-2**) but the visible label + icon carry the status, so intent holds. Compose color-cascade warning. Capability gap: per-instance icon on/off toggle (**F-6**). |
-| **Avatar** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 5/5 pass | **PARTIAL** | Each adapter's conditional rendering is correct (`{src && …}` / `if let src` / `if (src != null)`). But **true** fallback ("initials *when* no image") is **not expressible** — the schema has no if/else and no `not`, so the two children are gated on separate props and the **caller** must supply exactly one (**F-3**). Native drops the `img` trait but the accessible name (`aria-label=name`) survives. |
-| **Divider** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 5/5 pass | **PARTIAL** | Renders a border-colored rule on all six. **Orientation (horizontal/vertical) is not expressible** — no `aria-orientation`, no width/height style slot (**F-4**). `role=separator` is dropped on the three native adapters (**F-2**). |
-| **Spinner** | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | 5/5 pass | **PARTIAL** | Web emits `role=status` + `aria-live=polite`. **All three native adapters drop both** (**F-2**) — the busy state is announced on no native platform, and "Loading" degrades to inert static text with no live-region fallback. Capability gaps: size variants, `aria-busy`, the spin animation itself (**F-7**). |
-| **Skeleton** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 5/5 pass | **PASS** | Padded, rounded, muted placeholder block on all six. `role=presentation` is a correct no-op on native (a plain container is already decorative). Capability gap: shimmer/pulse animation (**F-8**, out of engine scope by design). |
+| **Button** | ✓ | ✓ | ✓ | ✓ | ✓ | ⚠ | 5/5 pass | **PASS** | **F-1 fixed**: SwiftUI now binds the ref label as a variable (`Label(label, …)`), verified by the new parity lint. Compose keeps its documented color-cascade warning. Logged gap: no `disabled` binding (**F-5**). |
+| **Badge** | ✓ | ✓ | ✓ | ⚠ | ⚠ | ⚠ | 5/5 pass | **PASS** | 4-way status variant + per-state icon; state never by color alone. Native adapters now emit a documented divergence warning for `role=status` (was a silent drop). Logged gap: per-instance icon toggle (**F-6**). |
+| **Avatar** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 5/5 pass | **PASS** | `role=img` now maps to real native traits (`accessibilityRole="image"` / `.isImage` / `role = Role.Image`). Passes the hardened gates. Logged schema gap (**F-3**, unfixed): true "image *else* initials" fallback still needs `if/else`/`not`; today the caller supplies exactly one of `src`/`initials`. |
+| **Divider** | ✓ | ✓ | ✓ | ⚠ | ⚠ | ⚠ | 5/5 pass | **PASS** | Renders a border-colored rule on all six; `role=separator` now surfaced as a documented divergence warning on native (was silent). Logged schema gap (**F-4**, unfixed): orientation (vertical) is not expressible — no `aria-orientation`, no dimension slot. |
+| **Spinner** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 5/5 pass | **PASS** | **F-2 fixed**: all three native adapters now emit the live-region trait (`accessibilityLiveRegion="polite"` + `accessibilityState={{busy}}` / `.updatesFrequently` / `liveRegion = LiveRegionMode.Polite`); `role=status` is a documented divergence where no native role exists. Logged schema gaps (**F-7**, unfixed): size variants and the spin animation. |
+| **Skeleton** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 5/5 pass | **PASS** | Padded, rounded, muted placeholder block on all six. `role=presentation` is a correct no-op on native. Logged gap: shimmer/pulse animation (**F-8**, out of engine scope by design). |
 
-**Tally: 2 PASS · 4 PARTIAL · 0 REFUSE · 0 FAIL.**
-Engine generates all 6 components across all 6 adapters with every gate green;
-`rm -rf out/ && node _shared/scripts/ci.mjs` → exit 0 (see below). No FAIL —
-but four components are PARTIAL, and **two defects are gate-invisible**, which is
-the headline result of this batch.
-
----
-
-## Why gates stayed green while output was wrong
-
-The two most serious findings (F-1, F-2) pass **every** gate. This is the point
-of a breadth test:
-
-- **a11y-guard** inspects the **IR**, not per-adapter output — so an `aria-live`
-  region that exists in the spec but is dropped by a native adapter is invisible
-  to it.
-- **cross-adapter parity** is **structural** — it checks that each prop *name*
-  textually appears in the generated source. SwiftUI's `Label("label", …)`
-  contains the substring `label`, so parity passes even though the value is
-  wrong. Parity does not compare *semantics* across adapters.
-
-Neither gate is broken; each has a scope, and these defects fall between them.
+**Tally after Batch 1.1: 6 PASS · 0 PARTIAL · 0 FAIL.**
+`rm -rf out/ && node _shared/scripts/ci.mjs` → exit 0. All 6 components generate
+across all 6 adapters, every (hardened) gate green; every native adapter that
+cannot express a role now says so with a divergence warning instead of dropping
+it. The four rows moved from PARTIAL to PASS **only** because they now pass the
+hardened gates — the remaining schema-expressiveness gaps (F-3/F-4/F-5/F-7) are
+still open and listed under "Still logged, unfixed."
 
 ---
 
-## Findings
+## Batch 1.1 — what changed
 
-Severity: **Critical** (ships broken / unsafe) · **Serious** (wrong output or
-lost a11y contract on a platform) · **Moderate** (intent only approximated) ·
-**Minor** (advisory / cosmetic). Not fixed inline — this batch measures.
+### The two defects (both were gate-invisible in Batch 1)
 
-### F-1 · Serious · SwiftUI renders a ref action-label as a literal — adapter bug
-- **Where:** `adapters/swiftui/generate.mjs`, `visitAction`, the icon+label branch.
-- **What:** `Label(${node.label ? JSON.stringify(String(node.label.value)) : '""'}, systemImage: …)` stringifies `node.label.value` unconditionally, ignoring `node.label.kind`. For a **literal** (e.g. Alert's `"Dismiss"`) it is correct; for a **ref** it emits the prop *name* as a string literal → a SwiftUI Button with a dynamic label + leading icon shows the word "label" instead of the bound value.
-- **Blast radius:** any `action` with a **ref/expr** label **and** an `icon`. Alert never hit it (literal dismiss label), so it stayed latent until Button exercised a ref label + icon.
-- **Why gates missed it:** parity is prop-*name* presence; `"label"` appears in the output. All 5 gates pass.
-- **Proposed one-line fix (not applied):** reuse the existing `plain()` helper —
-  `Label(${this.plain(node.label)}, systemImage: "${this.icon(node.icon)}")` —
-  which yields `Label(label, …)` for a ref and `Label("Dismiss", …)` for a literal
-  (`Label(_:systemImage:)` accepts a `StringProtocol` title). Add a regression
-  check (ref-label + icon action) before applying.
+**F-1 · Serious · SwiftUI ref-label stringified as a literal — FIXED.**
+`adapters/swiftui/generate.mjs` `visitAction` stringified `node.label.value`
+unconditionally, so a **ref** label + leading icon rendered the prop *name*
+(`Label("label", …)`) instead of the bound variable. One-line fix: route the
+title through the existing `plain()` helper, which respects `label.kind` →
+`Label(label, …)` for a ref, `Label("Dismiss", …)` for a literal. The other five
+adapters were already correct.
 
-### F-2 · Serious (Spinner) / Moderate (Divider, Badge) · Native adapters drop container `role` + `aria-live` — capability gap
-- **Where:** `adapters/react-native`, `adapters/swiftui`, `adapters/compose` — `visitContainer` / a11y helpers map only `a11y.label` (→ `accessibilityLabel` / `.accessibilityLabel` / `contentDescription`). `node.role` and `a11y.live` are **not** mapped to any native trait.
-- **What:** `role=status`, `role=separator`, `role=img`, and `aria-live=polite` are emitted on web (React/Vue/Svelte) but silently dropped on all three native adapters. Spinner is worst hit: its entire a11y contract is the live status region, so on RN/SwiftUI/Compose nothing announces the busy state.
-- **Why gates missed it:** a11y-guard runs on the IR (which has the role/live); parity is structural. All 5 gates pass.
-- **Direction (not applied):** map `node.role`/`a11y.live` to native affordances — SwiftUI `.accessibilityAddTraits`/`.accessibilityAddTraits(.updatesFrequently)`, Compose `Modifier.semantics { role = …; liveRegion = … }`, RN `accessibilityRole`/`accessibilityLiveRegion` — with an honest warning where a role has no native equivalent. This is an adapter enhancement, deliberately **not** built in this batch.
+**F-2 · Serious/Moderate · Native adapters dropped `role` + `aria-live` — FIXED.**
+RN / SwiftUI / Compose mapped only `a11y.label`. They now map `role` and
+`a11y.live` to the platform-correct trait:
 
-### F-3 · Moderate · No true conditional fallback (`if/else` / `not`) — schema gap
-- **Where:** `_shared/schemas/design-spec.schema.yaml` — `when` gates a node on a prop's truthiness; there is no `else`, no negation.
-- **What:** "Show image, **else** initials" cannot be expressed. Avatar approximates it with two independently-gated children (`when: src`, `when: initials`), pushing the branch to the caller (must pass exactly one). Passing both renders both; passing neither renders an empty avatar.
-- **Not an adapter bug** — every adapter faithfully renders what the spec says; the spec cannot say what the component means.
+- **RN:** `accessibilityRole` (img→`image`, alert→`alert`), `accessibilityLiveRegion`, and `accessibilityState={{busy:true}}` for a live status region (Spinner).
+- **SwiftUI:** `.accessibilityAddTraits(.isImage / .isButton / .isHeader)`, and `.updatesFrequently` for a live region.
+- **Compose:** `Modifier.semantics { role = Role.Image; liveRegion = LiveRegionMode.Polite }` (imports added only when used).
 
-### F-4 · Moderate · No orientation / dimension axis — schema gap
-- Divider cannot express horizontal vs. vertical: no `aria-orientation` field and no width/height style slot (style slots map to color/space/radius tokens only). Only a horizontal rule is expressible.
+Where a platform genuinely has no trait for a role (e.g. `status`/`separator`),
+the adapter now emits a **documented divergence warning** — never a silent drop.
+This also closed the same latent drop on the form-field error text (`role=alert`
++ `aria-live`) on all three native adapters.
 
-### F-5 · Moderate · No `disabled` (boolean attribute) binding — schema gap
-- An `action` has no way to bind a boolean prop to a `disabled`/`aria-disabled` attribute. Adding a `disabled` prop that never reaches output would also break the structural parity gate, so Button omits it. Button's disabled state is undeliverable today.
+### The two gate blind spots (closed)
 
-### F-6 · Minor · Variant icon is bound to the state, not a free toggle — schema gap
-- Badge's per-state icon comes from the variant `cases`; there is no boolean prop to toggle the icon per instance independently of the state.
+**a11y-guard — output tier (additive).** `checkA11y(ir, results)` now, when the
+IR declares `role`/`aria-live`, requires each adapter's **generated source** to
+carry the platform-correct trait **or** a divergence warning naming that role.
+IR-declared-but-output-missing now FAILS. The IR-only call (`checkA11y(ir)`) is
+unchanged and still used by P5 — the new tier is purely additive.
 
-### F-7 · Minor · Spinner size / `aria-busy` / animation — schema gap
-- No size style slot (sm/md/lg), no `aria-busy` in the a11y contract (only `live`), and the engine emits static structure — no keyframes/animation. All out of the current engine's expressive range.
+**parity — narrow F-1 lint.** `checkParity` now flags a prop consumed as a ref
+that is emitted as a string literal equal to its own name (the F-1 signature).
+It is language-aware (JSX/native `"name"` is a literal; Vue `:x="name"` is a
+binding, so Vue is checked only for a mustache-stringified ref). This is a
+**targeted signature check**, deliberately *not* a full semantic cross-language
+comparison.
 
-### F-8 · Minor · No animation primitive — by design
-- Skeleton shimmer / Spinner spin require animation the engine intentionally does not emit (static structure only). Recorded for completeness, not a defect.
+### Fired-gate proofs (revert → RED → restore → GREEN)
+
+A gate we have never seen go red is a gate we cannot trust.
+
+**F-1 — parity fires on SwiftUI Button:**
+```
+### F-1 REVERTED — Button pipeline ###
+  parity       FAIL  (1 issues)
+  [serious] parity/parity: swiftui: ref prop "label" is emitted as the string literal "label" ...
+  gates: FAIL
+  swiftui output: Label("label", systemImage: "checkmark")
+
+### F-1 RESTORED — Button pipeline ###
+  parity       PASS  (0 issues)
+  gates: PASS
+  swiftui output: Label(label, systemImage: "checkmark")
+```
+
+**F-2 — a11y-guard fires on Spinner (all three native adapters):**
+```
+### F-2 REVERTED (native role/live dropped) — Spinner pipeline ###
+  a11y-guard   FAIL  (6 issues)
+  [serious] a11y/a11y-output-live: react-native: IR declares aria-live="polite" but the output has no live-region trait and no divergence warning
+  [serious] a11y/a11y-output-role: react-native: IR declares role="status" ... neither the platform trait nor a divergence warning
+  [serious] a11y/a11y-output-live: swiftui:  ... no live-region trait ...
+  [serious] a11y/a11y-output-role: swiftui:  ... neither the platform trait nor a divergence warning
+  [serious] a11y/a11y-output-live: compose:  ... no live-region trait ...
+  [serious] a11y/a11y-output-role: compose:  ... neither the platform trait nor a divergence warning
+  gates: FAIL     (native live traits present: 0 / 0 / 0)
+
+### F-2 RESTORED — Spinner pipeline ###
+  a11y-guard   PASS  (0 issues)
+  gates: PASS     (native live traits present: 1 / 1 / 2)
+```
+
+### Regression pins
+
+- **P29** — SwiftUI + parity: a ref label binds the variable, never a self-named
+  literal (pins F-1 at the adapter level *and* asserts parity flags the signature).
+- **P30** — a11y-guard output tier: native adapters must express IR `role`/`live`,
+  not drop them (asserts the guard passes on the real output, FAILS on a
+  simulated silent drop, and that the IR-only call is unchanged).
+
+`verify-patches` is now **30 checks, all passing** (was 28).
 
 ---
 
-## Regression sanity (clean-state CI)
+## Still logged, unfixed (schema-expressiveness gaps — need their own design pass)
 
-`rm -rf out/ && node _shared/scripts/ci.mjs` — result pasted in the batch report.
-Every existing feature plus the 6 new specs build, all gates green, exit 0. The
-two gate-invisible defects (F-1, F-2) are **not** caught by CI for the reasons in
-"Why gates stayed green" — closing that blind spot (a semantic-parity check, or
-per-adapter a11y-output assertions) is a candidate follow-up, not part of this
-measurement batch.
+These are **not** adapter bugs and are out of scope for this batch. They are
+carried forward so they are not lost:
+
+- **F-3 · Moderate · No conditional fallback (`if/else` / `not`).** Avatar's
+  "image *else* initials" is approximated by two independently-`when`-gated
+  children; the caller must supply exactly one. Needs a schema design pass.
+- **F-4 · Moderate · No orientation / dimension axis.** Divider cannot express
+  vertical; no `aria-orientation`, no width/height style slot.
+- **F-5 · Moderate · No `disabled` (boolean attribute) binding.** An `action`
+  cannot bind a boolean prop to `disabled`/`aria-disabled`.
+- **F-7 · Minor · Spinner size + animation.** No size style slot; the engine
+  emits static structure (no keyframes). (`aria-busy` itself is now delivered on
+  web via `role=status`+`aria-live` and on native via the live-region/busy
+  traits from the F-2 fix.)
+- **F-8 · Minor · No animation primitive (by design).** Skeleton shimmer /
+  Spinner spin require animation the engine intentionally does not emit.
+
+Scope for Batch 1.1 was strictly the two false-greens and the two gate blind
+spots. No new components, no schema/fallback work, no new or removed gates, and
+no changes to agents / skills / workflow / AI router.

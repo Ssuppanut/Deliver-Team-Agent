@@ -48,11 +48,30 @@ class RNRenderer extends RendererBase {
       .join(', ');
     return `{({ ${cases} })[${v.prop}]}`;
   }
+  /** ARIA-style role -> React Native accessibilityRole (undefined where none exists). */
+  rnRole(role) {
+    return { img: 'image', alert: 'alert', button: 'button', link: 'link', header: 'header', presentation: 'none', none: 'none' }[role];
+  }
+  /** accessibilityLabel + role + live + busy — never a silent drop of role/live. */
+  a11yProps(node) {
+    const out = [];
+    if (node.a11y?.label) out.push(` accessibilityLabel={${this.attr(node.a11y.label)}}`);
+    if (node.role) {
+      const r = this.rnRole(node.role);
+      if (r) out.push(` accessibilityRole="${r}"`);
+      else if (!['presentation', 'none'].includes(node.role)) {
+        this.warnings.push(`a11y: role "${node.role}" has no React Native accessibilityRole; conveyed via live region / label where present (documented divergence)`);
+      }
+    }
+    if (node.a11y?.live) out.push(` accessibilityLiveRegion="${node.a11y.live === 'assertive' ? 'assertive' : 'polite'}"`);
+    // A live status region is a busy/updating region (e.g. Spinner).
+    if (node.role === 'status' && node.a11y?.live) out.push(` accessibilityState={{ busy: true }}`);
+    return out.join('');
+  }
   visitContainer(node, children) {
-    const label = node.a11y?.label ? ` accessibilityLabel={${this.attr(node.a11y.label)}}` : '';
     const lead = this.variantIcon(node);
     const inner = lead ? `${lead}\n${children}` : children;
-    return `<View accessible${label}${this.style(node)}>\n${indent(inner, 2)}\n</View>`;
+    return `<View accessible${this.a11yProps(node)}${this.style(node)}>\n${indent(inner, 2)}\n</View>`;
   }
   visitMedia(node) {
     const label = node.alt ? ` accessibilityLabel={${this.attr(node.alt)}}` : '';
@@ -62,7 +81,7 @@ class RNRenderer extends RendererBase {
     return `<Text accessibilityRole="header"${this.style(node)}>${node.text ? this.interp(node.text) : children}</Text>`;
   }
   visitText(node) {
-    return `<Text${this.style(node)}>${this.interp(node.text)}</Text>`;
+    return `<Text${this.a11yProps(node)}${this.style(node)}>${this.interp(node.text)}</Text>`;
   }
   visitAction(node) {
     const press = node.onEvent ? ` onPress={${node.onEvent}}` : '';

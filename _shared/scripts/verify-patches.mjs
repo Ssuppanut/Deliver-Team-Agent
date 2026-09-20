@@ -23,6 +23,7 @@ import { loadSpec } from './validate-schema.mjs';
 import { route, loadContext } from '../../.ai/router/route.mjs';
 import { loadWorkflow, evaluateWorkflow, runScenarios, lintWorkflow } from './workflow-eval.mjs';
 import { skillRegistryDrift } from './skill-registry.mjs';
+import { checkParity } from './e2e-multi.mjs';
 import { readFileSync, existsSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 
@@ -33,6 +34,8 @@ const PRODUCT = EX('product-card.spec.yaml');
 const LIST = EX('user-card-list.spec.yaml');
 const ALERT = resolve(ROOT, '.claude/artifacts/alert/design-spec.yaml');
 const FORM = resolve(ROOT, '.claude/artifacts/form-field/design-spec.yaml');
+const BUTTON = resolve(ROOT, '.claude/artifacts/button/design-spec.yaml');
+const SPINNER = resolve(ROOT, '.claude/artifacts/spinner/design-spec.yaml');
 
 let pass = 0, fail = 0;
 const results = [];
@@ -361,6 +364,43 @@ check('P28', 'skill-drift: flags both directions + dangling capability ref; clea
   // a capability impl references a runtime skill that is not on disk
   assert(skillRegistryDrift(surface, disk, [['accessibility-qa', 'renamed-guard']]).some((p) => /renamed-guard/.test(p)),
     'must flag a capability impl referencing a runtime skill not on disk');
+});
+
+// --- P29: F-1 — a ref label must bind the variable, never stringify its name --
+check('P29', 'swiftui + parity: a ref label binds the variable, never a self-named literal', () => {
+  // Adapter level: the SwiftUI icon+label branch must respect the ref kind.
+  const { code } = generateSwiftUI(BUTTON, '_verify');
+  assert(/Label\(label,/.test(code), 'swiftui must bind the ref label as a variable');
+  assert(!/Label\("label"/.test(code), 'swiftui regressed to stringifying the ref label as its own name');
+  // Gate level: parity must flag the F-1 signature (ref emitted as its own-name literal).
+  const ir = specToIrFromFile(BUTTON);
+  const good = {
+    react: generateReact(BUTTON, '_verify'), vue: generateVue(BUTTON, '_verify'),
+    svelte: generateSvelte(BUTTON, '_verify'), 'react-native': generateReactNative(BUTTON, '_verify'),
+    swiftui: generateSwiftUI(BUTTON, '_verify'), compose: generateCompose(BUTTON, '_verify'),
+  };
+  assert(checkParity(good, ir).ok, 'correctly bound refs must pass parity');
+  const bad = { ...good, swiftui: { component: 'Button', file: 'x', code: 'Label("label", systemImage: "checkmark")' } };
+  const r = checkParity(bad, ir);
+  assert(!r.ok && r.issues.some((i) => /string literal "label"/.test(i)), 'parity must flag a ref emitted as its own-name literal');
+});
+
+// --- P30: F-2 — IR-declared role/live must appear in each adapter's OUTPUT -----
+check('P30', 'a11y-guard (output tier): native adapters must express IR role/live, not drop them', () => {
+  const ir = specToIrFromFile(SPINNER);
+  const good = {
+    react: generateReact(SPINNER, '_verify'), vue: generateVue(SPINNER, '_verify'),
+    svelte: generateSvelte(SPINNER, '_verify'), 'react-native': generateReactNative(SPINNER, '_verify'),
+    swiftui: generateSwiftUI(SPINNER, '_verify'), compose: generateCompose(SPINNER, '_verify'),
+  };
+  assert(checkA11y(ir, good).ok, 'spinner with mapped native role/live must pass the output tier');
+  // Simulate the F-2 silent drop: a native adapter that maps only the label.
+  const reverted = { ...good, 'react-native': { component: 'Spinner', file: 'x', code: '<View accessible><Text>Loading</Text></View>', warnings: [] } };
+  const bad = checkA11y(ir, reverted);
+  assert(!bad.ok, 'dropping the native live-region trait must FAIL the hardened a11y-guard');
+  assert(bad.issues.some((i) => i.rule === 'a11y-output-live'), 'expected an a11y-output-live finding');
+  // The IR-only call (no results) must still behave exactly as before (backward compatible).
+  assert(checkA11y(ir).ok, 'IR-only a11y check must not regress');
 });
 
 console.log('\n=== verify-patches ===');
