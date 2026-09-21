@@ -1,0 +1,17 @@
+component: Spinner
+purpose: Indicate an in-progress, indeterminate operation.
+audience: End users of the product surface.
+platforms: [react, vue, svelte, react-native, swiftui, compose]
+variants: []
+states: [busy]
+interaction: static
+a11y:
+  - "role=status with aria-live=polite so AT announces the busy state"
+  - "a visible/announced 'Loading' label (no icon-only spinner without a name)"
+scope:
+  in:
+    - "a status region carrying a Loading label"
+  out:
+    - "size variants (sm/md/lg) — no size/dimension style slot exists — logged as a gap."
+    - "aria-busy — the a11y contract exposes live but not busy — logged as a gap."
+    - "the spin animation itself — the engine emits static structure, no keyframes — logged as a gap."

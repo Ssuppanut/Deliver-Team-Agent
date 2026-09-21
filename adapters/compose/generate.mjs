@@ -61,11 +61,34 @@ class ComposeRenderer extends RendererBase {
   colorArg(node) {
     return node.style?.color ? `color = ${mapToken(node.style.color)}` : '';
   }
-  semantics(node) {
-    if (!node.a11y?.label) return '';
-    const l = node.a11y.label;
-    const v = l.kind === 'literal' ? JSON.stringify(String(l.value)) : l.value;
-    return `.semantics { contentDescription = ${v} }`;
+  /** ARIA-style role -> Compose Role (undefined where the enum has none). */
+  composeRole(role) {
+    return { img: 'Role.Image', button: 'Role.Button', checkbox: 'Role.Checkbox', tab: 'Role.Tab' }[role];
+  }
+  /** contentDescription + role + liveRegion — never a silent drop of role/live. */
+  a11ySemantics(node) {
+    const props = [];
+    if (node.a11y?.label) {
+      const l = node.a11y.label;
+      props.push(`contentDescription = ${l.kind === 'literal' ? JSON.stringify(String(l.value)) : l.value}`);
+    }
+    if (node.role) {
+      const r = this.composeRole(node.role);
+      if (r) props.push(`role = ${r}`);
+      else if (!['presentation', 'none'].includes(node.role)) {
+        this.warnings.push(`a11y: role "${node.role}" has no Compose Role; conveyed via liveRegion / contentDescription where present (documented divergence)`);
+      }
+    }
+    if (node.a11y?.live) props.push(`liveRegion = LiveRegionMode.${node.a11y.live === 'assertive' ? 'Assertive' : 'Polite'}`);
+    if (!props.length) return '';
+    return `.semantics { ${props.join('; ')} }`;
+  }
+  /** Combine the style Modifier chain with an a11y semantics block for leaf elements. */
+  _a11yMod(node) {
+    const mod = this.modifier(node);
+    const sem = this.a11ySemantics(node);
+    if (!mod && !sem) return '';
+    return `, modifier = ${mod || 'Modifier'}${sem}`;
   }
   variantIcon(node) {
     const v = this.variantData(node);
@@ -77,7 +100,11 @@ class ComposeRenderer extends RendererBase {
   }
   visitContainer(node, children) {
     const mod = this.modifier(node);
-    const modArg = mod ? `modifier = ${mod}${this.semantics(node)}` : (node.a11y?.label ? `modifier = Modifier${this.semantics(node)}` : '');
+    const sem = this.a11ySemantics(node);
+    let modArg = '';
+    if (mod && sem) modArg = `modifier = ${mod}${sem}`;
+    else if (mod) modArg = `modifier = ${mod}`;
+    else if (sem) modArg = `modifier = Modifier${sem}`;
     const lead = this.variantIcon(node);
     const inner = lead ? `${lead}\n${children}` : children;
     return `Column(${modArg}) {\n${indent(inner, 2)}\n}`;
@@ -93,7 +120,7 @@ class ComposeRenderer extends RendererBase {
     return `Text(text = ${this.strExpr(node.text)}, style = MaterialTheme.typography.titleMedium${this._colorTail(node)}${this._mod(node)})`;
   }
   visitText(node) {
-    return `Text(text = ${this.strExpr(node.text)}${this._colorTail(node)}${this._mod(node)})`;
+    return `Text(text = ${this.strExpr(node.text)}${this._colorTail(node)}${this._a11yMod(node)})`;
   }
   _colorTail(node) {
     const c = this.colorArg(node);
@@ -161,6 +188,10 @@ class ComposeRenderer extends RendererBase {
     const iconImport = this.usedIcons.size
       ? `import androidx.compose.material.icons.Icons\nimport androidx.compose.material.icons.filled.*\n`
       : '';
+    // Semantics extras are imported only when the body actually emits them.
+    const semExtra =
+      (/\brole = Role\./.test(root) ? `import androidx.compose.ui.semantics.role\nimport androidx.compose.ui.semantics.Role\n` : '')
+      + (/\bliveRegion = LiveRegionMode\./.test(root) ? `import androidx.compose.ui.semantics.liveRegion\nimport androidx.compose.ui.semantics.LiveRegionMode\n` : '');
     return `import androidx.compose.foundation.layout.*\n`
       + `import androidx.compose.foundation.background\n`
       + `import androidx.compose.foundation.shape.RoundedCornerShape\n`
@@ -171,6 +202,7 @@ class ComposeRenderer extends RendererBase {
       + `import androidx.compose.ui.graphics.Color\n`
       + `import androidx.compose.ui.semantics.contentDescription\n`
       + `import androidx.compose.ui.semantics.semantics\n`
+      + semExtra
       + `import androidx.compose.foundation.clickable\n`
       + `import coil.compose.AsyncImage\n`
       + `${iconImport}import designtokens.DesignTokens\n\n`

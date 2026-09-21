@@ -61,16 +61,46 @@ function resolveSpec({ feature, spec }) {
   throw new Error(`no spec found for feature "${feature}". Looked in:\n  ${candidates.join('\n  ')}`);
 }
 
-function checkParity(results, ir) {
+/** Prop names that are consumed as a `{kind:'ref'}` value somewhere in the IR. */
+function refUsedProps(ir) {
+  const propNames = new Set(ir.props.map((p) => p.name));
+  const used = new Set();
+  const consider = (vr) => { if (vr && vr.kind === 'ref' && propNames.has(vr.value)) used.add(vr.value); };
+  const walk = (n) => {
+    for (const k of ['text', 'label', 'src', 'alt', 'href']) consider(n[k]);
+    consider(n.a11y?.label);
+    (n.children ?? []).forEach(walk);
+  };
+  walk(ir.root);
+  return used;
+}
+
+export function checkParity(results, ir) {
   const issues = [];
   const names = new Set(Object.values(results).map((r) => r.component));
   if (names.size !== 1) issues.push(`component name drift across adapters: ${[...names].join(', ')}`);
   const expectedProps = ir.props.map((p) => p.name).sort().join(',');
+  // Narrow F-1 lint: a prop consumed as a ref must render as a binding, never as a
+  // string literal equal to its own name (the SwiftUI ref-stringified-as-literal
+  // bug). Targeted signature check, NOT a full semantic cross-language comparison.
+  const refProps = refUsedProps(ir);
   for (const [adapter, res] of Object.entries(results)) {
     if (!res.file) issues.push(`${adapter}: no output file`);
     // Public API parity: every prop name must appear in the generated source.
     const missing = ir.props.filter((p) => !new RegExp(`\\b${p.name}\\b`).test(res.code));
     if (missing.length) issues.push(`${adapter}: props missing from output: ${missing.map((p) => p.name).join(', ')}`);
+    for (const name of refProps) {
+      // What a *string literal* of the ref's own name looks like differs by
+      // language: JSX/native use `"name"` for literals (bindings are `{name}` /
+      // bare `name`), while Vue uses `"name"` for a *bound* expression (`:x="name"`)
+      // and would stringify a ref only inside a mustache (`{{ 'name' }}`).
+      const litRe = adapter === 'vue'
+        ? new RegExp(`\\{\\{\\s*['"]${name}['"]\\s*\\}\\}`)
+        : new RegExp(`"${name}"`);
+      if (litRe.test(res.code ?? '')) {
+        issues.push(`${adapter}: ref prop "${name}" is emitted as the string literal "${name}" (a ref must bind the variable, not its own name)`);
+      }
+    }
   }
   return { ok: issues.length === 0, issues, expectedProps };
 }
@@ -110,7 +140,7 @@ function main() {
   console.log(`generated ${Object.keys(results).length} adapters -> out/<adapter>/${feature}/`);
 
   const tbd = checkTbd(ir);
-  const a11y = checkA11y(ir);
+  const a11y = checkA11y(ir, results);
   const tokens = checkTokens(ir, results);
   const perf = checkPerf(ir, results);
   const slop = checkSlop(ir, results);
@@ -169,4 +199,6 @@ function main() {
   if (!gatesPass) process.exit(1);
 }
 
-main();
+// Only run the pipeline when invoked directly, so the module (and checkParity)
+// can be imported by the regression harness without executing main().
+if (import.meta.url === `file://${process.argv[1]}`) main();

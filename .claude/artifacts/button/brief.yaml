@@ -1,0 +1,18 @@
+component: Button
+purpose: Trigger an action with a variant-driven visual weight and a leading icon.
+audience: End users of the product surface.
+platforms: [react, vue, svelte, react-native, swiftui, compose]
+variants: [primary, secondary, ghost, destructive]
+states: [default]
+interaction: variants
+a11y:
+  - "native button element / role=button with an accessible label from the text"
+  - "leading icon is decorative (aria-hidden), the label carries the name"
+scope:
+  in:
+    - "4-way visual variant driving background + foreground tokens"
+    - "leading icon (fixed icon token) preceding the label"
+    - "click callback"
+  out:
+    - "disabled state (no attribute-binding capability in the schema — logged as a gap)"
+    - "loading / async spinner-in-button (out of scope — compose primitives, not a variant)"

@@ -54,10 +54,22 @@ class SwiftUIRenderer extends RendererBase {
     return out.join('');
   }
   a11y(node) {
-    if (!node.a11y?.label) return '';
-    const l = node.a11y.label;
-    const v = l.kind === 'literal' ? JSON.stringify(String(l.value)) : safe(l.value);
-    return `\n  .accessibilityLabel(${v})`;
+    const out = [];
+    if (node.a11y?.label) {
+      const l = node.a11y.label;
+      const v = l.kind === 'literal' ? JSON.stringify(String(l.value)) : safe(l.value);
+      out.push(`\n  .accessibilityLabel(${v})`);
+    }
+    // Map ARIA-style role + live to SwiftUI accessibility traits — never a silent drop.
+    const TRAIT = { img: '.isImage', button: '.isButton', header: '.isHeader', link: '.isLink' };
+    if (node.role && TRAIT[node.role]) {
+      out.push(`\n  .accessibilityAddTraits(${TRAIT[node.role]})`);
+    } else if (node.role && !['presentation', 'none'].includes(node.role)) {
+      this.warnings.push(`a11y: role "${node.role}" has no direct SwiftUI trait; conveyed via label / updates where present (documented divergence)`);
+    }
+    // A live region — .updatesFrequently is SwiftUI's closest "re-announce on change" signal.
+    if (node.a11y?.live) out.push(`\n  .accessibilityAddTraits(.updatesFrequently)`);
+    return out.join('');
   }
   variantIcon(node) {
     const v = this.variantData(node);
@@ -81,12 +93,12 @@ class SwiftUIRenderer extends RendererBase {
     return `${this.textExpr(node.text)}\n  .font(${font})${this.modifiers(node)}`;
   }
   visitText(node) {
-    return `${this.textExpr(node.text)}${this.modifiers(node)}`;
+    return `${this.textExpr(node.text)}${this.modifiers(node)}${this.a11y(node)}`;
   }
   visitAction(node) {
     const action = node.onEvent ? safe(node.onEvent) : '{}';
     const label = node.icon
-      ? `Label(${node.label ? JSON.stringify(String(node.label.value)) : '""'}, systemImage: "${this.icon(node.icon)}")`
+      ? `Label(${this.plain(node.label)}, systemImage: "${this.icon(node.icon)}")`
       : this.textExpr(node.label);
     return `Button(action: ${action}) {\n  ${label}\n}${this.modifiers(node)}${this.a11y(node)}`;
   }

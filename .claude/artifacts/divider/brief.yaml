@@ -1,0 +1,16 @@
+component: Divider
+purpose: Separate content with a thin rule.
+audience: End users of the product surface.
+platforms: [react, vue, svelte, react-native, swiftui, compose]
+variants: []
+states: [default]
+interaction: static
+a11y:
+  - "role=separator so assistive tech announces a boundary"
+scope:
+  in:
+    - "a horizontal separator drawn with a border-color token"
+  out:
+    - "orientation (horizontal/vertical) — the schema has no aria-orientation and no"
+    - "width/height style slot, so vertical cannot be expressed — logged as a gap."
+    - "explicit 1px thickness — no sub-token dimension exists, thickness is left to CSS defaults."

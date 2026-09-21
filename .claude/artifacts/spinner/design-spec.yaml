@@ -1,0 +1,15 @@
+component: Spinner
+description: Indeterminate busy indicator exposed as a polite status region.
+category: feedback
+tokens:
+  - color.fg.muted
+root:
+  el: container
+  role: status
+  a11y:
+    live: polite
+  children:
+    - el: text
+      text: { kind: literal, value: "Loading" }
+      style:
+        color: color.fg.muted

@@ -1,0 +1,15 @@
+component: Skeleton
+purpose: Reserve layout space with a placeholder block while content loads.
+audience: End users of the product surface.
+platforms: [react, vue, svelte, react-native, swiftui, compose]
+variants: []
+states: [default]
+interaction: static
+a11y:
+  - "role=presentation — a purely decorative placeholder, not announced"
+scope:
+  in:
+    - "a padded, rounded block filled with a muted surface token"
+  out:
+    - "shimmer / pulse animation — the engine emits static structure only — logged as a gap."
+    - "explicit width/height — no size style slot; dimensions come from the layout context."

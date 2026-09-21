@@ -1,0 +1,29 @@
+component: Button
+description: Action trigger with a 4-way visual variant and a leading icon.
+category: input
+props:
+  - { name: label, type: string, required: true }
+  - { name: variant, type: enum, required: true, values: [primary, secondary, ghost, destructive] }
+  - { name: onClick, type: function, required: true }
+tokens:
+  - color.accent.default
+  - color.fg.onAccent
+  - color.fg.default
+  - color.bg.muted
+  - color.bg.default
+  - color.danger.fg
+  - radius.control
+root:
+  el: action
+  icon: icon.check
+  label: { kind: ref, value: label }
+  onEvent: onClick
+  variant:
+    prop: variant
+    cases:
+      primary:     { background: color.accent.default, color: color.fg.onAccent }
+      secondary:   { background: color.bg.muted,       color: color.fg.default }
+      ghost:       { background: color.bg.default,     color: color.accent.default }
+      destructive: { background: color.danger.fg,      color: color.fg.onAccent }
+  style:
+    radius: radius.control
