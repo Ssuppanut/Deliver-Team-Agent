@@ -1,0 +1,24 @@
+component: TokenAmount
+description: A numeric amount formatted to a fixed precision, beside a token symbol.
+category: display
+props:
+  - { name: amount, type: number, required: true }
+  - { name: symbol, type: string, required: true }
+  - { name: precision, type: number, required: true }
+tokens:
+  - color.fg.default
+  - color.fg.muted
+  - space.inset.sm
+root:
+  el: container
+  style:
+    gap: space.inset.sm
+  children:
+    - el: text
+      text: { kind: expr, value: "amount.toFixed(precision)" }
+      style:
+        color: color.fg.default
+    - el: text
+      text: { kind: ref, value: symbol }
+      style:
+        color: color.fg.muted

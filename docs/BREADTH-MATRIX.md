@@ -147,3 +147,107 @@ carried forward so they are not lost:
 Scope for Batch 1.1 was strictly the two false-greens and the two gate blind
 spots. No new components, no schema/fallback work, no new or removed gates, and
 no changes to agents / skills / workflow / AI router.
+
+---
+
+# Batch 2 (variant / display components)
+
+Four variant/display components run through the same pipeline against the
+**hardened** gates (a11y output tier + the narrow ref-not-self-literal parity
+lint). Batch 2 is also a live test of whether the Batch-1 hardening generalizes.
+
+Cell legend: `✓` correct · `⚠` correct with a documented divergence warning ·
+`○` generates but the stated intent is **silently unmet on that adapter** (no
+gate catches it).
+
+| Component | React | Vue | Svelte | RN | SwiftUI | Compose | Gates | Outcome | Notes |
+|---|---|---|---|---|---|---|---|---|---|
+| **Banner** | ✓ | ✓ | ✓ | ⚠ | ⚠ | ⚠ | 5/5 pass | **PASS** | Reuses the Alert pattern: 4-way severity variant + per-severity icon, `role=status`. Native `role=status` and Compose color-cascade are documented divergence warnings. Clean. |
+| **EmptyState** | ○ | ○ | ○ | ○ | ○ | ○ | 5/5 pass | **PARTIAL** | Optional action (`when: onAction`) works on all 6 — **optional-child conditional is supported**. But the declared hero `icon: icon.star` on the root container is **silently dropped by all 6 adapters** (no `Star`/`star` anywhere) and **no gate flags it**. New finding **F-10**. |
+| **StatCard** | ✓ | ✓ | ✓ | ✓ | ✓ | ⚠ | 5/5 pass | **PASS** | Delta direction conveyed by a per-direction icon (`success`/`error`) **and** an explicit sign in the text — not color alone; slop-guard clean. `direction` is a plain enum prop used on all 6. Compose color-cascade warning (delta text keeps default color there). Logged: cannot *auto-derive* direction from the numeric sign — **F-9**. Minor: icon set has no up/down arrow token (used success/error as directional proxies). |
+| **TokenAmount** | ✓ | ✓ | ✓ | ✓ | ○ | ○ | 5/5 pass | **PARTIAL** | Web + RN format correctly via a JS `expr` (`amount.toFixed(precision)`). SwiftUI/Compose cannot eval JS → render the **raw, unformatted** amount and leave **`precision` a declared-but-unused prop**. A documented `expr simplified` warning is emitted, but **parity still passes** because the prop *declaration* satisfies the name-presence check — a residual structural false-green. New finding **F-11**. |
+
+**Batch 2 tally: 2 PASS · 2 PARTIAL · 0 REFUSE · 0 FAIL.**
+`rm -rf out/ && node _shared/scripts/ci.mjs` → exit 0. All 4 generate across all
+6 adapters and pass every hardened gate — but two carry an intent that is
+silently unmet on some adapters (EmptyState icon on all 6; TokenAmount precision
+on the 2 native JS-less adapters), which the current gates do not catch.
+
+## Did the hardened gates catch anything on their own?
+
+**No new defect this batch — and that is itself the finding.** The Batch-1
+hardening was specific to the F-1 (ref-as-literal) and F-2 (dropped role/live)
+signatures; it correctly stayed green here (a11y output tier passed with
+divergence warnings; the ref-literal lint had nothing to fire on). But the two
+gaps Batch 2 surfaced — **F-10** (declared icon silently dropped) and **F-11**
+(precision declared-but-unused on native) — are *new* silent-drop classes that
+**no current gate catches**, exactly as F-1/F-2 were invisible before Batch 1.1.
+The hardening did not generalize to them; each would need its own output-tier
+assertion (deliberately **not** built here — logged only, per path A). The
+expression-driven-variant case (**F-9**) is the same story: SwiftUI/Compose emit
+invalid code with no warning and every gate passes.
+
+## Capability-gap findings (Batch 2)
+
+Severity: Moderate unless noted. None fixed — logged for the single conditional-
+schema design pass later.
+
+### F-9 · New · Variant selection cannot be driven by an expression / derived value
+- **Component:** StatCard (and any sign/threshold-driven variant).
+- **Exact intent that could not be expressed:** choose the variant case from a
+  computed discriminant (e.g. `direction = delta >= 0 ? 'positive' : 'negative'`)
+  instead of a caller-supplied enum prop. `variant.prop` is emitted verbatim as
+  the case index: React/Vue/Svelte/RN accept a JS expression, but **SwiftUI and
+  Compose emit invalid code** (`[dict][delta >= 0 ? 'positive' : 'negative']`,
+  `when (delta >= 0 ? 'positive' : 'negative')`) with **no warning and all gates
+  green**. Workaround shipped: caller precomputes `direction`.
+- **Maps to:** the F-3 family (no conditional/derived logic) but a **distinct
+  mechanism** (variant discriminant, not child render) → new number.
+
+### F-10 · New · No standalone decorative-icon element
+- **Component:** EmptyState (hero icon above the heading).
+- **Exact intent that could not be expressed:** render an icon-token glyph as its
+  own element. `icon` is honored only on `action` nodes and as a `variant` lead
+  on a container; `icon` set on a plain container is **silently ignored by all 6
+  adapters**. There is no `el: icon` kind. Also a **gate blind spot**: no guard
+  flags a declared-but-unrendered icon.
+- **Maps to:** genuinely new.
+
+### F-11 · New · Per-platform number formatting not expressible on native
+- **Component:** TokenAmount (fintech/crypto amount + precision).
+- **Exact intent that could not be expressed:** format a number to a prop-driven
+  precision (and, by extension, locale/thousands separators). Achieved on
+  **web + React Native** via a JS `expr` (`amount.toFixed(precision)`), but
+  **SwiftUI/Compose cannot eval JS** and fall back to the raw first identifier
+  (`amount`, unformatted), leaving **`precision` a declared-but-unused prop**.
+  Surfaced by the `expr simplified` warning, but **parity false-passes** because
+  the prop declaration satisfies the substring check.
+- **Maps to:** genuinely new (extends the P3/P5 native-expr limitation into an
+  explicit capability gap). **Do not** build a number-format framework here.
+
+### F-3 recurrence check
+- **No component required a true either/or (`if/else` / `not`) child fallback
+  this batch.** EmptyState used a one-way `when: onAction` (supported). The
+  closest relative that *did* surface is **F-9** (expression-driven variant),
+  logged above.
+
+## Running list — all logged-unfixed findings after Batch 2
+
+| # | Status | Summary |
+|---|---|---|
+| F-1 | **Fixed (B1.1)** | SwiftUI ref label stringified as its own name. |
+| F-2 | **Fixed (B1.1)** | Native adapters dropped `role`/`aria-live` from output. |
+| F-3 | Logged | No conditional/fallback (`if/else`, `not`) — true either/or child render. |
+| F-4 | Logged | No orientation / dimension axis (e.g. Divider vertical). |
+| F-5 | Logged | No boolean-attribute binding (e.g. Button `disabled`). |
+| F-6 | Logged (minor) | Variant icon bound to the state, not a free per-instance toggle (Badge). |
+| F-7 | Logged | No size slot (e.g. Spinner sizes). |
+| F-8 | Logged (by design) | No animation primitive (shimmer / spin). |
+| F-9 | **Logged (new, B2)** | Variant selection cannot be driven by an expression / derived value (native emits invalid code, silent). |
+| F-10 | **Logged (new, B2)** | No standalone decorative-icon element; `icon` on a container is silently ignored. |
+| F-11 | **Logged (new, B2)** | Per-platform number formatting (precision/separators) not expressible on SwiftUI/Compose; `precision` becomes a declared-but-unused prop. |
+
+Scope for Batch 2 was strictly authoring 4 component specs and recording results.
+No renderer-base/schema capabilities built, no conditional/number-format
+infrastructure, no gate changes, and no changes to agents / skills / workflow /
+AI router.

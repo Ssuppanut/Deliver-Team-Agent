@@ -1,0 +1,41 @@
+component: EmptyState
+description: Empty-region placeholder with a heading, description, and optional action.
+category: feedback
+props:
+  - { name: title, type: string, required: true }
+  - { name: description, type: string, required: true }
+  - { name: actionLabel, type: string, required: false }
+  - { name: onAction, type: function, required: false }
+tokens:
+  - color.fg.default
+  - color.fg.muted
+  - color.accent.default
+  - color.fg.onAccent
+  - space.stack.md
+  - space.inset.md
+  - radius.control
+root:
+  el: container
+  role: status
+  icon: icon.star
+  style:
+    gap: space.stack.md
+    padding: space.inset.md
+  children:
+    - el: heading
+      level: 3
+      text: { kind: ref, value: title }
+      style:
+        color: color.fg.default
+    - el: text
+      text: { kind: ref, value: description }
+      style:
+        color: color.fg.muted
+    - el: action
+      when: onAction
+      label: { kind: ref, value: actionLabel }
+      onEvent: onAction
+      style:
+        background: color.accent.default
+        color: color.fg.onAccent
+        radius: radius.control
