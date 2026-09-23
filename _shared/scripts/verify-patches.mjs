@@ -37,6 +37,8 @@ const ALERT = resolve(ROOT, '.claude/artifacts/alert/design-spec.yaml');
 const FORM = resolve(ROOT, '.claude/artifacts/form-field/design-spec.yaml');
 const BUTTON = resolve(ROOT, '.claude/artifacts/button/design-spec.yaml');
 const SPINNER = resolve(ROOT, '.claude/artifacts/spinner/design-spec.yaml');
+const EMPTY_STATE = resolve(ROOT, '.claude/artifacts/empty-state/design-spec.yaml');
+const TOKEN_AMOUNT = resolve(ROOT, '.claude/artifacts/token-amount/design-spec.yaml');
 
 let pass = 0, fail = 0;
 const results = [];
@@ -442,6 +444,49 @@ check('P32', 'declared-io: dropped prop + unrenderable icon FAIL; used prop, war
   // H2b GREEN: an icon on an action node renders and must pass.
   const okIcon = { props: [], root: { kind: 'container', children: [{ kind: 'action', icon: 'icon.check', label: { kind: 'literal', value: 'Go' } }] } };
   assert(checkDeclaredDropped(okIcon, { react: { code: '<button><Check/></button>', warnings: [] } }).ok, 'an icon on an action must pass H2b');
+});
+
+// --- P33: F-9 — an expression variant discriminant is REFUSED; an enum passes --
+check('P33', 'refusal: an expression variant discriminant is refused with an enum redirect; a plain enum is generated', () => {
+  const exprSpec = { root: { el: 'container',
+    variant: { prop: "d >= 0 ? 'positive' : 'negative'", cases: { positive: { color: 'color.success.fg' }, negative: { color: 'color.danger.fg' } } } } };
+  const r = checkRefusal(exprSpec);
+  assert(r && r.category === 'expression-variant', 'an expression discriminant must be refused');
+  assert(/enum/.test(r.redirect) && /data layer/.test(r.reason), 'refusal must redirect to a plain enum in the data layer');
+  // A plain enum discriminant (and a dotted member path) must NOT be refused.
+  assert(checkRefusal({ root: { el: 'container', variant: { prop: 'direction', cases: { a: {} } } } }) === null, 'a plain enum discriminant must pass');
+  assert(checkRefusal({ root: { el: 'container', variant: { prop: 'item.status', cases: { a: {} } } } }) === null, 'a dotted member path must pass');
+  // Existing category refusals are unchanged.
+  assert(checkRefusal({ category: 'overlay' })?.category === 'overlay', 'overlay refusal must be unchanged');
+});
+
+// --- P34: F-10 — a standalone `el: icon` renders on all 6; declared-io catches its loss --
+check('P34', 'icon element: a standalone icon renders on every adapter; declared-io flags a misplaced icon', () => {
+  const gens = { react: generateReact, vue: generateVue, svelte: generateSvelte, 'react-native': generateReactNative, swiftui: generateSwiftUI, compose: generateCompose };
+  for (const [name, gen] of Object.entries(gens)) {
+    const { code } = gen(EMPTY_STATE, '_verify');
+    assert(/star/i.test(code), `${name}: the standalone icon (star) must render`);
+  }
+  // declared-io passes when the icon is an `el: icon`, fails when it sits on a plain container.
+  const okIr = { props: [], root: { kind: 'container', children: [{ kind: 'icon', icon: 'icon.star' }] } };
+  assert(checkDeclaredDropped(okIr, { react: { code: '<Star/>', warnings: [] } }).ok, 'an el:icon must satisfy declared-io');
+  const badIr = { props: [], root: { kind: 'container', icon: 'icon.star', children: [] } };
+  assert(!checkDeclaredDropped(badIr, { react: { code: '<div/>', warnings: [] } }).ok, 'an icon on a plain container must still FAIL declared-io');
+});
+
+// --- P35: F-11 — native precision formatting is emitted; declared-io catches its loss --
+check('P35', 'number-format: SwiftUI/Compose format precision natively; declared-io flags a dropped precision', () => {
+  const sw = generateSwiftUI(TOKEN_AMOUNT, '_verify').code;
+  assert(/NumberFormatter\(\)/.test(sw) && /minimumFractionDigits = Int\(precision\)/.test(sw), 'swiftui must format via NumberFormatter with precision fraction digits');
+  const cp = generateCompose(TOKEN_AMOUNT, '_verify').code;
+  assert(/NumberFormat\.getNumberInstance/.test(cp) && /minimumFractionDigits = precision\.toInt\(\)/.test(cp), 'compose must format via NumberFormat with precision fraction digits');
+  // Real generated native output must satisfy declared-io (precision now used).
+  const ir = specToIrFromFile(TOKEN_AMOUNT);
+  const real = { swiftui: generateSwiftUI(TOKEN_AMOUNT, '_verify'), compose: generateCompose(TOKEN_AMOUNT, '_verify') };
+  assert(checkDeclaredDropped(ir, real).ok, 'formatted native output must pass declared-io');
+  // If precision is dropped (raw amount, no formatter, no warning), declared-io FAILS.
+  const dropped = { swiftui: { code: 'var body: some View {\n  Text(String(describing: amount))\n}', warnings: [] } };
+  assert(!checkDeclaredDropped(ir, dropped).ok, 'a dropped precision must FAIL declared-io');
 });
 
 console.log('\n=== verify-patches ===');

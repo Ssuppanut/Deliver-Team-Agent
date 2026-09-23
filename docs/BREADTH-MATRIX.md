@@ -163,19 +163,17 @@ gate catches it).
 | Component | React | Vue | Svelte | RN | SwiftUI | Compose | Gates | Outcome | Notes |
 |---|---|---|---|---|---|---|---|---|---|
 | **Banner** | ✓ | ✓ | ✓ | ⚠ | ⚠ | ⚠ | 5/5 pass | **PASS** | Reuses the Alert pattern: 4-way severity variant + per-severity icon, `role=status`. Native `role=status` and Compose color-cascade are documented divergence warnings. Clean. |
-| **EmptyState** | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | **declared-io FAIL** | **FAIL** *(after B3)* | Optional action (`when: onAction`) works on all 6 — **optional-child conditional is supported**. But the declared hero `icon: icon.star` sits on the root container, which no renderer places, so it is silently dropped on all 6. Under the Batch-3 **declared-io** gate this is now a hard FAIL (was a silent PARTIAL in B2). Finding **F-10**. |
-| **StatCard** | ✓ | ✓ | ✓ | ✓ | ✓ | ⚠ | 7/7 pass | **PASS** | Ships the **enum-workaround** form (`direction` is a plain prop): delta direction by per-direction icon + explicit sign, not color alone; slop-guard clean; valid on all 6, so it correctly stays GREEN under the new `native-code` gate too. The intent it works around — *auto-deriving* direction from the sign (**F-9**) — now FAILs `native-code` when expressed directly (proven in Batch 3). Minor: no up/down arrow icon token (used success/error as proxies). |
-| **TokenAmount** | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | **declared-io FAIL** | **FAIL** *(after B3)* | Web + RN format correctly via a JS `expr` (`amount.toFixed(precision)`). SwiftUI/Compose cannot eval JS → render the **raw, unformatted** amount and leave **`precision` a declared-but-unused prop**. In B2 parity false-passed on the prop *declaration*; the Batch-3 **declared-io** gate now catches the drop on both native adapters → FAIL. Finding **F-11**. |
+| **EmptyState** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 7/7 pass | **PASS** *(after B4/Phase B)* | Optional action (`when: onAction`) works on all 6. The hero icon now uses the **first-class `el: icon`** element (F-10 fixed), so `icon.star` renders on all 6 (`<Star/>` web/RN, `Image(systemName:"star")` SwiftUI, `Icon(Icons.Default.Star…)` Compose) and `declared-io` is clean. |
+| **StatCard** | ✓ | ✓ | ✓ | ✓ | ✓ | ⚠ | 7/7 pass | **PASS** | Ships the enum form (`direction` a plain prop): direction by per-direction icon + explicit sign, not color alone; slop-guard clean; valid on all 6. The **expression-driven** form of its intent (F-9) is now **REFUSED** by the orchestrator (see below), not silently mis-generated. Minor: no up/down arrow icon token (success/error used as proxies). |
+| **TokenAmount** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 7/7 pass | **PASS** *(after B4/Phase B)* | `precision` now maps to a real native formatter (F-11 fixed, precision-only): SwiftUI `NumberFormatter` and Compose `NumberFormat` with `min=max fractionDigits = precision`, grouping off. Web/RN keep `toFixed(precision)`. `precision` is used on all 6 → `declared-io` clean. Locale/currency/rounding are **out of scope** → deferred as **F-12**. |
 
-**Batch 2 tally (as recorded then): 2 PASS · 2 PARTIAL · 0 FAIL. Restated under the
-Batch-3 hardened gates: 2 PASS (Banner, StatCard) · 0 PARTIAL · 2 FAIL
-(EmptyState, TokenAmount).** The two ✗ rows were silently green in B2; the
-stricter gates now tell the truth. See the Batch 3 section below.
-`node _shared/scripts/ci.mjs` was exit 0 **at B2 time**; under Batch 3 it is
-**exit 1** by design (the two honest FAILs). All 4 still generate across all
-6 adapters and pass every hardened gate — but two carry an intent that is
-silently unmet on some adapters (EmptyState icon on all 6; TokenAmount precision
-on the 2 native JS-less adapters), which the current gates do not catch.
+**Batch 2, final resolved state (Phase B): 4 PASS · 0 PARTIAL · 0 FAIL.**
+Journey: B2 recorded 2 PASS / 2 PARTIAL (silent green); Batch-3 gates flipped the
+two silent gaps to honest FAIL; **Phase B fixes the root causes** — F-9 → REFUSE,
+F-10 → `el: icon`, F-11 → native precision formatter — so all four are now true
+PASS and `ci.mjs` is green again (exit 0). The Batch-3 `native-code` /
+`declared-io` gates stay in force as defense in depth. The expression-driven
+discriminant form (F-9) is recorded as **REFUSE-correct**.
 
 ## Did the hardened gates catch anything on their own?
 
@@ -247,9 +245,10 @@ schema design pass later.
 | F-6 | Logged (minor) | Variant icon bound to the state, not a free per-instance toggle (Badge). |
 | F-7 | Logged | No size slot (e.g. Spinner sizes). |
 | F-8 | Logged (by design) | No animation primitive (shimmer / spin). |
-| F-9 | **Caught by gate (B3)** · underlying gap logged | Expression-driven variant → native emits invalid code. Now FAILs the `native-code` gate (H1); the engine-direction fix is deferred. |
-| F-10 | **Caught by gate (B3)** · underlying gap logged | No standalone decorative-icon element. A misplaced `icon` now FAILs the `declared-io` gate (H2b); adding an icon element is deferred. |
-| F-11 | **Caught by gate (B3)** · underlying gap logged | Native number formatting drops `precision`. Now FAILs the `declared-io` gate (H2a); the format fix is deferred. |
+| F-9 | **Resolved — REFUSE (Phase B)** | Expression-driven variant discriminant is now refused by the orchestrator with an enum redirect (`expression-variant`). `native-code` gate stays as defense in depth. |
+| F-10 | **Fixed (Phase B)** | Added the first-class `el: icon` element; a standalone icon renders on all 6 via the icon-map, decorative by default / labeled when `a11y.label` set. |
+| F-11 | **Fixed (Phase B, precision-only)** | `X.toFixed(Y)` maps to SwiftUI `NumberFormatter` / Compose `NumberFormat` with `min=max fractionDigits = precision`, grouping off. Web/RN unchanged. |
+| F-12 | **Logged (new, Phase B) — deferred** | Locale (decimal separator / thousands grouping), currency symbol handling/positioning, and rounding-mode configuration for number formatting. A separate future number-format pass; explicitly out of scope for the precision-only F-11 fix. |
 
 Scope for Batch 2 was strictly authoring 4 component specs and recording results.
 No renderer-base/schema capabilities built, no conditional/number-format
@@ -369,3 +368,101 @@ Scope for Batch 3: two output-tier gate checks + their pins + this record. No
 component/renderer/schema fix, no refusal routing or expression pre-compute
 (deferred to Phase B), no new components, and no changes to agents / skills /
 workflow / AI router.
+
+---
+
+# Phase B (resolve the three deferred findings at the root)
+
+Batch 3 made F-9/F-10/F-11 go RED honestly. Phase B fixes each at its **root
+cause**, handled differently per the decision:
+
+- **F-9 → REFUSE.** An expression used as a variant discriminant (a ternary /
+  comparison / call, e.g. `delta >= 0 ? 'positive' : 'negative'`) is now refused
+  by the orchestrator (`refusal.mjs`) with a new `expression-variant` category,
+  redirecting the author to a plain enum computed in the data layer. Reference:
+  `knowledge/pattern-library/references/expression-variant.md`. A plain
+  identifier or dotted member path is accepted. The Batch-3 `native-code` gate
+  stays as defense in depth for any expression that slips past the refusal.
+- **F-10 → structural fix.** New first-class `el: icon` element (schema + IR +
+  `renderer-base` dispatch + a `visitIcon` in all 6 adapters). It renders through
+  the existing icon-map (lucide on web/RN, SF Symbols on SwiftUI, Material Icons
+  on Compose) and carries the a11y contract: **decorative** (`aria-hidden` /
+  `accessible={false}` / `.accessibilityHidden(true)` / `contentDescription = null`)
+  by default, **labeled** when `a11y.label` is present. `declared-io` H2b now
+  treats an `el: icon` as a valid icon position.
+- **F-11 → BUILD, precision-only.** SwiftUI/Compose map `X.toFixed(Y)` to a real
+  native decimal formatter with `min = max fractionDigits = precision` and
+  grouping off. **Precision-only:** no locale, no currency, no rounding mode, no
+  grouping options — those are logged as **F-12** and deferred.
+
+## Gate transitions (before/after)
+
+**F-9 — expression discriminant now REFUSED; the enum form still generates:**
+```
+### expression discriminant (variant.prop = "deltaValue >= 0 ? 'positive' : 'negative'") ###
+REFUSED: category "expression-variant" is out of scope
+  why:     a variant case must be selected by a plain enum prop, not an embedded expression
+           (found: `deltaValue >= 0 ? 'positive' : 'negative'`) — computed selection is presentation
+           logic that belongs in the data layer
+  instead: pass a plain enum variant prop (e.g. direction: 'negative') and compute the value in the data layer
+  No code generated (correct outcome).
+
+### shipped StatCard (variant.prop = "direction", plain enum) ###  gates: PASS
+```
+
+**F-10 — `icon.star` now renders on all 6; declared-io RED on revert → GREEN on restore:**
+```
+star present:  react 2 · vue 2 · svelte 2 · react-native 2 · swiftui 1 · compose 1
+  swiftui: Image(systemName: "star")      compose: Icon(Icons.Default.Star, contentDescription = null)
+### REVERT (icon back on the container) ###   declared-io FAIL (6)   → gates: FAIL
+### RESTORE (el: icon) ###                     declared-io PASS (0)   → gates: PASS
+```
+
+**F-11 — native precision formatter present + correct; declared-io RED on revert → GREEN on restore:**
+```
+swiftui: Text({ let f = NumberFormatter(); f.numberStyle = .decimal; f.usesGroupingSeparator = false;
+                f.minimumFractionDigits = Int(precision); f.maximumFractionDigits = Int(precision);
+                return f.string(from: NSNumber(value: amount)) ?? String(amount) }())
+compose: java.text.NumberFormat.getNumberInstance().apply { isGroupingUsed = false;
+                minimumFractionDigits = precision.toInt(); maximumFractionDigits = precision.toInt() }.format(amount)
+### REVERT (formatter disabled) ###   declared-io FAIL (2: precision dropped on swiftui+compose)  → gates: FAIL
+### RESTORE ###                        declared-io PASS (0)  → gates: PASS
+```
+Correctness: both formatters set `min = max fractionDigits = precision` with
+grouping off — the exact semantics of `toFixed(precision)` (e.g. precision 2 →
+`1234.50`, `1234.567 → 1234.57`; precision 0 → `42`; precision 4 → `0.1000`).
+*Note:* this container has no Swift/Kotlin toolchain, so native output is verified
+by construction (canonical formatter APIs) + the JS `toFixed` reference, not by
+compiling — consistent with the rest of the project (no native compile step).
+
+## F-11 scope confirmation
+
+**Precision-only.** The only thing mapped is the number of fraction digits
+(`minimum/maximumFractionDigits = precision`). Explicitly **not** built, and
+logged as **F-12 (deferred)**: locale (decimal separator / thousands grouping),
+currency symbol handling/positioning, rounding-mode configuration, grouping
+options. `isGroupingUsed=false` / `usesGroupingSeparator=false` keeps output to
+"same number, controlled decimal places" with no grouping.
+
+## Regression pins
+
+- **P33** — F-9: an expression discriminant is refused with an enum redirect; a
+  plain enum and a dotted member path pass; overlay/data-table refusals unchanged.
+- **P34** — F-10: the standalone `el: icon` renders on all 6; `declared-io`
+  accepts an `el: icon` and still FAILs an icon on a plain container.
+- **P35** — F-11: SwiftUI/Compose emit the native precision formatter; real
+  output passes `declared-io`; a dropped precision still FAILs it.
+
+`verify-patches` is now **35 checks, all passing** (was 32).
+
+## ci.mjs status after Phase B
+
+`node _shared/scripts/ci.mjs` is **GREEN again (exit 0)** — the real defects are
+fixed, not hidden. All in-scope features pass every gate (including the two new
+Batch-3 gates); modal/data-table still refuse; the expression-discriminant form
+refuses; `verify-patches` 35/35.
+
+Scope for Phase B: F-9 refusal, F-10 `el: icon` element, F-11 precision-only
+native formatter, plus P33–P35 and this record. No gate weakened or removed, no
+new components, no changes to agents / skills / workflow / AI router, and the
+overlay/table refusal behavior is unchanged.

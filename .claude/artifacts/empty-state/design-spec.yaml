@@ -17,11 +17,12 @@ tokens:
 root:
   el: container
   role: status
-  icon: icon.star
   style:
     gap: space.stack.md
     padding: space.inset.md
   children:
+    - el: icon
+      icon: icon.star
     - el: heading
       level: 3
       text: { kind: ref, value: title }

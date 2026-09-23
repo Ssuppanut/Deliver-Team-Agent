@@ -79,6 +79,13 @@ class SvelteRenderer extends RendererBase {
     const icon = node.icon ? `<svelte:component this={${this.icon(node.icon)}} aria-hidden="true" />` : '';
     return `<button type="button"${handler}${this.a11y(node)}${this.styleAttr(node)}>${icon}${node.label ? this.interp(node.label) : ''}</button>`;
   }
+  visitIcon(node) {
+    const sym = this.icon(node.icon);
+    return node.a11y?.label
+      ? `<svelte:component this={${sym}} role="img"${this.bind('aria-label', node.a11y.label)}${this.styleAttr(node)} />`
+      : `<svelte:component this={${sym}} aria-hidden="true"${this.styleAttr(node)} />`;
+  }
+
   visitLink(node, children) {
     return `<a${this.bind('href', node.href)}${this.styleAttr(node)}>${node.label ? this.interp(node.label) : children}</a>`;
   }

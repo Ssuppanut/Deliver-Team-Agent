@@ -67,7 +67,7 @@ definitions:
     properties:
       el:
         type: string
-        enum: [container, media, heading, text, action, link, input, slot]
+        enum: [container, media, heading, text, action, link, input, slot, icon]
       role: { type: string }
       as: { type: string, description: "Optional semantic tag hint (e.g. section, article)." }
       id:

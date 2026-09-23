@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 import { loadSpec, validate } from './validate-schema.mjs';
 
 const ELEMENT_KINDS = new Set([
-  'container', 'media', 'heading', 'text', 'action', 'link', 'input', 'slot',
+  'container', 'media', 'heading', 'text', 'action', 'link', 'input', 'slot', 'icon',
 ]);
 
 /** Normalize a value reference into canonical { kind, value }. */

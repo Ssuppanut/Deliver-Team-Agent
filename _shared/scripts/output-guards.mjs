@@ -83,7 +83,8 @@ export function checkDeclaredDropped(ir, results) {
   const badIcons = [];
   walk(ir.root, (n) => {
     if (!n.icon) return;
-    const renders = n.kind === 'action'
+    const renders = n.kind === 'icon'    // a first-class standalone icon element
+      || n.kind === 'action'
       || (n.kind === 'container' && n.variant && Object.values(n.variant.cases ?? {}).some((c) => 'icon' in c));
     if (!renders) badIcons.push(n.icon);
   });

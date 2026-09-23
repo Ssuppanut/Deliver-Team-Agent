@@ -22,6 +22,14 @@ class SwiftUIRenderer extends RendererBase {
     if (!vr) return 'Text("")';
     if (vr.kind === 'literal') return `Text(${JSON.stringify(String(vr.value))})`;
     if (vr.kind === 'ref') return `Text(String(describing: ${safe(vr.value)}))`;
+    // F-11 (precision-only): `<num>.toFixed(<precision>)` -> a real native decimal
+    // formatter with `precision` fraction digits. No locale / grouping / currency
+    // / rounding-mode — that is a separate future pass (F-12).
+    const fx = String(vr.value).trim().match(/^([A-Za-z_$][\w$]*)\.toFixed\(([A-Za-z_$][\w$]*)\)$/);
+    if (fx) {
+      const [, num, prec] = fx;
+      return `Text({ let f = NumberFormatter(); f.numberStyle = .decimal; f.usesGroupingSeparator = false; f.minimumFractionDigits = Int(${safe(prec)}); f.maximumFractionDigits = Int(${safe(prec)}); return f.string(from: NSNumber(value: ${safe(num)})) ?? String(${safe(num)}) }())`;
+    }
     const id = firstIdent(vr.value);
     this.warnings.push(`expr simplified to \`${id}\` (native cannot eval "${vr.value}")`);
     return `Text(String(describing: ${safe(id)}))`;
@@ -102,6 +110,16 @@ class SwiftUIRenderer extends RendererBase {
       : this.textExpr(node.label);
     return `Button(action: ${action}) {\n  ${label}\n}${this.modifiers(node)}${this.a11y(node)}`;
   }
+  visitIcon(node) {
+    const sym = this.icon(node.icon);
+    if (node.a11y?.label) {
+      const l = node.a11y.label;
+      const v = l.kind === 'literal' ? JSON.stringify(String(l.value)) : safe(l.value);
+      return `Image(systemName: "${sym}")\n  .accessibilityLabel(${v})`;
+    }
+    return `Image(systemName: "${sym}")\n  .accessibilityHidden(true)`;
+  }
+
   visitLink(node) {
     const url = node.href.kind === 'literal' ? JSON.stringify(String(node.href.value)) : safe(node.href.value);
     const label = node.label ? JSON.stringify(String(node.label.value)) : '""';

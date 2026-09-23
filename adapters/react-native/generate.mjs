@@ -88,6 +88,13 @@ class RNRenderer extends RendererBase {
     const icon = node.icon ? `<${this.icon(node.icon)} />` : '';
     return `<Pressable accessibilityRole="button"${press}${this.style(node)}>\n  ${icon}<Text>${node.label ? this.interp(node.label) : ''}</Text>\n</Pressable>`;
   }
+  visitIcon(node) {
+    const sym = this.icon(node.icon);
+    return node.a11y?.label
+      ? `<${sym} accessibilityRole="image" accessibilityLabel={${this.attr(node.a11y.label)}}${this.style(node)} />`
+      : `<${sym} accessible={false}${this.style(node)} />`;
+  }
+
   visitLink(node, children) {
     const press = node.href ? ` onPress={() => Linking.openURL(${this.attr(node.href)})}` : '';
     return `<Pressable accessibilityRole="link"${press}${this.style(node)}>\n  <Text>${node.label ? this.interp(node.label) : children}</Text>\n</Pressable>`;

@@ -18,6 +18,14 @@ class ComposeRenderer extends RendererBase {
     if (!vr) return '""';
     if (vr.kind === 'literal') return JSON.stringify(String(vr.value));
     if (vr.kind === 'ref') return vr.value;
+    // F-11 (precision-only): `<num>.toFixed(<precision>)` -> a real native decimal
+    // formatter with `precision` fraction digits. No locale / grouping / currency
+    // / rounding-mode — that is a separate future pass (F-12).
+    const fx = String(vr.value).trim().match(/^([A-Za-z_$][\w$]*)\.toFixed\(([A-Za-z_$][\w$]*)\)$/);
+    if (fx) {
+      const [, num, prec] = fx;
+      return `java.text.NumberFormat.getNumberInstance().apply { isGroupingUsed = false; minimumFractionDigits = ${prec}.toInt(); maximumFractionDigits = ${prec}.toInt() }.format(${num})`;
+    }
     const id = firstIdent(vr.value);
     this.warnings.push(`expr simplified to \`${id}\` (native cannot eval "${vr.value}")`);
     return `${id}.toString()`;
@@ -133,6 +141,16 @@ class ComposeRenderer extends RendererBase {
       : `Text(${this.strExpr(node.label)})`;
     return `Button(onClick = ${onClick}${this._mod(node)}) {\n  ${inner}\n}`;
   }
+  visitIcon(node) {
+    const sym = this.icon(node.icon);
+    if (node.a11y?.label) {
+      const l = node.a11y.label;
+      const v = l.kind === 'literal' ? JSON.stringify(String(l.value)) : l.value;
+      return `Icon(Icons.Default.${sym}, contentDescription = ${v})`;
+    }
+    return `Icon(Icons.Default.${sym}, contentDescription = null)`;
+  }
+
   visitLink(node, children) {
     return `Text(text = ${node.label ? this.strExpr(node.label) : `"${'link'}"`}, modifier = Modifier.clickable { /* open ${node.href?.value ?? ''} */ })`;
   }
