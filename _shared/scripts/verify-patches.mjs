@@ -24,6 +24,7 @@ import { route, loadContext } from '../../.ai/router/route.mjs';
 import { loadWorkflow, evaluateWorkflow, runScenarios, lintWorkflow } from './workflow-eval.mjs';
 import { skillRegistryDrift } from './skill-registry.mjs';
 import { checkParity } from './e2e-multi.mjs';
+import { checkNativeExprLeak, checkDeclaredDropped } from './output-guards.mjs';
 import { readFileSync, existsSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 
@@ -401,6 +402,46 @@ check('P30', 'a11y-guard (output tier): native adapters must express IR role/liv
   assert(bad.issues.some((i) => i.rule === 'a11y-output-live'), 'expected an a11y-output-live finding');
   // The IR-only call (no results) must still behave exactly as before (backward compatible).
   assert(checkA11y(ir).ok, 'IR-only a11y check must not regress');
+});
+
+// --- P31: H1 — native adapters must not emit an un-evaluated JS expression -----
+check('P31', 'native-code: a JS-expression variant discriminant is flagged on native, plain props pass', () => {
+  // RED: a variant driven by a JS expression leaks verbatim into SwiftUI/Compose.
+  const exprIr = { props: [], root: { kind: 'container',
+    variant: { prop: "d >= 0 ? 'positive' : 'negative'", cases: { positive: { color: 'color.success.fg' }, negative: { color: 'color.danger.fg' } } } } };
+  const leaked = {
+    swiftui: { code: `(["positive": A, "negative": B][d >= 0 ? 'positive' : 'negative'] ?? C)` },
+    compose: { code: `when (d >= 0 ? 'positive' : 'negative') { "positive" -> A; else -> B }` },
+    react:   { code: `({ positive: A })[d >= 0 ? 'positive' : 'negative']` }, // web can eval JS — not flagged
+  };
+  const r = checkNativeExprLeak(exprIr, leaked);
+  assert(!r.ok, 'H1 must FAIL when a native adapter emits an un-evaluated JS expression');
+  assert(r.issues.filter((i) => i.rule === 'native-expr-leak').length === 2, 'both SwiftUI and Compose must be flagged (web is not)');
+  // GREEN: a plain-identifier discriminant is valid on every adapter.
+  const plainIr = { props: [], root: { kind: 'container',
+    variant: { prop: 'direction', cases: { positive: { color: 'color.success.fg' }, negative: { color: 'color.danger.fg' } } } } };
+  const plain = { swiftui: { code: `(["positive": A][direction] ?? C)` }, compose: { code: `when (direction) { }` } };
+  assert(checkNativeExprLeak(plainIr, plain).ok, 'a plain-identifier discriminant must pass H1');
+});
+
+// --- P32: H2 — a declared prop / icon an adapter silently drops must FAIL -------
+check('P32', 'declared-io: dropped prop + unrenderable icon FAIL; used prop, warned drop, and rendered icon pass', () => {
+  // H2a RED: a prop absent from the native body, with no divergence warning naming it.
+  const propIr = { props: [{ name: 'precision', type: 'number' }], root: { kind: 'container', children: [] } };
+  const dropped = { swiftui: { code: 'var body: some View {\n  VStack { Text(amount) }\n}', warnings: ['expr simplified to `amount` (native cannot eval "amount.toFixed(precision)")'] } };
+  const rA = checkDeclaredDropped(propIr, dropped);
+  assert(!rA.ok && rA.issues.some((i) => i.rule === 'declared-prop-dropped'), 'H2a must FAIL a prop that only survives in the quoted expr of a warning');
+  // H2a GREEN — used in the body:
+  assert(checkDeclaredDropped(propIr, { swiftui: { code: 'var body: some View {\n  Text(precision)\n}', warnings: [] } }).ok, 'a prop used in the body must pass');
+  // H2a GREEN — a genuine (prose) divergence warning names it:
+  assert(checkDeclaredDropped(propIr, { swiftui: { code: 'var body: some View {\n  VStack {}\n}', warnings: ['precision not applied on native (no number formatting)'] } }).ok, 'a documented divergence must pass');
+  // H2b RED: an icon on a non-action / non-variant node is dropped on every adapter.
+  const iconIr = { props: [], root: { kind: 'container', icon: 'icon.star', children: [] } };
+  const rB = checkDeclaredDropped(iconIr, { react: { code: '<div></div>', warnings: [] }, swiftui: { code: 'var body: some View {}', warnings: [] } });
+  assert(!rB.ok && rB.issues.some((i) => i.rule === 'declared-icon-dropped'), 'H2b must FAIL an icon on a non-rendering node');
+  // H2b GREEN: an icon on an action node renders and must pass.
+  const okIcon = { props: [], root: { kind: 'container', children: [{ kind: 'action', icon: 'icon.check', label: { kind: 'literal', value: 'Go' } }] } };
+  assert(checkDeclaredDropped(okIcon, { react: { code: '<button><Check/></button>', warnings: [] } }).ok, 'an icon on an action must pass H2b');
 });
 
 console.log('\n=== verify-patches ===');

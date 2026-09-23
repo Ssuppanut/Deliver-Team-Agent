@@ -163,12 +163,16 @@ gate catches it).
 | Component | React | Vue | Svelte | RN | SwiftUI | Compose | Gates | Outcome | Notes |
 |---|---|---|---|---|---|---|---|---|---|
 | **Banner** | ✓ | ✓ | ✓ | ⚠ | ⚠ | ⚠ | 5/5 pass | **PASS** | Reuses the Alert pattern: 4-way severity variant + per-severity icon, `role=status`. Native `role=status` and Compose color-cascade are documented divergence warnings. Clean. |
-| **EmptyState** | ○ | ○ | ○ | ○ | ○ | ○ | 5/5 pass | **PARTIAL** | Optional action (`when: onAction`) works on all 6 — **optional-child conditional is supported**. But the declared hero `icon: icon.star` on the root container is **silently dropped by all 6 adapters** (no `Star`/`star` anywhere) and **no gate flags it**. New finding **F-10**. |
-| **StatCard** | ✓ | ✓ | ✓ | ✓ | ✓ | ⚠ | 5/5 pass | **PASS** | Delta direction conveyed by a per-direction icon (`success`/`error`) **and** an explicit sign in the text — not color alone; slop-guard clean. `direction` is a plain enum prop used on all 6. Compose color-cascade warning (delta text keeps default color there). Logged: cannot *auto-derive* direction from the numeric sign — **F-9**. Minor: icon set has no up/down arrow token (used success/error as directional proxies). |
-| **TokenAmount** | ✓ | ✓ | ✓ | ✓ | ○ | ○ | 5/5 pass | **PARTIAL** | Web + RN format correctly via a JS `expr` (`amount.toFixed(precision)`). SwiftUI/Compose cannot eval JS → render the **raw, unformatted** amount and leave **`precision` a declared-but-unused prop**. A documented `expr simplified` warning is emitted, but **parity still passes** because the prop *declaration* satisfies the name-presence check — a residual structural false-green. New finding **F-11**. |
+| **EmptyState** | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | **declared-io FAIL** | **FAIL** *(after B3)* | Optional action (`when: onAction`) works on all 6 — **optional-child conditional is supported**. But the declared hero `icon: icon.star` sits on the root container, which no renderer places, so it is silently dropped on all 6. Under the Batch-3 **declared-io** gate this is now a hard FAIL (was a silent PARTIAL in B2). Finding **F-10**. |
+| **StatCard** | ✓ | ✓ | ✓ | ✓ | ✓ | ⚠ | 7/7 pass | **PASS** | Ships the **enum-workaround** form (`direction` is a plain prop): delta direction by per-direction icon + explicit sign, not color alone; slop-guard clean; valid on all 6, so it correctly stays GREEN under the new `native-code` gate too. The intent it works around — *auto-deriving* direction from the sign (**F-9**) — now FAILs `native-code` when expressed directly (proven in Batch 3). Minor: no up/down arrow icon token (used success/error as proxies). |
+| **TokenAmount** | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | **declared-io FAIL** | **FAIL** *(after B3)* | Web + RN format correctly via a JS `expr` (`amount.toFixed(precision)`). SwiftUI/Compose cannot eval JS → render the **raw, unformatted** amount and leave **`precision` a declared-but-unused prop**. In B2 parity false-passed on the prop *declaration*; the Batch-3 **declared-io** gate now catches the drop on both native adapters → FAIL. Finding **F-11**. |
 
-**Batch 2 tally: 2 PASS · 2 PARTIAL · 0 REFUSE · 0 FAIL.**
-`rm -rf out/ && node _shared/scripts/ci.mjs` → exit 0. All 4 generate across all
+**Batch 2 tally (as recorded then): 2 PASS · 2 PARTIAL · 0 FAIL. Restated under the
+Batch-3 hardened gates: 2 PASS (Banner, StatCard) · 0 PARTIAL · 2 FAIL
+(EmptyState, TokenAmount).** The two ✗ rows were silently green in B2; the
+stricter gates now tell the truth. See the Batch 3 section below.
+`node _shared/scripts/ci.mjs` was exit 0 **at B2 time**; under Batch 3 it is
+**exit 1** by design (the two honest FAILs). All 4 still generate across all
 6 adapters and pass every hardened gate — but two carry an intent that is
 silently unmet on some adapters (EmptyState icon on all 6; TokenAmount precision
 on the 2 native JS-less adapters), which the current gates do not catch.
@@ -243,11 +247,125 @@ schema design pass later.
 | F-6 | Logged (minor) | Variant icon bound to the state, not a free per-instance toggle (Badge). |
 | F-7 | Logged | No size slot (e.g. Spinner sizes). |
 | F-8 | Logged (by design) | No animation primitive (shimmer / spin). |
-| F-9 | **Logged (new, B2)** | Variant selection cannot be driven by an expression / derived value (native emits invalid code, silent). |
-| F-10 | **Logged (new, B2)** | No standalone decorative-icon element; `icon` on a container is silently ignored. |
-| F-11 | **Logged (new, B2)** | Per-platform number formatting (precision/separators) not expressible on SwiftUI/Compose; `precision` becomes a declared-but-unused prop. |
+| F-9 | **Caught by gate (B3)** · underlying gap logged | Expression-driven variant → native emits invalid code. Now FAILs the `native-code` gate (H1); the engine-direction fix is deferred. |
+| F-10 | **Caught by gate (B3)** · underlying gap logged | No standalone decorative-icon element. A misplaced `icon` now FAILs the `declared-io` gate (H2b); adding an icon element is deferred. |
+| F-11 | **Caught by gate (B3)** · underlying gap logged | Native number formatting drops `precision`. Now FAILs the `declared-io` gate (H2a); the format fix is deferred. |
 
 Scope for Batch 2 was strictly authoring 4 component specs and recording results.
 No renderer-base/schema capabilities built, no conditional/number-format
 infrastructure, no gate changes, and no changes to agents / skills / workflow /
 AI router.
+
+---
+
+# Batch 3 (gate-hardening — generalize the output-tier discipline)
+
+Batch 2 surfaced three silent-failure classes the gates did not catch. Batch 3
+adds two output-tier hardenings so those classes go RED on their own, and pins
+them. This is a **gate** change only — **no** component/renderer/schema fix. The
+engine-direction question (should native REFUSE / FAIL / pre-compute an
+expression it can't eval) is **deferred**; the gate default chosen here is
+**FAIL** because it is the most reversible outcome.
+
+## The two hardenings (approach + limits)
+
+**H1 · `native-code` — no uncompilable native output (F-9 class).**
+`checkNativeExprLeak(ir, results)` in `_shared/scripts/output-guards.mjs`.
+Approach (targeted, IR-anchored + output-confirmed): collect every
+`variant.prop` that is **not** a plain identifier / dotted member path (i.e. it
+carries a JS ternary, comparison, call, or quotes), then FAIL if that exact
+string appears **verbatim** in a SwiftUI or Compose output. *Limit:* it targets
+the one place the engine currently emits an un-evaluated expression verbatim (the
+variant discriminant). Text/label `expr`s are **not** covered here because the
+native adapters already simplify them to a single identifier and emit a
+documented `expr simplified` warning — the *consequence* of that simplification
+(a dropped secondary prop) is caught by H2a, not H1. A full native compile check
+was judged too heavy for this pass.
+
+**H2 · `declared-io` — a silently-dropped declaration is a FAIL (F-10/F-11).**
+`checkDeclaredDropped(ir, results)`. When the IR declares something and an
+adapter's output neither expresses it nor emits a **documented divergence
+warning**, that adapter FAILs. Two detectors:
+- **H2a declared-but-unused prop** — a prop that never appears in a native
+  adapter's rendered **body** (props/type signature stripped) is a silent drop,
+  *unless* a prose divergence warning names it. The `expr simplified` warning
+  does **not** count: its quoted expression is stripped before the match, so a
+  prop that survives only inside that quote (e.g. `precision` in
+  `"amount.toFixed(precision)"`) is still a FAIL. *Limit:* enforced on the two
+  native adapters via body extraction — expr-simplification, the only current
+  prop-drop mechanism, is native-only (web/RN keep the `expr` and use the prop).
+- **H2b unrenderable declared icon** — an `icon` on a node that is neither an
+  `action` nor a container with a `variant` icon case. The renderers only place
+  icons in those two positions, so any other `icon` is dropped on **every**
+  adapter. *Limit:* structural (IR-anchored), matching the renderers' two
+  icon-bearing positions.
+
+The escape hatch is uniform with the Batch-1.1 a11y tier: **warned = acceptable
+divergence (PASS); silently absent = FAIL.**
+
+## Fired-gate proofs
+
+**H1 → the F-9 pattern (expression-driven variant) goes RED; the shipped enum
+StatCard stays GREEN (no over-flag):**
+```
+### H1 — F-9 pattern (variant.prop = "deltaValue >= 0 ? 'positive' : 'negative'") ###
+  native-code  FAIL  (2 issues)
+  [serious] native-code/native-expr-leak: swiftui: emits the un-evaluated JS expression `deltaValue >= 0 ? 'positive' : 'negative'` verbatim in native syntax (uncompilable output)
+  [serious] native-code/native-expr-leak: compose: emits the un-evaluated JS expression `deltaValue >= 0 ? 'positive' : 'negative'` verbatim in native syntax (uncompilable output)
+  gates: FAIL
+
+### CONTROL — shipped StatCard (variant.prop = "direction", a plain enum) ###
+  native-code  PASS  (0 issues)
+  gates: PASS
+```
+
+**H2 → EmptyState (F-10) and TokenAmount (F-11) go RED; every original gate was
+green (the pre-hardening false-green):**
+```
+### empty-state ###
+  readiness PASS · a11y PASS · token PASS · perf PASS · slop PASS · parity PASS · native-code PASS
+  declared-io  FAIL  (6 issues)   ← icon.star dropped on all 6 adapters
+  gates: FAIL
+
+### token-amount ###
+  readiness PASS · a11y PASS · token PASS · perf PASS · slop PASS · parity PASS · native-code PASS
+  declared-io  FAIL  (2 issues)   ← precision dropped on swiftui + compose
+  gates: FAIL
+```
+
+**No over-flagging.** Banner and all six Batch-1 primitives (Button, Badge,
+Avatar, Divider, Spinner, Skeleton) plus product-card, user-card-list, alert and
+form-field stay GREEN on both new gates. (product-card's price `expr` keeps its
+prop as the surviving first identifier, so H2a does not fire on it.)
+
+## Regression pins
+
+- **P31** — `native-code`: a JS-expression variant discriminant is flagged on
+  both native adapters (RED), a plain-identifier discriminant passes (GREEN).
+- **P32** — `declared-io`: a dropped prop and an unrenderable icon FAIL; a
+  body-used prop, a prose-documented divergence, and an action-borne icon pass.
+
+`verify-patches` is now **32 checks, all passing** (was 30).
+
+## Honest note on StatCard
+
+The **shipped** StatCard uses the enum workaround (`direction` is a caller-supplied
+prop), so its output is valid on all six and it correctly **stays PASS** under the
+new gates — H1 must not over-flag a correct component. StatCard therefore did
+**not** itself move to FAIL. The F-9 gap it works around is real and now
+gate-caught: expressing the intent directly (deriving the case from the numeric
+sign) FAILs `native-code`, as proven above. Rewriting the shipped spec to the
+direct (failing) form would be a deliberate change; I did not make it unilaterally.
+
+## ci.mjs status under Batch 3
+
+`node _shared/scripts/ci.mjs` now exits **1** — **by design and correct**. The two
+honest FAILs are **empty-state** (`declared-io`: `icon.star` dropped on all 6) and
+**token-amount** (`declared-io`: `precision` dropped on SwiftUI + Compose). Every
+other feature passes every gate; `verify-patches` is 32/32. CI is red because the
+matrix now tells the truth, not because anything regressed.
+
+Scope for Batch 3: two output-tier gate checks + their pins + this record. No
+component/renderer/schema fix, no refusal routing or expression pre-compute
+(deferred to Phase B), no new components, and no changes to agents / skills /
+workflow / AI router.
