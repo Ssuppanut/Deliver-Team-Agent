@@ -26,6 +26,7 @@ import { skillRegistryDrift } from './skill-registry.mjs';
 import { checkParity } from './e2e-multi.mjs';
 import { checkNativeExprLeak, checkDeclaredDropped } from './output-guards.mjs';
 import { checkLedger, loadWaivers } from './ledger-gate.mjs';
+import { runMutationTesting } from './mutate-gates.mjs';
 import { RendererBase } from '../../adapters/_shared/renderer-base.mjs';
 import { readFileSync, existsSync } from 'node:fs';
 import { execSync } from 'node:child_process';
@@ -651,6 +652,46 @@ check('P43', 'ledger: a divergence needs a matching, non-expired, approved waive
   // Every waiver actually in the registry is well-formed (approver + future expiry).
   const { problems } = loadWaivers(new Date('2026-09-24'));
   assert(problems.length === 0, `registry must have no open-ended/expired waivers: ${problems.join('; ')}`);
+});
+
+// --- P44: Layer 3 — gate mutation testing runs, baseline clean, known-defect
+//         mutants killed per operator, only the two known blind spots survive.
+check('P44', 'mutation testing: baseline all-green; each known-defect operator kills its mutants; only known blind spots survive', () => {
+  const { baselineFailures, mutants, survived } = runMutationTesting();
+  assert(baselineFailures.length === 0, `mutation baseline must be all-green, got RED: ${baselineFailures.map((f) => f.feature).join(', ')}`);
+  assert(mutants.length > 0, 'the harness must generate mutants');
+
+  // The killing operators must kill EVERY mutant they inject (each is a proven
+  // gate). If a gate regresses, one of these would survive.
+  const KILLERS = ['drop-trait', 'remove-a11y', 'native-expr-leak', 'ref-as-literal', 'hardcode-token-web', 'unresolved-tbd'];
+  for (const op of KILLERS) {
+    const ms = mutants.filter((m) => m.operator === op);
+    assert(ms.length > 0, `operator ${op} produced no mutants`);
+    const survivors = ms.filter((m) => !m.killed);
+    assert(survivors.length === 0, `operator ${op} must kill all its mutants; survivors: ${survivors.map((s) => s.key).join(', ')}`);
+  }
+
+  // Representative operator -> the gate that must catch it (kill attribution).
+  const killerGate = (op, gate) => {
+    const m = mutants.find((x) => x.operator === op && x.killed);
+    assert(m && m.red.includes(gate), `operator ${op} must be killed by the ${gate} gate (red: ${m ? m.red.join(',') : 'none'})`);
+  };
+  killerGate('drop-trait', 'ledger');
+  killerGate('remove-a11y', 'a11y');
+  killerGate('native-expr-leak', 'native-code');
+  killerGate('ref-as-literal', 'parity');
+  killerGate('hardcode-token-web', 'token');
+  killerGate('unresolved-tbd', 'readiness');
+
+  // Every survivor must be a KNOWN blind spot (logged finding). A new survivor
+  // class is a fresh blind spot and must fail here so it cannot ship silently.
+  const KNOWN = new Set(['hardcode-token-native', 'state-by-color-only']);
+  const unexpected = survived.filter((m) => !KNOWN.has(m.operator));
+  assert(unexpected.length === 0, `unexpected surviving mutant (new blind spot): ${unexpected.map((m) => m.key).join(', ')}`);
+  // And the two known blind spots must actually still survive (else the finding
+  // is stale and should be closed).
+  assert(survived.some((m) => m.operator === 'hardcode-token-native'), 'F-21 blind spot (native token hardcode) expected to survive');
+  assert(survived.some((m) => m.operator === 'state-by-color-only'), 'F-22 blind spot (state-by-color-only advisory) expected to survive');
 });
 
 console.log('\n=== verify-patches ===');

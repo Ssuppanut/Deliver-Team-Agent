@@ -727,3 +727,131 @@ breadth components (the three form-control specs are test vehicles for the
 express() fix, not a new batch); or touch agents / skills / workflow / AI-router.
 No existing gate was weakened: a11y-guard, token-guard, perf-guard, slop-guard,
 parity, native-code and declared-io are all unchanged and still run.
+
+---
+
+# Layer 3 — Gate mutation testing (proving the gates)
+
+## Why this layer exists
+
+Throughout this project we proved each gate works **by hand**: revert a fix,
+confirm the gate goes RED, restore. That is trustworthy but manual, one gate at a
+time, and easy to forget for a gate we have not touched lately. **A gate you have
+never seen go RED is a gate you cannot trust.** Layer 3 automates that revert-proof
+across every gate and every defect class, so a **blind spot in the gates
+themselves** is found before shipping, not after.
+
+## Mechanism — mutation testing for gates
+
+`_shared/scripts/mutate-gates.mjs` (`npm run mutate:gates`):
+
+1. For a corpus of already-passing features (all 19 in-scope specs — the Batch
+   1/2 components, the conditional specs, the form-control inputs, product-card /
+   alert / form-field), generate the full bundle `{ ir, results(6 adapters),
+   ledger }`.
+2. Confirm the **un-mutated baseline is all-GREEN** on every gate, so any RED
+   below is caused by the mutation, never a pre-existing failure.
+3. For each **mutation operator**, inject exactly **one** defect into a clone of
+   the bundle → a **mutant**.
+4. Run **all** gates against the mutant.
+5. **Kill criterion:** a mutant is KILLED if ≥1 blocking gate goes RED. A mutant
+   that leaves every gate GREEN is a **SURVIVING MUTANT** — a proven blind spot.
+
+**Faithfulness.** A mutant models a state a real buggy generator could actually
+produce, so survivors are real and not harness artifacts. A dropped trait is
+removed from the adapter's `code` **and** its ledger entry flips to `unaccounted`
+(a real adapter that drops a trait also never called `express()`). IR-anchored
+defects (native-expr-leak, unresolved-TBD) mutate the IR; the perf gate is
+advisory (`ok:true` always) and is never counted as a killer — identical to
+`e2e-multi`'s own wiring. The run is deterministic (sorted corpus, deterministic
+site selection).
+
+## Mutation operators
+
+| Operator | Defect class | Expected killer |
+|---|---|---|
+| `drop-trait` | ledger / declared-io | ledger (`unaccounted`) |
+| `remove-a11y` | a11y (enforced role/live) | a11y output tier |
+| `native-expr-leak` | native-code | native-code |
+| `ref-as-literal` | parity (the F-1 signature) | parity |
+| `hardcode-token-web` | token-guard | token-guard (web) |
+| `hardcode-token-native` | token (native) | — (probe) |
+| `unresolved-tbd` | readiness | readiness |
+| `state-by-color-only` | slop | slop (advisory only) |
+
+## Result
+
+Baseline: **clean** — all 19 features GREEN on every gate.
+
+```
+total mutants: 251
+killed (>=1 gate RED): 228
+survived (all GREEN):  23
+```
+
+| Operator | mutants | killed | survived |
+|---|---|---|---|
+| drop-trait | 101 | 101 | 0 |
+| remove-a11y | 36 | 36 | 0 |
+| native-expr-leak | 38 | 38 | 0 |
+| ref-as-literal | 15 | 15 | 0 |
+| hardcode-token-web | 19 | 19 | 0 |
+| hardcode-token-native | 19 | 0 | **19** |
+| unresolved-tbd | 19 | 19 | 0 |
+| state-by-color-only | 4 | 0 | **4** |
+
+Sample killed mutant per operator (the injected defect → the gate that went RED):
+
+- `drop-trait` — `alert:react:a11y.label` → **ledger**: `react: component "Alert" (action) drops trait a11y.label — neither expressed nor diverged`.
+- `remove-a11y` — `alert:react:role=alert` → **a11y** (+ ledger): `react: IR declares role="alert" but the output has neither the platform trait nor a divergence warning`.
+- `native-expr-leak` — `alert:swiftui` → **native-code**: `swiftui: emits the un-evaluated JS expression "deltaValue >= 0 ? 'positive' : 'negative'" verbatim in native syntax`.
+- `ref-as-literal` — `alert:react:message` → **parity**: `react: ref prop "message" is emitted as the string literal "message"`.
+- `hardcode-token-web` — `alert:react` → **token**: `react: raw hex color in output`.
+- `unresolved-tbd` — `alert` → **readiness**: `/container[2]/action label: "TBD — unknown copy" — resolve before generating`.
+
+The `drop-trait` result is the Layer-1 payoff in aggregate: **all 101 trait-drop
+mutants** — across every adapter and every declared trait, including the ones no
+per-class gate enumerates — are killed by the ledger.
+
+## Surviving mutants (blind spots) — findings
+
+Two defect classes survive every gate. Both are logged, **not fixed inline**
+(per the Layer-3 brief: reveal first, triage together).
+
+| ID | Defect class | Finding |
+|---|---|---|
+| **F-21** | Hardcoded token on a **native** adapter | `token-guard` inspects **web** adapters only (`react`/`vue`/`svelte`) for raw hex / raw px. A raw `#ef4444` or `12px` emitted by SwiftUI / Compose / React Native passes **every** gate. 19/19 native-hardcode mutants survived; independently confirmed 0 RED gates. **Proposed minimal fix (not applied):** extend `token-guard`'s source-tier scan to the native adapters with platform-appropriate literal patterns (a Swift `Color(red:…)` / hex string, a Compose `Color(0x…)`, an RN numeric style literal). This is more than a one-line change (native color/dimension literals are not the web hex/px shapes), so it is reported for triage rather than applied here. |
+| **F-22** | State conveyed by **color alone** | `slop-guard`'s `status-color-only` rule fires but at **`minor`** severity, which is advisory and does not block the gate. Turning a good icon+color status variant into a color-only one is reported but never RED (4/4 mutants survived; `slop.ok` stays true while the issue is listed). This is an **intentional severity choice** (color-only is a smell, not always a defect — some contexts add text instead of an icon), so it is a *known* advisory gap, not necessarily a bug. **Options for triage:** leave advisory (status quo), or escalate to `serious` when a variant is color-only AND carries no adjacent text/icon anywhere. No change applied. |
+
+Everything else — every a11y trait, every token on web, every ref binding, every
+native expression, every TBD — is killed by at least one gate.
+
+## Wiring — runs in ci.mjs on every run
+
+The harness is **fast (~2.3 s)**, so it runs on **every CI run** as step 4 of
+`ci.mjs`, and standalone via `npm run mutate:gates`. Its exit policy makes it a
+useful guard rather than noise: it exits **0** when the baseline is clean and
+every survivor is a **known** blind spot (F-21 / F-22), and **non-zero** on a
+dirty baseline, a **new** survivor class (a fresh blind spot), or a
+previously-killed mutant that now survives (a **gate regression**). So known
+blind spots are tracked as findings without reddening CI, while a real
+regression in any gate — or a brand-new blind spot — fails fast.
+
+`P44` pins the invariant in the regression harness: baseline clean, each
+known-defect operator kills all its mutants, the six killer operators are killed
+by their expected gate, and only F-21 / F-22 survive.
+
+## ci.mjs status under Layer 3
+
+`rm -rf out/ && node _shared/scripts/ci.mjs` → **exit 0**. 19 features PASS, 2
+refused, `verify-patches` **44/44**, mutation testing **251 mutants / 228 killed
+/ 23 survived** (all survivors are the two logged blind spots F-21 / F-22).
+
+## Scope — logged, not built
+
+Layer 3 is **only** the mutation-testing harness plus the two findings it
+surfaced. It does **not**: build Layer 2 (a runtime platform-a11y oracle) or add
+any native toolchain to CI; migrate the IR off ARIA; build the control-state
+primitive or add new components; **fix** the discovered blind spots inline (F-21 /
+F-22 are logged for triage); weaken or remove any gate; or touch agents / skills /
+workflow / AI-router. F-17 / F-18 / F-19 remain deferred as before.

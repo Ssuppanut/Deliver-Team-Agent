@@ -13,6 +13,7 @@
     "spec:ir": "node _shared/scripts/spec-to-ir.mjs",
     "e2e": "node _shared/scripts/e2e-multi.mjs",
     "verify:patches": "node _shared/scripts/verify-patches.mjs",
+    "mutate:gates": "node _shared/scripts/mutate-gates.mjs",
     "ci": "node _shared/scripts/ci.mjs",
     "test": "node _shared/scripts/verify-patches.mjs"
   },
