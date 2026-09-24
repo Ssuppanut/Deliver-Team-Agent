@@ -1,0 +1,17 @@
+component: EmptyState
+purpose: Fill an empty region with an icon, a heading, a description, and an optional call to action.
+audience: End users of the product surface.
+platforms: [react, vue, svelte, react-native, swiftui, compose]
+variants: []
+states: [with-action, without-action]
+interaction: conditional
+a11y:
+  - "role=status so the empty region is surfaced"
+  - "the optional action is a real button with a label"
+scope:
+  in:
+    - "heading + description text"
+    - "optional action button (conditional on an onAction callback)"
+  out:
+    - "leading decorative icon — declared, but PROBING whether a standalone icon"
+    - "element is expressible (icon currently renders only on actions / variant leads)"

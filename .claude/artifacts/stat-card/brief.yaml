@@ -1,0 +1,17 @@
+component: StatCard
+purpose: Show a metric value with a label and a signed delta whose direction is conveyed by sign + icon, never color alone.
+audience: End users of the product surface.
+platforms: [react, vue, svelte, react-native, swiftui, compose]
+variants: [positive, negative]
+states: [default]
+interaction: variants
+a11y:
+  - "delta direction carried by a per-direction icon + an explicit sign in the text, not color alone"
+scope:
+  in:
+    - "value + label text"
+    - "signed delta text (caller supplies the sign, e.g. +2.5% / -1.2%)"
+    - "direction enum (positive/negative) driving a per-direction icon + color"
+  out:
+    - "auto-deriving direction from the numeric sign — PROBING whether an"
+    - "expression can drive variant-case selection (see report)"

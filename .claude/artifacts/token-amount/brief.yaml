@@ -1,0 +1,16 @@
+component: TokenAmount
+purpose: Render a formatted numeric amount to a fixed precision, next to a currency/token symbol.
+audience: End users of a fintech / crypto surface.
+platforms: [react, vue, svelte, react-native, swiftui, compose]
+variants: []
+states: [default]
+interaction: expression
+a11y:
+  - "the amount and symbol are plain text; no interactive affordance"
+scope:
+  in:
+    - "numeric amount formatted to a prop-driven precision"
+    - "a currency / token symbol"
+  out:
+    - "thousands separators / locale formatting — PROBING whether per-platform"
+    - "number formatting (toFixed/precision) is expressible across all 6 adapters"

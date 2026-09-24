@@ -24,6 +24,7 @@ import { route, loadContext } from '../../.ai/router/route.mjs';
 import { loadWorkflow, evaluateWorkflow, runScenarios, lintWorkflow } from './workflow-eval.mjs';
 import { skillRegistryDrift } from './skill-registry.mjs';
 import { checkParity } from './e2e-multi.mjs';
+import { checkNativeExprLeak, checkDeclaredDropped } from './output-guards.mjs';
 import { readFileSync, existsSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 
@@ -36,6 +37,8 @@ const ALERT = resolve(ROOT, '.claude/artifacts/alert/design-spec.yaml');
 const FORM = resolve(ROOT, '.claude/artifacts/form-field/design-spec.yaml');
 const BUTTON = resolve(ROOT, '.claude/artifacts/button/design-spec.yaml');
 const SPINNER = resolve(ROOT, '.claude/artifacts/spinner/design-spec.yaml');
+const EMPTY_STATE = resolve(ROOT, '.claude/artifacts/empty-state/design-spec.yaml');
+const TOKEN_AMOUNT = resolve(ROOT, '.claude/artifacts/token-amount/design-spec.yaml');
 
 let pass = 0, fail = 0;
 const results = [];
@@ -401,6 +404,89 @@ check('P30', 'a11y-guard (output tier): native adapters must express IR role/liv
   assert(bad.issues.some((i) => i.rule === 'a11y-output-live'), 'expected an a11y-output-live finding');
   // The IR-only call (no results) must still behave exactly as before (backward compatible).
   assert(checkA11y(ir).ok, 'IR-only a11y check must not regress');
+});
+
+// --- P31: H1 — native adapters must not emit an un-evaluated JS expression -----
+check('P31', 'native-code: a JS-expression variant discriminant is flagged on native, plain props pass', () => {
+  // RED: a variant driven by a JS expression leaks verbatim into SwiftUI/Compose.
+  const exprIr = { props: [], root: { kind: 'container',
+    variant: { prop: "d >= 0 ? 'positive' : 'negative'", cases: { positive: { color: 'color.success.fg' }, negative: { color: 'color.danger.fg' } } } } };
+  const leaked = {
+    swiftui: { code: `(["positive": A, "negative": B][d >= 0 ? 'positive' : 'negative'] ?? C)` },
+    compose: { code: `when (d >= 0 ? 'positive' : 'negative') { "positive" -> A; else -> B }` },
+    react:   { code: `({ positive: A })[d >= 0 ? 'positive' : 'negative']` }, // web can eval JS — not flagged
+  };
+  const r = checkNativeExprLeak(exprIr, leaked);
+  assert(!r.ok, 'H1 must FAIL when a native adapter emits an un-evaluated JS expression');
+  assert(r.issues.filter((i) => i.rule === 'native-expr-leak').length === 2, 'both SwiftUI and Compose must be flagged (web is not)');
+  // GREEN: a plain-identifier discriminant is valid on every adapter.
+  const plainIr = { props: [], root: { kind: 'container',
+    variant: { prop: 'direction', cases: { positive: { color: 'color.success.fg' }, negative: { color: 'color.danger.fg' } } } } };
+  const plain = { swiftui: { code: `(["positive": A][direction] ?? C)` }, compose: { code: `when (direction) { }` } };
+  assert(checkNativeExprLeak(plainIr, plain).ok, 'a plain-identifier discriminant must pass H1');
+});
+
+// --- P32: H2 — a declared prop / icon an adapter silently drops must FAIL -------
+check('P32', 'declared-io: dropped prop + unrenderable icon FAIL; used prop, warned drop, and rendered icon pass', () => {
+  // H2a RED: a prop absent from the native body, with no divergence warning naming it.
+  const propIr = { props: [{ name: 'precision', type: 'number' }], root: { kind: 'container', children: [] } };
+  const dropped = { swiftui: { code: 'var body: some View {\n  VStack { Text(amount) }\n}', warnings: ['expr simplified to `amount` (native cannot eval "amount.toFixed(precision)")'] } };
+  const rA = checkDeclaredDropped(propIr, dropped);
+  assert(!rA.ok && rA.issues.some((i) => i.rule === 'declared-prop-dropped'), 'H2a must FAIL a prop that only survives in the quoted expr of a warning');
+  // H2a GREEN — used in the body:
+  assert(checkDeclaredDropped(propIr, { swiftui: { code: 'var body: some View {\n  Text(precision)\n}', warnings: [] } }).ok, 'a prop used in the body must pass');
+  // H2a GREEN — a genuine (prose) divergence warning names it:
+  assert(checkDeclaredDropped(propIr, { swiftui: { code: 'var body: some View {\n  VStack {}\n}', warnings: ['precision not applied on native (no number formatting)'] } }).ok, 'a documented divergence must pass');
+  // H2b RED: an icon on a non-action / non-variant node is dropped on every adapter.
+  const iconIr = { props: [], root: { kind: 'container', icon: 'icon.star', children: [] } };
+  const rB = checkDeclaredDropped(iconIr, { react: { code: '<div></div>', warnings: [] }, swiftui: { code: 'var body: some View {}', warnings: [] } });
+  assert(!rB.ok && rB.issues.some((i) => i.rule === 'declared-icon-dropped'), 'H2b must FAIL an icon on a non-rendering node');
+  // H2b GREEN: an icon on an action node renders and must pass.
+  const okIcon = { props: [], root: { kind: 'container', children: [{ kind: 'action', icon: 'icon.check', label: { kind: 'literal', value: 'Go' } }] } };
+  assert(checkDeclaredDropped(okIcon, { react: { code: '<button><Check/></button>', warnings: [] } }).ok, 'an icon on an action must pass H2b');
+});
+
+// --- P33: F-9 — an expression variant discriminant is REFUSED; an enum passes --
+check('P33', 'refusal: an expression variant discriminant is refused with an enum redirect; a plain enum is generated', () => {
+  const exprSpec = { root: { el: 'container',
+    variant: { prop: "d >= 0 ? 'positive' : 'negative'", cases: { positive: { color: 'color.success.fg' }, negative: { color: 'color.danger.fg' } } } } };
+  const r = checkRefusal(exprSpec);
+  assert(r && r.category === 'expression-variant', 'an expression discriminant must be refused');
+  assert(/enum/.test(r.redirect) && /data layer/.test(r.reason), 'refusal must redirect to a plain enum in the data layer');
+  // A plain enum discriminant (and a dotted member path) must NOT be refused.
+  assert(checkRefusal({ root: { el: 'container', variant: { prop: 'direction', cases: { a: {} } } } }) === null, 'a plain enum discriminant must pass');
+  assert(checkRefusal({ root: { el: 'container', variant: { prop: 'item.status', cases: { a: {} } } } }) === null, 'a dotted member path must pass');
+  // Existing category refusals are unchanged.
+  assert(checkRefusal({ category: 'overlay' })?.category === 'overlay', 'overlay refusal must be unchanged');
+});
+
+// --- P34: F-10 — a standalone `el: icon` renders on all 6; declared-io catches its loss --
+check('P34', 'icon element: a standalone icon renders on every adapter; declared-io flags a misplaced icon', () => {
+  const gens = { react: generateReact, vue: generateVue, svelte: generateSvelte, 'react-native': generateReactNative, swiftui: generateSwiftUI, compose: generateCompose };
+  for (const [name, gen] of Object.entries(gens)) {
+    const { code } = gen(EMPTY_STATE, '_verify');
+    assert(/star/i.test(code), `${name}: the standalone icon (star) must render`);
+  }
+  // declared-io passes when the icon is an `el: icon`, fails when it sits on a plain container.
+  const okIr = { props: [], root: { kind: 'container', children: [{ kind: 'icon', icon: 'icon.star' }] } };
+  assert(checkDeclaredDropped(okIr, { react: { code: '<Star/>', warnings: [] } }).ok, 'an el:icon must satisfy declared-io');
+  const badIr = { props: [], root: { kind: 'container', icon: 'icon.star', children: [] } };
+  assert(!checkDeclaredDropped(badIr, { react: { code: '<div/>', warnings: [] } }).ok, 'an icon on a plain container must still FAIL declared-io');
+});
+
+// --- P35: F-11 — native precision formatting is emitted; declared-io catches its loss --
+check('P35', 'number-format: SwiftUI/Compose format precision natively; declared-io flags a dropped precision', () => {
+  const sw = generateSwiftUI(TOKEN_AMOUNT, '_verify').code;
+  assert(/NumberFormatter\(\)/.test(sw) && /minimumFractionDigits = Int\(precision\)/.test(sw), 'swiftui must format via NumberFormatter with precision fraction digits');
+  const cp = generateCompose(TOKEN_AMOUNT, '_verify').code;
+  assert(/NumberFormat\.getNumberInstance/.test(cp) && /minimumFractionDigits = precision\.toInt\(\)/.test(cp), 'compose must format via NumberFormat with precision fraction digits');
+  // Real generated native output must satisfy declared-io (precision now used).
+  const ir = specToIrFromFile(TOKEN_AMOUNT);
+  const real = { swiftui: generateSwiftUI(TOKEN_AMOUNT, '_verify'), compose: generateCompose(TOKEN_AMOUNT, '_verify') };
+  assert(checkDeclaredDropped(ir, real).ok, 'formatted native output must pass declared-io');
+  // If precision is dropped (raw amount, no formatter, no warning), declared-io FAILS.
+  const dropped = { swiftui: { code: 'var body: some View {\n  Text(String(describing: amount))\n}', warnings: [] } };
+  assert(!checkDeclaredDropped(ir, dropped).ok, 'a dropped precision must FAIL declared-io');
 });
 
 console.log('\n=== verify-patches ===');

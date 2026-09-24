@@ -1,0 +1,17 @@
+component: Banner
+purpose: Page-level informational callout with a severity-driven treatment.
+audience: End users of the product surface.
+platforms: [react, vue, svelte, react-native, swiftui, compose]
+variants: [info, success, warning, error]
+states: [default]
+interaction: variants
+a11y:
+  - "role=status so assistive tech surfaces the message region"
+  - "per-severity icon so state survives grayscale / color-blindness"
+scope:
+  in:
+    - "4-way severity enum driving background + foreground tokens"
+    - "per-severity leading icon"
+    - "heading + body text"
+  out:
+    - "dismiss / auto-dismiss (that is the Alert/Toast surface, out of scope here)"

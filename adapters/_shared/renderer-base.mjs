@@ -77,6 +77,7 @@ export class RendererBase {
   visitLink(_node, _children) { throw new Error('visitLink not implemented'); }
   visitInput(_node) { throw new Error('visitInput not implemented'); }
   visitSlot(_node) { throw new Error('visitSlot not implemented'); }
+  visitIcon(_node) { throw new Error('visitIcon not implemented'); }
 
   // --- Control-flow wrapping (adapters override) ---------------------------
   wrapConditional(_node, rendered) { return rendered; }
@@ -103,6 +104,7 @@ export class RendererBase {
       case 'link': out = this.visitLink(node, this.renderChildren(node)); break;
       case 'input': out = this.visitInput(node); break;
       case 'slot': out = this.visitSlot(node); break;
+      case 'icon': out = this.visitIcon(node); break;
       default: throw new Error(`Unknown IR node kind: ${node.kind}`);
     }
     // Conditional is applied before iteration: `each` repeats the guarded node.

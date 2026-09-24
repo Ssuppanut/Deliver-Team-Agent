@@ -29,6 +29,7 @@ import { checkTokens } from '../../.claude/skills/_guards/token-guard/scripts/ch
 import { checkPerf } from '../../.claude/skills/_guards/perf-guard/scripts/check.mjs';
 import { checkSlop } from '../../.claude/skills/_guards/slop-guard/scripts/check.mjs';
 import { checkTbd } from '../../.claude/skills/_meta/critique/scripts/check-tbd.mjs';
+import { checkNativeExprLeak, checkDeclaredDropped } from './output-guards.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '../..');
@@ -145,6 +146,10 @@ function main() {
   const perf = checkPerf(ir, results);
   const slop = checkSlop(ir, results);
   const parity = checkParity(results, ir);
+  // Batch-3 output-tier hardenings (H1: no uncompilable native code; H2: a
+  // declared prop/icon that an adapter silently drops is a failure).
+  const nativeExpr = checkNativeExprLeak(ir, results);
+  const declared = checkDeclaredDropped(ir, results);
 
   console.log('\nguards:');
   console.log(`  readiness    ${fmt(tbd.ok)}  (${tbd.issues.length} unresolved TBD)`);
@@ -153,6 +158,8 @@ function main() {
   console.log(`  perf-guard   ${fmt(perf.ok)}  (${perf.issues.length} issues)`);
   console.log(`  slop-guard   ${fmt(slop.ok)}  (${slop.issues.length} issues)`);
   console.log(`  parity       ${fmt(parity.ok)}  (${parity.issues.length} issues)`);
+  console.log(`  native-code  ${fmt(nativeExpr.ok)}  (${nativeExpr.issues.length} issues)`);
+  console.log(`  declared-io  ${fmt(declared.ok)}  (${declared.issues.length} issues)`);
 
   const allIssues = [
     ...tbd.issues.map((i) => ({ guard: 'readiness', ...i })),
@@ -161,6 +168,8 @@ function main() {
     ...perf.issues.map((i) => ({ guard: 'perf', ...i })),
     ...slop.issues.map((i) => ({ guard: 'slop', ...i })),
     ...parity.issues.map((msg) => ({ guard: 'parity', severity: 'serious', msg })),
+    ...nativeExpr.issues.map((i) => ({ guard: 'native-code', ...i })),
+    ...declared.issues.map((i) => ({ guard: 'declared-io', ...i })),
   ];
   const warnings = Object.entries(results).flatMap(([a, r]) => (r.warnings ?? []).map((w) => `${a}: ${w}`));
 
@@ -173,7 +182,8 @@ function main() {
     for (const w of warnings) console.log(`  ${w}`);
   }
 
-  const gatesPass = tbd.ok && a11y.ok && tokens.ok && perf.ok && slop.ok && parity.ok;
+  const gatesPass = tbd.ok && a11y.ok && tokens.ok && perf.ok && slop.ok && parity.ok
+    && nativeExpr.ok && declared.ok;
   const report = {
     feature,
     component: ir.component,
@@ -187,6 +197,8 @@ function main() {
       perf: { ok: perf.ok, issues: perf.issues },
       slop: { ok: slop.ok, issues: slop.issues },
       parity: { ok: parity.ok, issues: parity.issues },
+      nativeCode: { ok: nativeExpr.ok, issues: nativeExpr.issues },
+      declaredIo: { ok: declared.ok, issues: declared.issues },
     },
     warnings,
     gatesPass,

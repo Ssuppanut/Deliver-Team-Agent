@@ -1,0 +1,33 @@
+component: Banner
+description: Page-level callout with a 4-way severity variant and a per-severity icon.
+category: feedback
+props:
+  - { name: severity, type: enum, required: true, values: [info, success, warning, error] }
+  - { name: title, type: string, required: true }
+  - { name: message, type: string, required: true }
+tokens:
+  - color.fg.default
+  - space.inset.md
+  - space.stack.sm
+  - radius.surface
+root:
+  el: container
+  role: status
+  variant:
+    prop: severity
+    cases:
+      info:    { background: color.info.bg,    color: color.info.fg,    icon: icon.info }
+      success: { background: color.success.bg, color: color.success.fg, icon: icon.success }
+      warning: { background: color.warning.bg, color: color.warning.fg, icon: icon.warning }
+      error:   { background: color.danger.bg,  color: color.danger.fg,  icon: icon.error }
+  style:
+    padding: space.inset.md
+    radius: radius.surface
+  children:
+    - el: heading
+      level: 4
+      text: { kind: ref, value: title }
+    - el: text
+      text: { kind: ref, value: message }
+      style:
+        color: color.fg.default

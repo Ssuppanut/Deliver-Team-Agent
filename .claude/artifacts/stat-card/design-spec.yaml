@@ -1,0 +1,42 @@
+component: StatCard
+description: Metric value + label + a signed delta whose direction shows by icon and sign.
+category: display
+props:
+  - { name: value, type: string, required: true }
+  - { name: label, type: string, required: true }
+  - { name: delta, type: string, required: true }
+  - { name: direction, type: enum, required: true, values: [positive, negative] }
+tokens:
+  - color.fg.default
+  - color.fg.muted
+  - color.success.fg
+  - color.danger.fg
+  - space.stack.sm
+  - space.inset.md
+  - radius.surface
+root:
+  el: container
+  as: article
+  style:
+    gap: space.stack.sm
+    padding: space.inset.md
+    radius: radius.surface
+  children:
+    - el: heading
+      level: 3
+      text: { kind: ref, value: value }
+      style:
+        color: color.fg.default
+    - el: text
+      text: { kind: ref, value: label }
+      style:
+        color: color.fg.muted
+    - el: container
+      variant:
+        prop: direction
+        cases:
+          positive: { color: color.success.fg, icon: icon.success }
+          negative: { color: color.danger.fg,  icon: icon.error }
+      children:
+        - el: text
+          text: { kind: ref, value: delta }

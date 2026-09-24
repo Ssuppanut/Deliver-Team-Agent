@@ -98,6 +98,13 @@ class ReactRenderer extends RendererBase {
     return `<button type="button"${handler}${this.a11yAttrs(node)}${this.styleAttr(node)}>${icon}${label}</button>`;
   }
 
+  visitIcon(node) {
+    const sym = this.icon(node.icon);
+    return node.a11y?.label
+      ? `<${sym} role="img" aria-label=${this.attr(node.a11y.label)}${this.styleAttr(node)} />`
+      : `<${sym} aria-hidden="true"${this.styleAttr(node)} />`;
+  }
+
   visitLink(node, children) {
     const label = node.label ? this.interp(node.label) : children;
     return `<a href=${this.attr(node.href)}${this.styleAttr(node)}>${label}</a>`;

@@ -83,6 +83,13 @@ class VueRenderer extends RendererBase {
     const icon = node.icon ? `<${this.icon(node.icon)} aria-hidden="true" />` : '';
     return `<button type="button"${handler}${this.a11y(node)}${this.styleAttr(node)}>${icon}${node.label ? this.interp(node.label) : ''}</button>`;
   }
+  visitIcon(node) {
+    const sym = this.icon(node.icon);
+    return node.a11y?.label
+      ? `<${sym} role="img"${this.bind('aria-label', node.a11y.label)}${this.styleAttr(node)} />`
+      : `<${sym} aria-hidden="true"${this.styleAttr(node)} />`;
+  }
+
   visitLink(node, children) {
     return `<a${this.bind('href', node.href)}${this.styleAttr(node)}>${node.label ? this.interp(node.label) : children}</a>`;
   }
