@@ -71,7 +71,7 @@ class ComposeRenderer extends RendererBase {
   }
   /** ARIA-style role -> Compose Role (undefined where the enum has none). */
   composeRole(role) {
-    return { img: 'Role.Image', button: 'Role.Button', checkbox: 'Role.Checkbox', tab: 'Role.Tab' }[role];
+    return { img: 'Role.Image', button: 'Role.Button', checkbox: 'Role.Checkbox', switch: 'Role.Switch', slider: null, tab: 'Role.Tab' }[role];
   }
   /** contentDescription + role + liveRegion — never a silent drop of role/live. */
   a11ySemantics(node) {
@@ -79,15 +79,19 @@ class ComposeRenderer extends RendererBase {
     if (node.a11y?.label) {
       const l = node.a11y.label;
       props.push(`contentDescription = ${l.kind === 'literal' ? JSON.stringify(String(l.value)) : l.value}`);
+      this.express('a11y.label', { mechanism: 'contentDescription' });
     }
     if (node.role) {
       const r = this.composeRole(node.role);
-      if (r) props.push(`role = ${r}`);
-      else if (!['presentation', 'none'].includes(node.role)) {
+      if (r) { props.push(`role = ${r}`); this.express(`role=${node.role}`, { mechanism: `semantics { role = ${r} }` }); }
+      else if (['presentation', 'none'].includes(node.role)) {
+        this.express(`role=${node.role}`, { mechanism: 'decorative (Compose default: no semantics role)' });
+      } else {
+        this.diverge(`role=${node.role}`, { reason: `no Compose Role for role "${node.role}"`, fallback: 'liveRegion / contentDescription convey the role', waiver: `a11y-role-${node.role}` });
         this.warnings.push(`a11y: role "${node.role}" has no Compose Role; conveyed via liveRegion / contentDescription where present (documented divergence)`);
       }
     }
-    if (node.a11y?.live) props.push(`liveRegion = LiveRegionMode.${node.a11y.live === 'assertive' ? 'Assertive' : 'Polite'}`);
+    if (node.a11y?.live) { props.push(`liveRegion = LiveRegionMode.${node.a11y.live === 'assertive' ? 'Assertive' : 'Polite'}`); this.express(`a11y.live=${node.a11y.live}`, { mechanism: 'liveRegion' }); }
     if (!props.length) return '';
     return `.semantics { ${props.join('; ')} }`;
   }
@@ -139,7 +143,16 @@ class ComposeRenderer extends RendererBase {
     const inner = node.icon
       ? `Icon(Icons.Default.${this.icon(node.icon)}, contentDescription = null)\n  Text(${this.strExpr(node.label)})`
       : `Text(${this.strExpr(node.label)})`;
-    return `Button(onClick = ${onClick}${this._mod(node)}) {\n  ${inner}\n}`;
+    // Account for an explicit contentDescription / role / live on the button.
+    // Previously only style modifiers were emitted, so the IR's a11y.label was
+    // silently dropped — caught by the Lowering Ledger.
+    const mod = this.modifier(node);
+    const sem = this.a11ySemantics(node);
+    let modArg = '';
+    if (mod && sem) modArg = `, modifier = ${mod}${sem}`;
+    else if (mod) modArg = `, modifier = ${mod}`;
+    else if (sem) modArg = `, modifier = Modifier${sem}`;
+    return `Button(onClick = ${onClick}${modArg}) {\n  ${inner}\n}`;
   }
   visitIcon(node) {
     const sym = this.icon(node.icon);
@@ -160,10 +173,39 @@ class ComposeRenderer extends RendererBase {
   }
   visitInput(node) {
     const i = node.input ?? {};
-    const parts = [`value = ${i.valueProp ?? 'value'}`, `onValueChange = ${i.changeProp ?? '{}'}`];
+    const role = node.role;
+    if (node.a11y?.describedBy) this.diverge('a11y.describedBy', { reason: 'Compose has no aria-describedby', fallback: 'adjacent Text / stateDescription', waiver: 'a11y-describedby-native' });
+    // The accessible name for a bare Compose control (which has no text-label param)
+    // rides an explicit contentDescription in the semantics block.
     const label = this.plain(node.label ?? node.a11y?.label);
+    const cd = (node.a11y?.label && label) ? `; contentDescription = ${label}` : '';
+
+    // Real form controls for the toggle / adjustable roles — never a bare TextField.
+    if (role === 'checkbox' || role === 'switch') {
+      const checked = i.valueProp ?? 'checked';
+      const onCh = i.changeProp ?? '{}';
+      const roleName = role === 'switch' ? 'Role.Switch' : 'Role.Checkbox';
+      const control = role === 'switch' ? 'Switch' : 'Checkbox';
+      if (node.a11y?.invalid) this.diverge('a11y.invalid', { reason: `Compose ${control} has no isError`, fallback: 'adjacent error Text conveys the invalid state', waiver: 'a11y-invalid-compose' });
+      this.express(`role=${role}`, { mechanism: `${control}(checked/onCheckedChange) + Modifier.semantics { role = ${roleName} }` });
+      if (cd) this.express('a11y.label', { mechanism: 'semantics { contentDescription }' });
+      return `${control}(checked = ${checked}, onCheckedChange = ${onCh}, modifier = Modifier.semantics { role = ${roleName}${cd} })`;
+    }
+    if (role === 'slider') {
+      const value = i.valueProp ?? 'value';
+      const onCh = i.changeProp ?? '{}';
+      if (node.a11y?.invalid) this.diverge('a11y.invalid', { reason: 'Compose Slider has no isError', fallback: 'adjacent error Text conveys the invalid state', waiver: 'a11y-invalid-compose' });
+      this.express(`role=${role}`, { mechanism: 'Slider(value/onValueChange) — built-in progressBarRangeInfo semantics' });
+      if (cd) this.express('a11y.label', { mechanism: 'semantics { contentDescription }' });
+      const sliderMod = cd ? `, modifier = Modifier.semantics { ${cd.replace(/^; /, '')} }` : '';
+      return `Slider(value = ${value}, onValueChange = ${onCh}${sliderMod})`;
+    }
+
+    if (node.a11y?.label) this.express('a11y.label', { mechanism: 'TextField label slot (Text)' });
+    const parts = [`value = ${i.valueProp ?? 'value'}`, `onValueChange = ${i.changeProp ?? '{}'}`];
     if (label) parts.push(`label = { Text(${label}) }`);
-    if (node.a11y?.invalid) parts.push(`isError = ${node.a11y.invalid} != null`);
+    if (node.a11y?.invalid) { parts.push(`isError = ${node.a11y.invalid} != null`); this.express('a11y.invalid', { mechanism: 'isError' }); }
+    if (role) this.diverge(`role=${role}`, { reason: `no Compose Role for role "${role}" on a text field`, fallback: 'label conveys intent', waiver: `a11y-role-${role}` });
     const mod = this.modifierArg(node);
     if (mod) parts.push(mod);
     return `TextField(${parts.join(', ')})`;
@@ -237,13 +279,13 @@ class ComposeRenderer extends RendererBase {
 
 export function generateCompose(specPath, feature) {
   const ir = specToIrFromFile(specPath);
-  const renderer = new ComposeRenderer(ir, { iconMap });
+  const renderer = new ComposeRenderer(ir, { iconMap, adapter: "compose" });
   const code = renderer.build();
   const outDir = resolve(ROOT, 'out/compose', feature);
   mkdirSync(outDir, { recursive: true });
   const file = resolve(outDir, `${ir.component}.kt`);
   writeFileSync(file, code);
-  return { file, code, warnings: renderer.warnings, component: ir.component, usedIconsCount: renderer.usedIcons.size };
+  return { file, code, warnings: renderer.warnings, component: ir.component, usedIconsCount: renderer.usedIcons.size, ledger: renderer.ledger };
 }
 
 function main() {

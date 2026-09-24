@@ -1,0 +1,21 @@
+component: SwitchToggle
+description: A labeled on/off switch — a controlled boolean form control.
+category: input
+props:
+  - { name: label, type: string, required: true }
+  - { name: checked, type: boolean, required: true }
+  - { name: onToggle, type: function, required: true }
+tokens:
+  - color.fg.default
+  - space.inset.sm
+root:
+  el: input
+  role: switch
+  label: { kind: ref, value: label }
+  input:
+    valueProp: checked
+    changeProp: onToggle
+  a11y:
+    label: { kind: ref, value: label }
+  style:
+    padding: space.inset.sm

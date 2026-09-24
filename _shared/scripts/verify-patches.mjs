@@ -25,6 +25,8 @@ import { loadWorkflow, evaluateWorkflow, runScenarios, lintWorkflow } from './wo
 import { skillRegistryDrift } from './skill-registry.mjs';
 import { checkParity } from './e2e-multi.mjs';
 import { checkNativeExprLeak, checkDeclaredDropped } from './output-guards.mjs';
+import { checkLedger, loadWaivers } from './ledger-gate.mjs';
+import { RendererBase } from '../../adapters/_shared/renderer-base.mjs';
 import { readFileSync, existsSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 
@@ -558,6 +560,97 @@ check('P39', 'refusal: an expression condition is refused with a flag redirect; 
   ] } }) === null, 'a plain boolean flag condition must pass');
   // The F-9 variant-expression refusal still fires (regression guard).
   assert(checkRefusal({ root: { el: 'container', variant: { prop: "d >= 0 ? 'a' : 'b'", cases: { a: {} } } } })?.category === 'expression-variant', 'variant-expression refusal must be unchanged');
+});
+
+const CHECKBOX = resolve(ROOT, '.claude/artifacts/checkbox/design-spec.yaml');
+const SWITCH = resolve(ROOT, '.claude/artifacts/switch-toggle/design-spec.yaml');
+const SLIDER = resolve(ROOT, '.claude/artifacts/slider/design-spec.yaml');
+
+// A minimal renderer that emits nothing and accounts for nothing, used to prove
+// the Lowering Ledger derives `pending` from the IR (no whitelist) and records a
+// silent drop as `unaccounted`.
+class NoopRenderer extends RendererBase {
+  visitText() { return ''; }
+  visitContainer(_n, c) { return c; }
+  renderComponent(r) { return r; }
+}
+
+// --- P40: Lowering Ledger — an unaccounted trait FAILS, naming adapter/component/trait
+check('P40', 'ledger: a trait neither expressed nor diverged is `unaccounted` and FAILS, naming adapter/component/trait', () => {
+  // A renderer that drops a declared role leaves it pending -> unaccounted.
+  const ir = { component: 'Widget', props: [], root: { kind: 'text', role: 'status', text: { kind: 'literal', value: 'x' } } };
+  const dropped = new NoopRenderer(ir, { adapter: 'react' });
+  dropped.build();
+  const un = dropped.ledger.filter((e) => e.status === 'unaccounted');
+  assert(un.length === 1 && un[0].traitId === 'role=status', 'a dropped trait must be recorded unaccounted');
+  const res = checkLedger(dropped.ledger);
+  assert(!res.ok, 'unaccounted must FAIL the ledger gate');
+  const msg = res.issues.map((i) => i.msg).join('\n');
+  assert(/react/.test(msg) && /Widget/.test(msg) && /role=status/.test(msg), 'the failure must name adapter, component and traitId');
+  // Expressing the same trait makes it PASS — the gate reads the ledger, not source.
+  const expressed = new NoopRenderer(ir, { adapter: 'react' });
+  expressed._pending = new Set(expressed.declaredTraits(ir.root));
+  expressed._pendingNode = ir.root;
+  expressed.express('role=status', { mechanism: 'role="status"' });
+  assert(checkLedger([...expressed.ledger]).ok, 'an expressed trait must PASS');
+});
+
+// --- P41: no whitelist — a brand-NEW trait id is enforced with zero gate edits ---
+check('P41', 'ledger: a never-before-seen role value auto-enrolls from the IR and is enforced (no whitelist)', () => {
+  const NOVEL = 'quantum-frobnicator-3000';
+  const base = new RendererBase({ component: 'X', props: [], root: {} });
+  // declaredTraits derives the pending set purely from the IR node — a novel role
+  // enrolls with no code that knows about it.
+  const traits = base.declaredTraits({ role: NOVEL, a11y: { label: { kind: 'literal', value: 'l' } } });
+  assert(traits.includes(`role=${NOVEL}`), 'a novel role value must auto-enrol as a pending trait');
+  // End-to-end: a renderer that does not handle the novel role drops it -> unaccounted -> FAIL,
+  // without any edit to ledger-gate.mjs or a role list.
+  const ir = { component: 'Novel', props: [], root: { kind: 'text', role: NOVEL, text: { kind: 'literal', value: 'x' } } };
+  const r = new NoopRenderer(ir, { adapter: 'svelte' });
+  r.build();
+  const res = checkLedger(r.ledger);
+  assert(!res.ok && res.issues.some((i) => i.msg.includes(`role=${NOVEL}`)), 'the unseen trait must be enforced and named on FAIL');
+});
+
+// --- P42: form-control roles are EXPRESSED (real native control) on all 3 natives
+check('P42', 'ledger: checkbox/switch/slider roles are expressed with a real native mechanism on RN, SwiftUI, Compose', () => {
+  const cases = [
+    { spec: CHECKBOX, role: 'checkbox', rn: /<Switch\b[^>]*accessibilityRole="checkbox"/, swift: /Toggle\(/, compose: /Checkbox\(checked/ },
+    { spec: SWITCH, role: 'switch', rn: /<Switch\b[^>]*accessibilityRole="switch"/, swift: /Toggle\(/, compose: /Switch\(checked/ },
+    { spec: SLIDER, role: 'slider', rn: /<Slider\b[^>]*accessibilityRole="adjustable"/, swift: /Slider\(value:/, compose: /Slider\(value =/ },
+  ];
+  for (const c of cases) {
+    const gens = { 'react-native': generateReactNative, swiftui: generateSwiftUI, compose: generateCompose };
+    const pats = { 'react-native': c.rn, swiftui: c.swift, compose: c.compose };
+    const entries = [];
+    for (const [ad, gen] of Object.entries(gens)) {
+      const out = gen(c.spec, `verify-${c.role}`);
+      entries.push(...out.ledger);
+      // The role is expressed (not diverged, not dropped) with a real mechanism.
+      const e = out.ledger.find((x) => x.traitId === `role=${c.role}`);
+      assert(e && e.status === 'expressed' && e.mechanism, `${ad}: role=${c.role} must be expressed with a mechanism, got ${JSON.stringify(e)}`);
+      // The real native control appears in the generated source.
+      assert(pats[ad].test(out.code), `${ad}: expected a real ${c.role} control in output`);
+    }
+    // No unaccounted anywhere for these controls; ledger gate passes.
+    assert(!entries.some((e) => e.status === 'unaccounted'), `${c.role}: no trait may be unaccounted`);
+    assert(checkLedger(entries).ok, `${c.role}: ledger gate must pass`);
+  }
+});
+
+// --- P43: waiver policy — an expired / unapproved waiver cannot authorize a divergence
+check('P43', 'ledger: a divergence needs a matching, non-expired, approved waiver; expired/unknown ones FAIL', () => {
+  const diverged = [{ component: 'C', adapter: 'swiftui', kind: 'container', traitId: 'role=group', status: 'diverged', waiver: 'a11y-role-group' }];
+  // Valid, non-expired waiver in the registry -> PASS.
+  assert(checkLedger(diverged, { now: new Date('2026-09-24') }).ok, 'a valid waiver must authorize the divergence');
+  // Same waiver evaluated far in the future (past its expiry) -> FAIL.
+  assert(!checkLedger(diverged, { now: new Date('2999-01-01') }).ok, 'an expired waiver must not authorize a divergence');
+  // A divergence citing an unknown waiver id -> FAIL.
+  const unknown = [{ component: 'C', adapter: 'swiftui', kind: 'container', traitId: 'role=zzz', status: 'diverged', waiver: 'no-such-waiver' }];
+  assert(!checkLedger(unknown).ok, 'an unknown waiver id must FAIL');
+  // Every waiver actually in the registry is well-formed (approver + future expiry).
+  const { problems } = loadWaivers(new Date('2026-09-24'));
+  assert(problems.length === 0, `registry must have no open-ended/expired waivers: ${problems.join('; ')}`);
 });
 
 console.log('\n=== verify-patches ===');

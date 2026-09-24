@@ -1,0 +1,22 @@
+component: Slider
+description: A labeled range slider — a controlled numeric adjustable form control.
+category: input
+props:
+  - { name: label, type: string, required: true }
+  - { name: value, type: number, required: true }
+  - { name: onChange, type: function, required: true }
+tokens:
+  - color.fg.default
+  - space.inset.sm
+root:
+  el: input
+  role: slider
+  label: { kind: ref, value: label }
+  input:
+    valueProp: value
+    changeProp: onChange
+    inputType: number
+  a11y:
+    label: { kind: ref, value: label }
+  style:
+    padding: space.inset.sm

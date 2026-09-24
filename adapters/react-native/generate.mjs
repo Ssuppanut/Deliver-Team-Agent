@@ -55,15 +55,16 @@ class RNRenderer extends RendererBase {
   /** accessibilityLabel + role + live + busy — never a silent drop of role/live. */
   a11yProps(node) {
     const out = [];
-    if (node.a11y?.label) out.push(` accessibilityLabel={${this.attr(node.a11y.label)}}`);
+    if (node.a11y?.label) { out.push(` accessibilityLabel={${this.attr(node.a11y.label)}}`); this.express('a11y.label', { mechanism: 'accessibilityLabel' }); }
     if (node.role) {
       const r = this.rnRole(node.role);
-      if (r) out.push(` accessibilityRole="${r}"`);
-      else if (!['presentation', 'none'].includes(node.role)) {
+      if (r) { out.push(` accessibilityRole="${r}"`); this.express(`role=${node.role}`, { mechanism: `accessibilityRole="${r}"` }); }
+      else {
+        this.diverge(`role=${node.role}`, { reason: `no React Native accessibilityRole for "${node.role}"`, fallback: 'label + live region convey the role', waiver: `a11y-role-${node.role}` });
         this.warnings.push(`a11y: role "${node.role}" has no React Native accessibilityRole; conveyed via live region / label where present (documented divergence)`);
       }
     }
-    if (node.a11y?.live) out.push(` accessibilityLiveRegion="${node.a11y.live === 'assertive' ? 'assertive' : 'polite'}"`);
+    if (node.a11y?.live) { out.push(` accessibilityLiveRegion="${node.a11y.live === 'assertive' ? 'assertive' : 'polite'}"`); this.express(`a11y.live=${node.a11y.live}`, { mechanism: 'accessibilityLiveRegion' }); }
     // A live status region is a busy/updating region (e.g. Spinner).
     if (node.role === 'status' && node.a11y?.live) out.push(` accessibilityState={{ busy: true }}`);
     return out.join('');
@@ -86,7 +87,10 @@ class RNRenderer extends RendererBase {
   visitAction(node) {
     const press = node.onEvent ? ` onPress={${node.onEvent}}` : '';
     const icon = node.icon ? `<${this.icon(node.icon)} />` : '';
-    return `<Pressable accessibilityRole="button"${press}${this.style(node)}>\n  ${icon}<Text>${node.label ? this.interp(node.label) : ''}</Text>\n</Pressable>`;
+    // a11yProps accounts for an explicit accessibilityLabel / live on the button
+    // (role is already fixed to "button" here). Without this the IR's a11y.label
+    // was silently dropped — caught by the Lowering Ledger.
+    return `<Pressable accessibilityRole="button"${press}${this.a11yProps(node)}${this.style(node)}>\n  ${icon}<Text>${node.label ? this.interp(node.label) : ''}</Text>\n</Pressable>`;
   }
   visitIcon(node) {
     const sym = this.icon(node.icon);
@@ -101,14 +105,38 @@ class RNRenderer extends RendererBase {
   }
   visitInput(node) {
     const i = node.input ?? {};
-    const value = i.valueProp ? ` value={${i.valueProp}}` : '';
-    const change = i.changeProp ? ` onChangeText={${i.changeProp}}` : '';
+    const role = node.role;
     // A visible label also serves as the accessible name (no htmlFor on native).
     const labelSource = node.label ?? node.a11y?.label;
     const labelEl = node.label ? `<Text>${this.interp(node.label)}</Text>\n` : '';
     const a11yLabel = labelSource ? ` accessibilityLabel={${this.attr(labelSource)}}` : '';
-    const invalid = node.a11y?.invalid ? ` aria-invalid={!!${node.a11y.invalid}}` : '';
-    return `${labelEl}<TextInput${value}${change}${a11yLabel}${invalid}${this.style(node)} />`;
+    if (node.a11y?.label) this.express('a11y.label', { mechanism: 'accessibilityLabel' });
+    if (node.a11y?.describedBy) this.diverge('a11y.describedBy', { reason: 'React Native has no aria-describedby', fallback: 'adjacent live-region Text / accessibilityHint', waiver: 'a11y-describedby-native' });
+    const invalidAttr = node.a11y?.invalid ? ` aria-invalid={!!${node.a11y.invalid}}` : '';
+    if (node.a11y?.invalid) this.express('a11y.invalid', { mechanism: 'aria-invalid' });
+
+    // Real form controls for the toggle / adjustable roles — never a bare TextInput.
+    if (role === 'checkbox' || role === 'switch') {
+      const v = i.valueProp ?? 'checked';
+      const onCh = i.changeProp ? ` onValueChange={${i.changeProp}}` : '';
+      this.express(`role=${role}`, { mechanism: `<Switch> + accessibilityRole="${role}" + accessibilityState={{checked}}` });
+      return `${labelEl}<Switch value={${v}}${onCh} accessibilityRole="${role}" accessibilityState={{ checked: ${v} }}${a11yLabel}${invalidAttr}${this.style(node)} />`;
+    }
+    if (role === 'slider') {
+      const v = i.valueProp ?? 'value';
+      const onCh = i.changeProp ? ` onValueChange={${i.changeProp}}` : '';
+      this.express(`role=${role}`, { mechanism: '<Slider> + accessibilityRole="adjustable" + accessibilityValue' });
+      return `${labelEl}<Slider value={${v}}${onCh} accessibilityRole="adjustable" accessibilityValue={{ now: ${v} }}${a11yLabel}${this.style(node)} />`;
+    }
+    const value = i.valueProp ? ` value={${i.valueProp}}` : '';
+    const change = i.changeProp ? ` onChangeText={${i.changeProp}}` : '';
+    let roleAttr = '';
+    if (role) {
+      const r = this.rnRole(role);
+      if (r) { roleAttr = ` accessibilityRole="${r}"`; this.express(`role=${role}`, { mechanism: `accessibilityRole="${r}"` }); }
+      else this.diverge(`role=${role}`, { reason: `no React Native accessibilityRole for "${role}"`, fallback: 'label', waiver: `a11y-role-${role}` });
+    }
+    return `${labelEl}<TextInput${value}${change}${a11yLabel}${invalidAttr}${roleAttr}${this.style(node)} />`;
   }
   visitSlot(node) {
     const name = node.label?.value ?? 'children';
@@ -146,12 +174,14 @@ class RNRenderer extends RendererBase {
     const props = this.ir.props.map((p) => `  ${p.name}${p.required ? '' : '?'}: ${this.tsType(p)};`).join('\n');
     const args = this.ir.props.map((p) => p.name).join(', ');
     const rnImports = new Set(['View', 'Text', 'Image', 'Pressable', 'TextInput', 'Linking']);
+    if (/<Switch\b/.test(root)) rnImports.add('Switch');
+    const sliderImport = /<Slider\b/.test(root) ? `import Slider from '@react-native-community/slider';\n` : '';
     const iconImport = this.usedIcons.size
       ? `import { ${[...this.usedIcons].join(', ')} } from '${ICON_LIB}';\n`
       : '';
     return `import React from 'react';\n`
       + `import { ${[...rnImports].join(', ')} } from 'react-native';\n`
-      + `${iconImport}import { tokens } from '../../_shared/tokens/tokens-rn';\n\n`
+      + `${sliderImport}${iconImport}import { tokens } from '../../_shared/tokens/tokens-rn';\n\n`
       + `export interface ${name}Props {\n${props}\n}\n\n`
       + `export function ${name}({ ${args} }: ${name}Props) {\n  return (\n${indent(root, 4)}\n  );\n}\n`;
   }
@@ -159,13 +189,13 @@ class RNRenderer extends RendererBase {
 
 export function generateReactNative(specPath, feature) {
   const ir = specToIrFromFile(specPath);
-  const renderer = new RNRenderer(ir, { iconMap });
+  const renderer = new RNRenderer(ir, { iconMap, adapter: "react-native" });
   const code = renderer.build();
   const outDir = resolve(ROOT, 'out/react-native', feature);
   mkdirSync(outDir, { recursive: true });
   const file = resolve(outDir, `${ir.component}.tsx`);
   writeFileSync(file, code);
-  return { file, code, warnings: renderer.warnings, component: ir.component, usedIconsCount: renderer.usedIcons.size };
+  return { file, code, warnings: renderer.warnings, component: ir.component, usedIconsCount: renderer.usedIcons.size, ledger: renderer.ledger };
 }
 
 function main() {

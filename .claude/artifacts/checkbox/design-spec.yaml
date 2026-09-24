@@ -1,0 +1,21 @@
+component: Checkbox
+description: A labeled binary checkbox — a controlled boolean form control.
+category: input
+props:
+  - { name: label, type: string, required: true }
+  - { name: checked, type: boolean, required: true }
+  - { name: onChange, type: function, required: true }
+tokens:
+  - color.fg.default
+  - space.inset.sm
+root:
+  el: input
+  role: checkbox
+  label: { kind: ref, value: label }
+  input:
+    valueProp: checked
+    changeProp: onChange
+  a11y:
+    label: { kind: ref, value: label }
+  style:
+    padding: space.inset.sm

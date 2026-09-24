@@ -67,16 +67,21 @@ class SwiftUIRenderer extends RendererBase {
       const l = node.a11y.label;
       const v = l.kind === 'literal' ? JSON.stringify(String(l.value)) : safe(l.value);
       out.push(`\n  .accessibilityLabel(${v})`);
+      this.express('a11y.label', { mechanism: '.accessibilityLabel' });
     }
     // Map ARIA-style role + live to SwiftUI accessibility traits — never a silent drop.
     const TRAIT = { img: '.isImage', button: '.isButton', header: '.isHeader', link: '.isLink' };
     if (node.role && TRAIT[node.role]) {
       out.push(`\n  .accessibilityAddTraits(${TRAIT[node.role]})`);
-    } else if (node.role && !['presentation', 'none'].includes(node.role)) {
+      this.express(`role=${node.role}`, { mechanism: `.accessibilityAddTraits(${TRAIT[node.role]})` });
+    } else if (node.role && ['presentation', 'none'].includes(node.role)) {
+      this.express(`role=${node.role}`, { mechanism: 'decorative (SwiftUI default: no a11y role)' });
+    } else if (node.role) {
+      this.diverge(`role=${node.role}`, { reason: `no direct SwiftUI trait for role "${node.role}"`, fallback: 'label / live updates convey the role', waiver: `a11y-role-${node.role}` });
       this.warnings.push(`a11y: role "${node.role}" has no direct SwiftUI trait; conveyed via label / updates where present (documented divergence)`);
     }
     // A live region — .updatesFrequently is SwiftUI's closest "re-announce on change" signal.
-    if (node.a11y?.live) out.push(`\n  .accessibilityAddTraits(.updatesFrequently)`);
+    if (node.a11y?.live) { out.push(`\n  .accessibilityAddTraits(.updatesFrequently)`); this.express(`a11y.live=${node.a11y.live}`, { mechanism: '.accessibilityAddTraits(.updatesFrequently)' }); }
     return out.join('');
   }
   variantIcon(node) {
@@ -131,11 +136,41 @@ class SwiftUIRenderer extends RendererBase {
   }
   visitInput(node) {
     const i = node.input ?? {};
+    const role = node.role;
     const title = this.plain(node.label ?? node.a11y?.label);
+    if (node.a11y?.describedBy) this.diverge('a11y.describedBy', { reason: 'SwiftUI has no aria-describedby', fallback: '.accessibilityHint / adjacent Text', waiver: 'a11y-describedby-native' });
+    if (node.a11y?.invalid) this.diverge('a11y.invalid', { reason: 'SwiftUI has no direct aria-invalid trait', fallback: 'label / adjacent error Text conveys the invalid state', waiver: 'a11y-invalid-swiftui' });
+
+    // Real form controls for the toggle / adjustable roles — never a bare TextField.
+    if (role === 'checkbox' || role === 'switch') {
+      const bind = i.changeProp
+        ? `Binding(get: { ${safe(i.valueProp ?? 'checked')} }, set: { ${safe(i.changeProp)}($0) })`
+        : `$${safe(i.valueProp ?? 'checked')}`;
+      this.express(`role=${role}`, { mechanism: 'Toggle (isOn binding)' });
+      // The Toggle's title label IS its accessible name.
+      if (node.a11y?.label) this.express('a11y.label', { mechanism: 'Toggle title label (accessible name)' });
+      return `Toggle(${title}, isOn: ${bind})${this.modifiers(node)}`;
+    }
+    if (role === 'slider') {
+      const bind = i.changeProp
+        ? `Binding(get: { ${safe(i.valueProp ?? 'value')} }, set: { ${safe(i.changeProp)}($0) })`
+        : `$${safe(i.valueProp ?? 'value')}`;
+      this.express(`role=${role}`, { mechanism: 'Slider (value binding)' });
+      // Slider has no title argument, so the label rides an explicit modifier.
+      let labelMod = '';
+      if (node.a11y?.label) { labelMod = `\n  .accessibilityLabel(${title})`; this.express('a11y.label', { mechanism: '.accessibilityLabel' }); }
+      return `Slider(value: ${bind})${labelMod}${this.modifiers(node)}`;
+    }
+
     // Wire the controlled value+onChange contract through a custom Binding.
     const binding = i.changeProp
       ? `Binding(get: { ${safe(i.valueProp ?? 'value')} }, set: { ${safe(i.changeProp)}($0) })`
       : `$${safe(i.valueProp ?? 'value')}`;
+    if (node.a11y?.label) this.express('a11y.label', { mechanism: 'TextField title label (accessible name)' });
+    if (role) {
+      // A generic role on a text field has no SwiftUI trait — account for it honestly.
+      this.diverge(`role=${role}`, { reason: `no direct SwiftUI trait for role "${role}"`, fallback: 'label conveys intent', waiver: `a11y-role-${role}` });
+    }
     return `TextField(${title}, text: ${binding})${this.modifiers(node)}`;
   }
   visitSlot() { return 'content'; }
@@ -196,13 +231,13 @@ class SwiftUIRenderer extends RendererBase {
 
 export function generateSwiftUI(specPath, feature) {
   const ir = specToIrFromFile(specPath);
-  const renderer = new SwiftUIRenderer(ir, { iconMap });
+  const renderer = new SwiftUIRenderer(ir, { iconMap, adapter: "swiftui" });
   const code = renderer.build();
   const outDir = resolve(ROOT, 'out/swiftui', feature);
   mkdirSync(outDir, { recursive: true });
   const file = resolve(outDir, `${ir.component}.swift`);
   writeFileSync(file, code);
-  return { file, code, warnings: renderer.warnings, component: ir.component, usedIconsCount: renderer.usedIcons.size };
+  return { file, code, warnings: renderer.warnings, component: ir.component, usedIconsCount: renderer.usedIcons.size, ledger: renderer.ledger };
 }
 
 function main() {

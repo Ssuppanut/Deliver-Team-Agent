@@ -20,12 +20,56 @@ export class RendererBase {
    * @param {Record<string,string>} opts.tokenMap  semantic token -> platform ref
    * @param {Record<string,string>} opts.iconMap   icon token -> platform symbol
    */
-  constructor(ir, { tokenMap = {}, iconMap = {} } = {}) {
+  constructor(ir, { tokenMap = {}, iconMap = {}, adapter = 'unknown' } = {}) {
     this.ir = ir;
     this.tokenMap = tokenMap;
     this.iconMap = iconMap;
+    this.adapter = adapter;
     this.usedIcons = new Set();
     this.warnings = [];
+    // --- Lowering Ledger (Layer 1: totality) -------------------------------
+    // Every semantic trait the IR declares on a node must be ACCOUNTED FOR by
+    // this adapter: `express`ed via a real platform mechanism, or `diverge`d
+    // with an explicit documented reason. A trait left unaccounted after the
+    // node renders is recorded `unaccounted` and FAILS the ledger gate. The
+    // gate reads this ledger, never the generated source.
+    this.ledger = [];
+    this._pending = null;      // Set<traitId> for the node currently rendering
+    this._pendingNode = null;
+  }
+
+  /**
+   * The semantic traits the IR declares on a node — derived from the IR, with
+   * NO hardcoded list of known roles/values. Any new role value or a11y field
+   * enrols automatically, so a brand-new trait is enforced without a gate edit.
+   * @returns {string[]} trait ids (value-encoded so distinct values stay distinct)
+   */
+  declaredTraits(node) {
+    const t = [];
+    if (node.role) t.push(`role=${node.role}`);
+    const a = node.a11y || {};
+    if (a.label) t.push('a11y.label');
+    if (a.live) t.push(`a11y.live=${a.live}`);
+    if (a.invalid) t.push('a11y.invalid');
+    if (a.labelledBy) t.push('a11y.labelledBy');
+    if (a.describedBy) t.push('a11y.describedBy');
+    return t;
+  }
+
+  /** Account for a trait: this adapter emitted it via a real platform mechanism. */
+  express(traitId, { mechanism, loc } = {}) {
+    if (this._pending && this._pending.has(traitId)) {
+      this._pending.delete(traitId);
+      this.ledger.push({ component: this.ir.component, adapter: this.adapter, kind: this._pendingNode?.kind, traitId, status: 'expressed', mechanism, loc });
+    }
+  }
+
+  /** Account for a trait: this platform genuinely cannot express it (documented). */
+  diverge(traitId, { reason, fallback, waiver } = {}) {
+    if (this._pending && this._pending.has(traitId)) {
+      this._pending.delete(traitId);
+      this.ledger.push({ component: this.ir.component, adapter: this.adapter, kind: this._pendingNode?.kind, traitId, status: 'diverged', reason, fallback, waiver });
+    }
   }
 
   /** Resolve a semantic token name to its platform reference. */
@@ -98,6 +142,14 @@ export class RendererBase {
 
   /** Dispatch a single node to the right visitor, then apply control flow. */
   renderNode(node) {
+    // Open a ledger frame for this node: its declared traits are `pending` until
+    // the adapter accounts for each. Frames nest (save/restore) so a parent's
+    // traits are accounted in its own visitor after its children have rendered.
+    const prevPending = this._pending;
+    const prevNode = this._pendingNode;
+    this._pending = new Set(this.declaredTraits(node));
+    this._pendingNode = node;
+
     let out;
     switch (node.kind) {
       case 'container': out = this.visitContainer(node, this.renderChildren(node)); break;
@@ -112,6 +164,14 @@ export class RendererBase {
       case 'conditional': out = this.visitConditional(node); break;
       default: throw new Error(`Unknown IR node kind: ${node.kind}`);
     }
+
+    // Totality check: anything still pending was neither expressed nor diverged.
+    for (const traitId of this._pending) {
+      this.ledger.push({ component: this.ir.component, adapter: this.adapter, kind: node.kind, traitId, status: 'unaccounted' });
+    }
+    this._pending = prevPending;
+    this._pendingNode = prevNode;
+
     // A `conditional` node consumes its own `when` (the branch condition) inside
     // visitConditional, so it must NOT also be wrapped by the element-level
     // one-way `when` here.

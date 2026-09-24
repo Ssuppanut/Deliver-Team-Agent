@@ -567,3 +567,163 @@ a true if/else, two conditional fixtures (`cond-show`, `cond-list`), P36–P39, 
 this record. No gate weakened or removed; overlay/table refusal unchanged; no new
 roadmap components; no agent/skill/workflow/AI-router changes beyond the
 F-9-consistent refusal category.
+
+---
+
+# Layer 1 — The Lowering Ledger (totality check)
+
+## Why this layer exists
+
+Three times in a row a real defect passed **every** gate green because the
+system tolerated an adapter *silently dropping* a semantic trait it could not
+express. Most recently: the form-control roles `role=switch / checkbox / slider`
+were dropped on all three native adapters — the checkbox rendered as a bare
+`TextField` — while every gate stayed green (findings **F-14 / F-15 / F-16**).
+
+The root cause was **not** any one adapter. It was the *shape* of our gate
+hardening: every fix was **per-class / whitelist-based** (a11y-guard enforces a
+fixed `ENFORCED_ROLES` set; declared-io enumerates prop/icon drops). Each new
+component category introduced a trait outside every whitelist, so the same
+silent-drop class re-appeared one component later, invisibly.
+
+Layer 1 makes a silent drop **structurally impossible** rather than
+detectable-once-we-add-a-rule. It does **not** replace the existing gates — it
+sits underneath them as a totality check.
+
+## Mechanism
+
+For every node, the base renderer (`adapters/_shared/renderer-base.mjs`) derives
+a `pending` set of the traits the **IR** declares on that node
+(`declaredTraits`): `role=<value>`, `a11y.label`, `a11y.live=<value>`,
+`a11y.invalid`, `a11y.labelledBy`, `a11y.describedBy`. The set is derived from
+the IR — **there is no list of known roles** — so a brand-new role value or a11y
+field enrols automatically.
+
+Each adapter, as it renders the node, must account for every pending trait:
+
+- `express(traitId, { mechanism })` — emitted via a real platform mechanism.
+- `diverge(traitId, { reason, fallback, waiver })` — the platform genuinely
+  cannot express it; cites a waiver.
+
+Anything still pending after the node renders is recorded **`unaccounted`**. The
+`ledger` gate (`_shared/scripts/ledger-gate.mjs`, wired into `e2e-multi.mjs`)
+reads that ledger — **never the generated source** — and enforces:
+
+| status | outcome |
+|---|---|
+| `expressed` | PASS |
+| `diverged` | requires a matching, **non-expired, approved** waiver (else FAIL) |
+| `unaccounted` | **FAIL** — names component / adapter / traitId |
+
+Waivers reuse the existing a11y-guard policy verbatim ("Only with an explicit
+expiry date and an approver. No open-ended waivers.") — encoded as a registry at
+`_shared/policy/a11y-waivers.json`. A divergence whose waiver is missing,
+expired, or unapproved fails the gate.
+
+**Additive, not a replacement:** a11y-guard, token-guard, perf-guard, slop-guard,
+parity, native-code (H1) and declared-io (H2) are all unchanged and still run.
+The ledger is a new gate beneath them.
+
+## The four proofs
+
+**1 · The ledger catches a silent drop with no gate edit.** Temporarily made the
+React adapter emit `role="alert"` in output but *not* call `express` (a one-line
+change to the adapter, **zero** changes to any gate file):
+
+```
+BEFORE  alert  ledger PASS (16 expressed, 2 diverged, 0 unaccounted)   gates: PASS
+AFTER   alert  ledger FAIL (15 expressed, 2 diverged, 1 unaccounted)   gates: FAIL
+  [critical] ledger/ledger-unaccounted: react: component "Alert" (container)
+             drops trait `role=alert` — neither expressed nor diverged (silent drop)
+```
+
+Reverted; `alert` returns to PASS. The gate read the *ledger*, not the source —
+the role was still present in the emitted JSX.
+
+**2 · No whitelist — a never-seen trait is enforced with zero gate code.** Added a
+spec with `role: zorptastic-9000` (a value that appears in no adapter map, no
+gate, no waiver). With **no edit** to `ledger-gate.mjs`:
+
+```
+_tmp-novel  ledger FAIL (3 expressed, 3 diverged, 0 unaccounted)   gates: FAIL
+  web adapters express role="zorptastic-9000"; the 3 natives cannot map it, so
+  they diverge citing waiver "a11y-role-zorptastic-9000" — which does not exist → FAIL
+```
+
+The brand-new trait was auto-enforced: to pass it must be **expressed** or
+covered by an **approved waiver**. It cannot pass silently.
+
+**3 · No over-flag.** `rm -rf out/ && node _shared/scripts/ci.mjs` → **exit 0**.
+All 19 in-scope features PASS, both refused categories still refuse, `0`
+unaccounted anywhere. Every previously-passing component still passes.
+
+**4 · The 3 natives now express the form-control roles** (real mechanism in the
+ledger and in the output):
+
+| role | React Native | SwiftUI | Compose |
+|---|---|---|---|
+| `checkbox` | `<Switch> + accessibilityRole="checkbox" + accessibilityState={{checked}}` | `Toggle(label, isOn:)` | `Checkbox(checked/onCheckedChange) + semantics { role = Role.Checkbox }` |
+| `switch` | `<Switch> + accessibilityRole="switch" + accessibilityState={{checked}}` | `Toggle(label, isOn:)` | `Switch(...) + semantics { role = Role.Switch }` |
+| `slider` | `<Slider> + accessibilityRole="adjustable" + accessibilityValue` | `Slider(value:) + .accessibilityLabel` | `Slider(value/onValueChange)` (built-in range semantics) |
+
+Fixtures: `.claude/artifacts/{checkbox,switch-toggle,slider}/`. Each shows
+`ledger PASS (12 expressed, 0 diverged, 0 unaccounted)` — role **and** accessible
+name expressed on all 6 adapters. A native checkbox is now a real toggle, never a
+bare text field.
+
+## Breadth matrix — form controls (true state)
+
+Cell legend as above (`✓` correct · `⚠` documented divergence).
+
+| Component | React | Vue | Svelte | RN | SwiftUI | Compose | Gates | Outcome | Notes |
+|---|---|---|---|---|---|---|---|---|---|
+| **Checkbox** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 9/9 pass | **PASS** | `role=checkbox` + checked state expressed as a real toggle on every native (RN `Switch`+`accessibilityState`, SwiftUI `Toggle`, Compose `Checkbox`+`semantics{role}`). Was a silent drop (F-14/F-15). |
+| **Switch** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 9/9 pass | **PASS** | `role=switch` + on/off state expressed as a real toggle on every native. Was a silent drop (F-14/F-15). |
+| **Slider** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 9/9 pass | **PASS** | `role=slider` expressed as a real adjustable control (RN `Slider`+`accessibilityValue`, SwiftUI `Slider`, Compose `Slider`). Was a silent drop (F-14/F-16). |
+
+("Gates 9/9" = the seven prior gates + native-code + the new ledger.)
+
+## Findings ledger — update
+
+| ID | Status | Note |
+|---|---|---|
+| **F-14** | **Resolved** | Form-control roles (`checkbox`/`switch`/`slider`) silently dropped on all 3 natives while gates stayed green. Now (a) **structurally impossible** to drop silently — the Lowering Ledger fails any unaccounted trait; and (b) the three roles are **expressed** as real native controls. |
+| **F-15** | **Partially resolved — residual logged** | The a11y **trait** level is done: checkbox/switch checked-state is expressed via `accessibilityState={{checked}}` / `isOn:` binding / `Role.Checkbox`+`Role.Switch` semantics. A full **control-state primitive** (a schema-level bound state contract shared across all stateful controls, beyond a11y traits) is **not** built here — logged as the next roadmap item. Not expanded per scope lock. |
+| **F-16** | **Partially resolved — residual logged** | Slider `role=slider` is expressed as a real adjustable control with a value channel (`accessibilityValue` / native `Slider`). Full **range semantics** (`min`/`max`/`step` as a first-class schema contract, and `valueRange`/`steps` wired natively) remain — logged (overlaps **F-19**). Not built here. |
+| **F-17** | Logged (unchanged) | Radio + single-select group semantics (one-of-N) — deferred, not in this layer's scope. |
+| **F-18** | Logged (unchanged) | Native `select` + option list — deferred. |
+| **F-19** | Logged (unchanged) | `min`/`max`/`step` numeric constraints and `textarea` (multiline) — deferred (overlaps F-16 residual). |
+| **F-20** | **Resolved (surfaced by the ledger)** | *New finding, caught immediately by Layer 1 on first run:* the React Native and Compose `action` (button) visitors dropped an explicit `a11y.label` — the Alert dismiss button's "Dismiss alert" accessible name was silently lost on both, green on every prior gate. Fixed: RN `visitAction` now emits `a11yProps`; Compose `visitAction` now emits an a11y semantics block. This is the exact class F-14 belongs to, found without adding any rule. |
+
+## Regression pins
+
+- **P40** — ledger: a trait neither expressed nor diverged is `unaccounted` and
+  FAILS, naming adapter / component / traitId; expressing it PASSes (gate reads
+  the ledger, not source).
+- **P41** — no whitelist: a never-before-seen role value auto-enrols from the IR
+  and is enforced with zero edits to the gate or any role list.
+- **P42** — the `checkbox` / `switch` / `slider` roles are **expressed** with a
+  real native mechanism on RN, SwiftUI and Compose (ledger status + output
+  control confirmed); no trait unaccounted.
+- **P43** — a divergence needs a matching, non-expired, **approved** waiver;
+  expired / unknown waivers FAIL; the shipped registry is well-formed.
+
+`verify-patches` is now **43 checks, all passing** (was 39).
+
+## ci.mjs status under Layer 1
+
+`rm -rf out/ && node _shared/scripts/ci.mjs` → **exit 0**. 19 features PASS, 2
+refused (data-grid, modal), `0` unaccounted across `~180` ledger entries,
+43/43 regressions pass.
+
+## Scope — logged, not built
+
+Per the Layer-1 scope lock, this change is **only** the totality check plus the
+form-control-role fix. It does **not**: migrate the IR off ARIA/neutral semantic
+kinds; build a runtime platform-a11y oracle; build a gate mutation-testing
+framework; build the full control-state primitive (F-15 residual) or range
+semantics (F-16/F-19 residual); weaken or remove any existing gate; add new
+breadth components (the three form-control specs are test vehicles for the
+express() fix, not a new batch); or touch agents / skills / workflow / AI-router.
+No existing gate was weakened: a11y-guard, token-guard, perf-guard, slop-guard,
+parity, native-code and declared-io are all unchanged and still run.
