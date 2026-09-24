@@ -1,0 +1,14 @@
+component: NumberInput
+description: Labeled controlled plain numeric input (type=number; no min/max/step, no formatting).
+category: input
+props:
+  - { name: label, type: string, required: true }
+  - { name: value, type: string, required: true }
+  - { name: onChange, type: function, required: true }
+tokens: [color.border.default, space.inset.sm, radius.control]
+root:
+  el: input
+  id: number-input-field
+  label: { kind: ref, value: label }
+  input: { valueProp: value, changeProp: onChange, inputType: number }
+  style: { border: color.border.default, padding: space.inset.sm, radius: radius.control }

@@ -1,0 +1,12 @@
+component: TextInput
+purpose: A labeled, controlled single-line text input.
+audience: End users of the product surface.
+platforms: [react, vue, svelte, react-native, swiftui, compose]
+variants: []
+states: [default]
+interaction: controlled-input
+a11y:
+  - "programmatically associated visible label (web) / accessible name (native)"
+scope:
+  in: ["controlled value + onChange, visible label"]
+  out: ["multiline/textarea (no multiline inputType — logged gap), validation UI (see FormField)"]

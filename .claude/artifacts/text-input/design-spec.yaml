@@ -1,0 +1,14 @@
+component: TextInput
+description: Labeled controlled single-line text input.
+category: input
+props:
+  - { name: label, type: string, required: true }
+  - { name: value, type: string, required: true }
+  - { name: onChange, type: function, required: true }
+tokens: [color.border.default, space.inset.sm, radius.control]
+root:
+  el: input
+  id: text-input-field
+  label: { kind: ref, value: label }
+  input: { valueProp: value, changeProp: onChange, inputType: text }
+  style: { border: color.border.default, padding: space.inset.sm, radius: radius.control }

@@ -1,0 +1,12 @@
+component: NumberInput
+purpose: A labeled controlled plain numeric input (NOT number formatting — that is F-11/F-12).
+audience: End users of the product surface.
+platforms: [react, vue, svelte, react-native, swiftui, compose]
+variants: []
+states: [default]
+interaction: controlled-input
+a11y:
+  - "programmatically associated label; numeric input affordance"
+scope:
+  in: ["controlled value + onChange, numeric input type, label"]
+  out: ["min/max/step (no schema field — logged gap), display formatting (F-11/F-12)"]

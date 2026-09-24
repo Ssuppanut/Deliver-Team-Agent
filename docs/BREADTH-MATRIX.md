@@ -567,3 +567,90 @@ a true if/else, two conditional fixtures (`cond-show`, `cond-list`), P36–P39, 
 this record. No gate weakened or removed; overlay/table refusal unchanged; no new
 roadmap components; no agent/skill/workflow/AI-router changes beyond the
 F-9-consistent refusal category.
+
+---
+
+# Step ก — form inputs (breadth; new a11y contracts)
+
+Roadmap step ก stresses form-control a11y contracts the engine has never emitted.
+The `input` element is a **text-field abstraction**: web renders `<input type=…>`
+(and emits `role` via a11yAttrs), but **RN/SwiftUI/Compose `visitInput` always emit
+a plain text field and never emit `role`**. There is no `checked`/`aria-checked`,
+`aria-valuenow`/`min`/`max`, `radio` inputType, single-select, or `select`+options.
+So most controls here are **capability gaps**, discovered and logged (not built,
+per scope lock). Cell legend as before; `—` = not expressible on that adapter.
+
+| Component | React | Vue | Svelte | RN | SwiftUI | Compose | Gates | Outcome | Notes |
+|---|---|---|---|---|---|---|---|---|---|
+| **TextInput** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 8/8 pass | **PASS** *(shipped)* | Reuses the FormField controlled-input pattern; native `TextField`/`TextInput` is correct for text. Clean. |
+| **NumberInput** | ✓ | ✓ | ✓ | ⚠ | ⚠ | ⚠ | 8/8 pass | **PARTIAL** *(shipped)* | Web `<input type="number">`; native degrades to a plain text field (no numeric keyboard hint). `min`/`max`/`step` inexpressible (**F-19**). Plain numeric input only — no formatting (that's F-11/F-12). |
+| **Checkbox** | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | 8/8 **green** | **PARTIAL** *(not shipped)* | Web `<input type="checkbox" role="checkbox">`. **Native: a text field; `role=checkbox` silently dropped, no `aria-checked`, and every gate PASSES (no divergence warning).** Needs control state + native checkbox (**F-15**); gate blind spot (**F-14**). |
+| **Switch** | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | 8/8 **green** | **PARTIAL** *(not shipped)* | Web `<input type="checkbox" role="switch">`. Native: text field; `role=switch` silently dropped, no checked state; gates green. Needs Toggle/Switch + state (**F-15**, **F-14**). |
+| **Slider** | ⚠ | ⚠ | ⚠ | ✗ | ✗ | ✗ | green | **PARTIAL** *(not shipped)* | `role=slider` reaches web only; **no `aria-valuenow`/`valuemin`/`valuemax`, no min/max/step** — not a real slider on any platform. Needs a range capability (**F-16**), gate blind spot (**F-14**). |
+| **RadioGroup** | — | — | — | — | — | — | n/a | **GAP** *(not authorable)* | No `radio` inputType, no single-select binding, no per-option checked, no unique per-iteration ids. Not expressible (**F-17**). |
+| **Select (native)** | — | — | — | — | — | — | n/a | **GAP** *(not authorable)* | No `select` element kind and no static-options binding. Not expressible (**F-18**). |
+| **Select (custom/overlay)** | — | — | — | — | — | — | n/a | **REFUSE-correct** | A floating listbox overlay → refused via the existing `overlay` category (Radix / native picker). Verified. |
+
+**Tally: 1 PASS · 1 PARTIAL shipped · 3 PARTIAL / 2 GAP probed-and-logged · 1 REFUSE-correct.**
+Shipped to this branch: **TextInput (PASS), NumberInput (PARTIAL)** — both reuse the
+existing input capability and pass every gate. `ci.mjs` is **green (exit 0)**;
+verify-patches 39/39. The remaining controls need genuinely new capabilities and
+are logged (not built) per the scope lock.
+
+## Did the hardened gates catch the a11y drops on their own? — NO
+
+This is the generalization check, and the answer is **no** (the same class Batch 2
+exposed for F-10/F-11). `role=checkbox` / `role=switch` / `role=slider` set on an
+`el: input`:
+- reaches **web** output (`visitInput` calls `a11yAttrs`),
+- is **silently dropped on all 3 native adapters** — `visitInput` on RN/SwiftUI/
+  Compose emits a bare `TextField`/`TextInput` and never emits `role`, so there is
+  **not even a divergence warning**,
+- and **every gate stays green**: `declared-io PASS`, `a11y-guard PASS`,
+  `native-code PASS`. a11y-guard's output tier enforces only
+  `{status, alert, img, separator}`; the form-control roles are unenforced.
+
+So the Phase-A hardening did **not** generalize to form-control roles. Closing this
+(extend the a11y output tier to `checkbox`/`switch`/`slider`/`radio`/`radiogroup`,
+and make native `visitInput` map or warn on `role`) is a **future hardening pass**,
+deliberately out of scope for step ก — logged as **F-14**.
+
+## New findings (step ก)
+
+| # | Status | Summary |
+|---|---|---|
+| F-14 | **Logged (new) — gate gap** | `role` on `el: input` is silently dropped by all 3 native adapters and a11y-guard doesn't enforce form-control roles (checkbox/switch/slider/radio/radiogroup) — a silent, gate-blind a11y drop. Needs a future a11y-hardening pass. |
+| F-15 | **Logged (new) — capability** | No control a11y state: `checked`/`aria-checked` and native checkbox/Toggle-Switch mapping. `el: input` is text-only on native. Checkbox & Switch not deliverable natively. |
+| F-16 | **Logged (new) — capability** | No range/Slider: `role=slider` + `aria-valuenow`/`valuemin`/`valuemax`, no min/max/step, no native `Slider`. Slider not deliverable. |
+| F-17 | **Logged (new) — capability** | No RadioGroup single-select: no `radio` inputType, no group binding, no per-option checked, no unique per-iteration ids. |
+| F-18 | **Logged (new) — capability** | No native `select` element + static options binding. (Custom-overlay Select is correctly REFUSED via the overlay boundary.) |
+| F-19 | **Logged (new) — minor** | No numeric `min`/`max`/`step`, and no multiline/`textarea` inputType. |
+
+## Running list — all logged findings after step ก
+
+| # | Status |
+|---|---|
+| F-1, F-2 | Fixed (Batch 1.1) |
+| F-3 | Fixed (conditional shapes 1–3) |
+| F-4 | Logged — no orientation / dimension axis |
+| F-5 | Logged — no boolean-attribute binding (`disabled`) |
+| F-6 | Logged (minor) — variant icon bound to state, not a free toggle |
+| F-7 | Logged — no size slot |
+| F-8 | Logged (by design) — no animation primitive |
+| F-9 | Resolved (REFUSE) — expression-driven variant discriminant |
+| F-10 | Fixed — standalone `el: icon` |
+| F-11 | Fixed (precision-only) — native number formatting |
+| F-12 | Logged (deferred) — number-format locale / currency / rounding / grouping |
+| F-13 | Logged (deferred) — nested / else-if / per-item / deep conditional |
+| **F-14** | **Logged (new) — form-control roles: silent native drop, gate-blind** |
+| **F-15** | **Logged (new) — control state (checked/aria-checked) + native checkbox/switch** |
+| **F-16** | **Logged (new) — slider / range (aria-valuenow, min/max)** |
+| **F-17** | **Logged (new) — radio-group single-select** |
+| **F-18** | **Logged (new) — native select element + options** |
+| **F-19** | **Logged (new, minor) — numeric min/max/step; multiline/textarea** |
+
+Scope for step ก: authored + shipped TextInput and NumberInput (reuse), probed the
+rest and logged F-14–F-19, confirmed the custom-overlay Select refusal. No
+renderer-base capabilities built, no gate weakened/removed, overlay/table refusal
+unchanged, no agent/skill/workflow/AI-router changes, next step (ค number-format)
+not started.
