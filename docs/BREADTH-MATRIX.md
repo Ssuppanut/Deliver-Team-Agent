@@ -23,7 +23,7 @@ so — never a silent drop).
 |---|---|---|---|---|---|---|---|---|---|
 | **Button** | ✓ | ✓ | ✓ | ✓ | ✓ | ⚠ | 5/5 pass | **PASS** | **F-1 fixed**: SwiftUI now binds the ref label as a variable (`Label(label, …)`), verified by the new parity lint. Compose keeps its documented color-cascade warning. Logged gap: no `disabled` binding (**F-5**). |
 | **Badge** | ✓ | ✓ | ✓ | ⚠ | ⚠ | ⚠ | 5/5 pass | **PASS** | 4-way status variant + per-state icon; state never by color alone. Native adapters now emit a documented divergence warning for `role=status` (was a silent drop). Logged gap: per-instance icon toggle (**F-6**). |
-| **Avatar** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 5/5 pass | **PASS** | `role=img` now maps to real native traits (`accessibilityRole="image"` / `.isImage` / `role = Role.Image`). Passes the hardened gates. Logged schema gap (**F-3**, unfixed): true "image *else* initials" fallback still needs `if/else`/`not`; today the caller supplies exactly one of `src`/`initials`. |
+| **Avatar** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 5/5 pass | **PASS** | `role=img` maps to real native traits (`accessibilityRole="image"` / `.isImage` / `role = Role.Image`). **F-3 now resolved:** Avatar uses a real `el: conditional` (`if hasImage → image, else → initials`) as a native if/else on all 6 — the true fallback, no longer two independently-gated children. |
 | **Divider** | ✓ | ✓ | ✓ | ⚠ | ⚠ | ⚠ | 5/5 pass | **PASS** | Renders a border-colored rule on all six; `role=separator` now surfaced as a documented divergence warning on native (was silent). Logged schema gap (**F-4**, unfixed): orientation (vertical) is not expressible — no `aria-orientation`, no dimension slot. |
 | **Spinner** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 5/5 pass | **PASS** | **F-2 fixed**: all three native adapters now emit the live-region trait (`accessibilityLiveRegion="polite"` + `accessibilityState={{busy}}` / `.updatesFrequently` / `liveRegion = LiveRegionMode.Polite`); `role=status` is a documented divergence where no native role exists. Logged schema gaps (**F-7**, unfixed): size variants and the spin animation. |
 | **Skeleton** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 5/5 pass | **PASS** | Padded, rounded, muted placeholder block on all six. `role=presentation` is a correct no-op on native. Logged gap: shimmer/pulse animation (**F-8**, out of engine scope by design). |
@@ -239,7 +239,7 @@ schema design pass later.
 |---|---|---|
 | F-1 | **Fixed (B1.1)** | SwiftUI ref label stringified as its own name. |
 | F-2 | **Fixed (B1.1)** | Native adapters dropped `role`/`aria-live` from output. |
-| F-3 | Logged | No conditional/fallback (`if/else`, `not`) — true either/or child render. |
+| F-3 | **Fixed (F-3 pass)** | Conditional rendering shapes 1–3 (`el: conditional`: if / if-else / conditional-wrapping-iteration) on all 6 adapters; condition is a boolean flag, expression conditions refused. |
 | F-4 | Logged | No orientation / dimension axis (e.g. Divider vertical). |
 | F-5 | Logged | No boolean-attribute binding (e.g. Button `disabled`). |
 | F-6 | Logged (minor) | Variant icon bound to the state, not a free per-instance toggle (Badge). |
@@ -248,7 +248,8 @@ schema design pass later.
 | F-9 | **Resolved — REFUSE (Phase B)** | Expression-driven variant discriminant is now refused by the orchestrator with an enum redirect (`expression-variant`). `native-code` gate stays as defense in depth. |
 | F-10 | **Fixed (Phase B)** | Added the first-class `el: icon` element; a standalone icon renders on all 6 via the icon-map, decorative by default / labeled when `a11y.label` set. |
 | F-11 | **Fixed (Phase B, precision-only)** | `X.toFixed(Y)` maps to SwiftUI `NumberFormatter` / Compose `NumberFormat` with `min=max fractionDigits = precision`, grouping off. Web/RN unchanged. |
-| F-12 | **Logged (new, Phase B) — deferred** | Locale (decimal separator / thousands grouping), currency symbol handling/positioning, and rounding-mode configuration for number formatting. A separate future number-format pass; explicitly out of scope for the precision-only F-11 fix. |
+| F-12 | **Logged (Phase B) — deferred** | Locale (decimal separator / thousands grouping), currency symbol handling/positioning, and rounding-mode configuration for number formatting. A separate future number-format pass; explicitly out of scope for the precision-only F-11 fix. |
+| F-13 | **Logged (new, F-3) — deferred** | Conditional shapes beyond the three built: nested conditional (if inside if), else-if chains, per-item conditional (a conditional INSIDE each iterated item), and conditionals nested more than one level in iteration. Each needs its own design pass. |
 
 Scope for Batch 2 was strictly authoring 4 component specs and recording results.
 No renderer-base/schema capabilities built, no conditional/number-format
@@ -466,3 +467,103 @@ Scope for Phase B: F-9 refusal, F-10 `el: icon` element, F-11 precision-only
 native formatter, plus P33–P35 and this record. No gate weakened or removed, no
 new components, no changes to agents / skills / workflow / AI router, and the
 overlay/table refusal behavior is unchanged.
+
+---
+
+# F-3 — conditional rendering (roadmap step ข)
+
+A renderer-base-level capability (like `variant`): a spec expresses "show X, or Y,
+based on a condition", generated as each platform's native conditional construct.
+
+## IR node design
+
+A new element kind **`el: conditional`** with a boolean condition and one/two branches:
+
+```yaml
+el: conditional
+when: hasImage        # boolean FLAG prop (never an expression — see refusal)
+then: { el: media, ... }     # required — rendered when the flag is true
+else: { el: text, ... }      # optional — rendered when false
+```
+
+`spec-to-ir` lowers `then`/`else` into `children[0]`/`children[1]` (so every guard
+that walks `children` also traverses both branches — no guard changes needed).
+`renderer-base.visitConditional` renders each branch via the shared `renderNode`
+and defers only the platform syntax to each adapter's `condBlock(flag, then, else)`.
+Because a branch is a normal node, it may carry its own `each` — that is shape 3
+(the conditional sits *outside* the iteration and chooses list-vs-fallback). The
+node consumes its own `when`; `renderNode` skips the element-level one-way `when`
+wrap for a `conditional` kind so it is never double-wrapped.
+
+| adapter | one-way (shape 1) | if/else (shape 2) |
+|---|---|---|
+| React / RN | `{flag && ( … )}` | `{flag ? ( … ) : ( … )}` |
+| Vue | `<template v-if="flag">…</template>` | `+ <template v-else>…</template>` |
+| Svelte | `{#if flag} … {/if}` | `… {:else} … {/if}` |
+| SwiftUI | `if flag { … }` | `if flag { … } else { … }` |
+| Compose | `if (flag) { … }` | `if (flag) { … } else { … }` |
+
+## Proofs (correct native construct, not a stringified condition)
+
+**Shape 1 (if / show-hide)** — `cond-show`, `showNote`:
+React `{showNote && (…)}` · Vue `<template v-if="showNote">` · Svelte `{#if showNote}` ·
+RN `{showNote && (…)}` · SwiftUI `if showNote {` · Compose `if (showNote) {` — no else branch on any.
+
+**Shape 2 (if/else)** — `Avatar`, `hasImage` → image, else initials:
+React `{hasImage ? (<img …/>) : (<span>{initials}</span>)}` · Vue `v-if`/`v-else` ·
+Svelte `{#if hasImage}…{:else}…{/if}` · RN `{hasImage ? (<Image/>) : (<Text>{initials})}` ·
+SwiftUI `if hasImage { AsyncImage… } else { Text(…initials) }` ·
+Compose `if (hasImage) { AsyncImage… } else { Text(…) }`.
+
+**Shape 3 (conditional + one-level iteration)** — `cond-list`, `isEmpty` → fallback, else → list:
+React `{isEmpty ? (<div role="status">…</div>) : (items.map((item) => …))}` ·
+Vue `v-if`/`v-else` with `v-for="item in items"` in the else ·
+Svelte `{#if isEmpty}…{:else}{#each items as item (item.id)}…{/each}{/if}` ·
+SwiftUI `if isEmpty { … } else { ForEach(items, id: \.id) { item in … } }` ·
+Compose `if (isEmpty) { … } else { items.forEach { item -> … } }`.
+The existing iteration construct renders correctly inside the else branch on all 6.
+
+**Refusal (expression condition = F-9 anti-pattern through the back door):**
+```
+when: "items.length > 0"  →
+REFUSED: category "expression-condition" is out of scope
+  why:     a condition must be a plain boolean flag prop, not an embedded expression
+           (found: `items.length > 0`) — compute the boolean in the data layer
+  instead: pass a boolean flag prop (e.g. when: isEmpty) computed in the data layer, not a JS expression
+  No code generated.
+```
+The boolean-flag form (`when: isEmpty`) generates and passes. The orchestrator
+refusal now scans both `variant.prop` (F-9) and every `when` (F-3), recursing
+`then`/`else`. This is the F-9-consistent refusal added to the existing refusal
+gate — not an architecture change.
+
+## Gate interaction
+
+The `native-code` gate does **not** over-flag a legitimate native `if/else`: it
+only matches un-evaluatable JS expressions collected from `variant.prop`, so a
+conditional-only spec has nothing to flag — confirmed `native-code PASS` on
+Avatar, cond-list, and cond-show. All existing gates (a11y, token, perf, slop,
+readiness, `native-code`, `declared-io`, parity) pass on the conditional output.
+
+## Regression pins
+
+- **P36** — shape 1 (if) renders the native show/hide construct on all 6, no else.
+- **P37** — shape 2 (if/else) emits both branches as native conditionals on all 6.
+- **P38** — shape 3 conditional-wrapping-iteration; the iteration still renders inside the else.
+- **P39** — an expression condition is refused with a flag redirect; a plain flag passes; the F-9 variant refusal still fires.
+
+`verify-patches` is now **39 checks, all passing** (was 35).
+
+## Out of scope — logged, not built
+
+Nested conditional, else-if chains, per-item conditional (inside each iterated
+item), and conditionals nested more than one level in iteration are **F-13
+(deferred)**. An expression as a condition is **refused** (F-9 rule), never
+evaluated.
+
+Scope for F-3: the `el: conditional` node (schema + IR + renderer-base + a
+`condBlock` in all 6 adapters), the `when`-expression refusal, Avatar upgraded to
+a true if/else, two conditional fixtures (`cond-show`, `cond-list`), P36–P39, and
+this record. No gate weakened or removed; overlay/table refusal unchanged; no new
+roadmap components; no agent/skill/workflow/AI-router changes beyond the
+F-9-consistent refusal category.

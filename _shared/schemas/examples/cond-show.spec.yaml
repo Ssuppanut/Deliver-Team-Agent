@@ -1,0 +1,21 @@
+component: CondShow
+description: F-3 shape 1 — one-way conditional (show an element only when a boolean flag is true).
+category: display
+props:
+  - { name: showNote, type: boolean, required: true }
+  - { name: note, type: string, required: true }
+tokens:
+  - color.fg.muted
+  - space.inset.sm
+root:
+  el: container
+  style:
+    padding: space.inset.sm
+  children:
+    - el: conditional
+      when: showNote
+      then:
+        el: text
+        text: { kind: ref, value: note }
+        style:
+          color: color.fg.muted

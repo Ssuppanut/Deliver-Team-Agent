@@ -149,6 +149,14 @@ class SwiftUIRenderer extends RendererBase {
     }
     return `if ${w} {\n${indent(rendered, 2)}\n}`;
   }
+
+  condBlock(flag, thenStr, elseStr) {
+    const prop = this.ir.props.find((p) => p.name === flag);
+    const w = safe(flag);
+    const head = (prop && prop.required === false) ? `if let ${w} = ${w}` : `if ${w}`;
+    if (elseStr == null) return `${head} {\n${indent(thenStr, 2)}\n}`;
+    return `${head} {\n${indent(thenStr, 2)}\n} else {\n${indent(elseStr, 2)}\n}`;
+  }
   wrapIteration(node, rendered) {
     const { items, as, key } = node.each;
     return `ForEach(${safe(items)}, id: \\.${key}) { ${safe(as)} in\n${indent(rendered, 2)}\n}`;

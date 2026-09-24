@@ -39,6 +39,9 @@ const BUTTON = resolve(ROOT, '.claude/artifacts/button/design-spec.yaml');
 const SPINNER = resolve(ROOT, '.claude/artifacts/spinner/design-spec.yaml');
 const EMPTY_STATE = resolve(ROOT, '.claude/artifacts/empty-state/design-spec.yaml');
 const TOKEN_AMOUNT = resolve(ROOT, '.claude/artifacts/token-amount/design-spec.yaml');
+const AVATAR = resolve(ROOT, '.claude/artifacts/avatar/design-spec.yaml');
+const CONDSHOW = EX('cond-show.spec.yaml');
+const CONDLIST = EX('cond-list.spec.yaml');
 
 let pass = 0, fail = 0;
 const results = [];
@@ -487,6 +490,74 @@ check('P35', 'number-format: SwiftUI/Compose format precision natively; declared
   // If precision is dropped (raw amount, no formatter, no warning), declared-io FAILS.
   const dropped = { swiftui: { code: 'var body: some View {\n  Text(String(describing: amount))\n}', warnings: [] } };
   assert(!checkDeclaredDropped(ir, dropped).ok, 'a dropped precision must FAIL declared-io');
+});
+
+// --- P36: F-3 shape 1 — one-way conditional (show/hide) on every adapter ------
+check('P36', 'conditional: shape 1 (if) renders the native show/hide construct on all 6, no else', () => {
+  const expect = [
+    [generateReact, /\{showNote && \(/, /\? \(/],
+    [generateVue, /<template v-if="showNote">/, /v-else/],
+    [generateSvelte, /\{#if showNote\}/, /\{:else\}/],
+    [generateReactNative, /\{showNote && \(/, /\? \(/],
+    [generateSwiftUI, /if showNote \{/, /\} else \{/],
+    [generateCompose, /if \(showNote\) \{/, /\} else \{/],
+  ];
+  for (const [gen, present, elseRe] of expect) {
+    const { code } = gen(CONDSHOW, '_verify');
+    assert(present.test(code), `${gen.name} missing the one-way conditional construct`);
+    assert(!elseRe.test(code), `${gen.name} must not emit an else branch for a one-way conditional`);
+  }
+});
+
+// --- P37: F-3 shape 2 — if/else (either/or), Avatar image-vs-initials ----------
+check('P37', 'conditional: shape 2 (if/else) emits both branches as native conditionals on all 6', () => {
+  const expect = [
+    [generateReact, /\{hasImage \? \(/, /<img /, /initials/],
+    [generateVue, /<template v-if="hasImage">/, /<template v-else>/, /initials/],
+    [generateSvelte, /\{#if hasImage\}/, /\{:else\}/, /initials/],
+    [generateReactNative, /\{hasImage \? \(/, /<Image /, /initials/],
+    [generateSwiftUI, /if hasImage \{/, /\} else \{/, /initials/],
+    [generateCompose, /if \(hasImage\) \{/, /\} else \{/, /initials/],
+  ];
+  for (const [gen, thenRe, elseRe, initRe] of expect) {
+    const { code } = gen(AVATAR, '_verify');
+    assert(thenRe.test(code), `${gen.name} missing the if branch`);
+    assert(elseRe.test(code), `${gen.name} missing the else branch`);
+    assert(initRe.test(code), `${gen.name} missing the else (initials) content`);
+  }
+});
+
+// --- P38: F-3 shape 3 — conditional wrapping one-level iteration ---------------
+check('P38', 'conditional: shape 3 chooses fallback vs list; iteration still renders inside the else branch', () => {
+  const expect = [
+    [generateReact, /isEmpty \? \(/, /items\.map\(\(item\)/],
+    [generateVue, /<template v-if="isEmpty">/, /v-for="item in items"/],
+    [generateSvelte, /\{#if isEmpty\}/, /\{#each items as item/],
+    [generateReactNative, /isEmpty \? \(/, /items\.map\(\(item\)/],
+    [generateSwiftUI, /if isEmpty \{/, /ForEach\(items, id: \\\.id\)/],
+    [generateCompose, /if \(isEmpty\) \{/, /items\.forEach \{ item ->/],
+  ];
+  for (const [gen, condRe, iterRe] of expect) {
+    const { code } = gen(CONDLIST, '_verify');
+    assert(condRe.test(code), `${gen.name} missing the conditional on isEmpty`);
+    assert(iterRe.test(code), `${gen.name} missing the iteration inside the else branch`);
+  }
+});
+
+// --- P39: F-3 — an expression condition is REFUSED; a boolean flag passes -------
+check('P39', 'refusal: an expression condition is refused with a flag redirect; a plain flag passes', () => {
+  const exprCond = { root: { el: 'container', children: [
+    { el: 'conditional', when: 'items.length > 0', then: { el: 'text', text: { kind: 'ref', value: 'x' } } },
+  ] } };
+  const r = checkRefusal(exprCond);
+  assert(r && r.category === 'expression-condition', 'an expression condition must be refused');
+  assert(/boolean flag/.test(r.redirect) && /data layer/.test(r.reason), 'must redirect to a data-layer boolean flag');
+  // A plain boolean flag condition is NOT refused.
+  assert(checkRefusal({ root: { el: 'container', children: [
+    { el: 'conditional', when: 'isEmpty', then: { el: 'text', text: { kind: 'ref', value: 'x' } } },
+  ] } }) === null, 'a plain boolean flag condition must pass');
+  // The F-9 variant-expression refusal still fires (regression guard).
+  assert(checkRefusal({ root: { el: 'container', variant: { prop: "d >= 0 ? 'a' : 'b'", cases: { a: {} } } } })?.category === 'expression-variant', 'variant-expression refusal must be unchanged');
 });
 
 console.log('\n=== verify-patches ===');

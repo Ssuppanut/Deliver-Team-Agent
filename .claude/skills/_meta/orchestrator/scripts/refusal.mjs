@@ -28,19 +28,24 @@ export const REFUSED = {
 // uncompilable native code (see the native-code gate), so the orchestrator
 // refuses it outright, consistent with the overlay / data-table refusals.
 const PLAIN_DISCRIMINANT = /^[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*$/;
+// A conditional/one-way condition (`when`) must be a plain boolean flag prop — a
+// bare identifier. An expression (comparison / ternary / call, e.g.
+// `items.length > 0`) is the F-9 anti-pattern re-entering through the condition:
+// it must be refused too, redirecting to a computed boolean flag from the data layer.
+const PLAIN_FLAG = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 const EXPRESSION_VARIANT = {
   redirect: "pass a plain enum variant prop (e.g. direction: 'negative') and compute the value in the data layer",
   reference: 'knowledge/pattern-library/references/expression-variant.md',
 };
 
-function findExpressionDiscriminant(node) {
+/** Walk the spec tree (children + conditional then/else) for a refusable condition. */
+function findBadCondition(node) {
   if (!node || typeof node !== 'object') return null;
-  const p = node.variant?.prop;
-  if (typeof p === 'string' && !PLAIN_DISCRIMINANT.test(p.trim())) return p.trim();
-  for (const c of node.children ?? []) {
-    const hit = findExpressionDiscriminant(c);
-    if (hit) return hit;
-  }
+  const vp = node.variant?.prop;
+  if (typeof vp === 'string' && !PLAIN_DISCRIMINANT.test(vp.trim())) return { kind: 'variant', expr: vp.trim() };
+  if (typeof node.when === 'string' && !PLAIN_FLAG.test(node.when.trim())) return { kind: 'condition', expr: node.when.trim() };
+  for (const c of node.children ?? []) { const hit = findBadCondition(c); if (hit) return hit; }
+  for (const b of [node.then, node.else]) { if (b) { const hit = findBadCondition(b); if (hit) return hit; } }
   return null;
 }
 
@@ -53,13 +58,21 @@ export function checkRefusal(spec) {
   if (category && category in REFUSED) {
     return { category, ...REFUSED[category] };
   }
-  const expr = spec?.root ? findExpressionDiscriminant(spec.root) : null;
-  if (expr) {
+  const bad = spec?.root ? findBadCondition(spec.root) : null;
+  if (bad?.kind === 'variant') {
     return {
       category: 'expression-variant',
-      reason: `a variant case must be selected by a plain enum prop, not an embedded expression (found: \`${expr}\`) — computed selection is presentation logic that belongs in the data layer`,
+      reason: `a variant case must be selected by a plain enum prop, not an embedded expression (found: \`${bad.expr}\`) — computed selection is presentation logic that belongs in the data layer`,
       redirect: EXPRESSION_VARIANT.redirect,
       reference: EXPRESSION_VARIANT.reference,
+    };
+  }
+  if (bad?.kind === 'condition') {
+    return {
+      category: 'expression-condition',
+      reason: `a condition must be a plain boolean flag prop, not an embedded expression (found: \`${bad.expr}\`) — compute the boolean in the data layer`,
+      redirect: "pass a boolean flag prop (e.g. when: isEmpty) computed in the data layer, not a JS expression",
+      reference: 'knowledge/pattern-library/references/expression-variant.md',
     };
   }
   return null;

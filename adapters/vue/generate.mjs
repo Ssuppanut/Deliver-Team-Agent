@@ -114,6 +114,12 @@ class VueRenderer extends RendererBase {
     // Vue applies v-if on the element; wrap in <template> to attach directive.
     return `<template v-if="${node.when}">\n${indent(rendered, 2)}\n</template>`;
   }
+
+  condBlock(flag, thenStr, elseStr) {
+    const t = `<template v-if="${flag}">\n${indent(thenStr, 2)}\n</template>`;
+    if (elseStr == null) return t;
+    return `${t}\n<template v-else>\n${indent(elseStr, 2)}\n</template>`;
+  }
   wrapIteration(node, rendered) {
     const { items, as, key } = node.each;
     return `<template v-for="${as} in ${items}" :key="${as}.${key}">\n${indent(rendered, 2)}\n</template>`;

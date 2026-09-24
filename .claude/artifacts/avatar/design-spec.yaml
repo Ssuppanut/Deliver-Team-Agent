@@ -1,10 +1,11 @@
 component: Avatar
-description: User image with an initials fallback (two independently-gated children).
+description: User image with a true initials fallback (if hasImage → image, else → initials).
 category: display
 props:
   - { name: name, type: string, required: true }
-  - { name: src, type: string, required: false }
-  - { name: initials, type: string, required: false }
+  - { name: hasImage, type: boolean, required: true }
+  - { name: src, type: string, required: true }
+  - { name: initials, type: string, required: true }
 tokens:
   - color.bg.muted
   - color.fg.muted
@@ -18,14 +19,16 @@ root:
     background: color.bg.muted
     radius: radius.full
   children:
-    - el: media
-      when: src
-      src: { kind: ref, value: src }
-      alt: { kind: ref, value: name }
-      style:
-        radius: radius.full
-    - el: text
-      when: initials
-      text: { kind: ref, value: initials }
-      style:
-        color: color.fg.muted
+    - el: conditional
+      when: hasImage
+      then:
+        el: media
+        src: { kind: ref, value: src }
+        alt: { kind: ref, value: name }
+        style:
+          radius: radius.full
+      else:
+        el: text
+        text: { kind: ref, value: initials }
+        style:
+          color: color.fg.muted

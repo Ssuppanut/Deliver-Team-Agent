@@ -109,6 +109,11 @@ class SvelteRenderer extends RendererBase {
   wrapConditional(node, rendered) {
     return `{#if ${node.when}}\n${indent(rendered, 2)}\n{/if}`;
   }
+
+  condBlock(flag, thenStr, elseStr) {
+    if (elseStr == null) return `{#if ${flag}}\n${indent(thenStr, 2)}\n{/if}`;
+    return `{#if ${flag}}\n${indent(thenStr, 2)}\n{:else}\n${indent(elseStr, 2)}\n{/if}`;
+  }
   wrapIteration(node, rendered) {
     const { items, as, key } = node.each;
     return `{#each ${items} as ${as} (${as}.${key})}\n${indent(rendered, 2)}\n{/each}`;
