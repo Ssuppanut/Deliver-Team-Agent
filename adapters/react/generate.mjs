@@ -54,9 +54,9 @@ class ReactRenderer extends RendererBase {
 
   a11yAttrs(node) {
     const out = [];
-    if (node.role) out.push(` role="${node.role}"`);
-    if (node.a11y?.label) out.push(` aria-label=${this.attr(node.a11y.label)}`);
-    if (node.a11y?.live) out.push(` aria-live="${node.a11y.live}"`);
+    if (node.role) { out.push(` role="${node.role}"`); this.express(`role=${node.role}`, { mechanism: `role="${node.role}"` }); }
+    if (node.a11y?.label) { out.push(` aria-label=${this.attr(node.a11y.label)}`); this.express('a11y.label', { mechanism: 'aria-label' }); }
+    if (node.a11y?.live) { out.push(` aria-live="${node.a11y.live}"`); this.express(`a11y.live=${node.a11y.live}`, { mechanism: 'aria-live' }); }
     return out.join('');
   }
 
@@ -124,10 +124,11 @@ class ReactRenderer extends RendererBase {
     const invalid = node.a11y?.invalid;
     const desc = node.a11y?.describedBy;
     let aria = '';
-    if (invalid) aria += ` aria-invalid={!!${invalid}}`;
+    if (invalid) { aria += ` aria-invalid={!!${invalid}}`; this.express('a11y.invalid', { mechanism: 'aria-invalid' }); }
     if (desc) {
       // Only point at the description while it is actually rendered.
       aria += invalid ? ` aria-describedby={${invalid} ? "${desc}" : undefined}` : ` aria-describedby="${desc}"`;
+      this.express('a11y.describedBy', { mechanism: 'aria-describedby' });
     }
     return `${labelEl}<input id="${id}" type="${i.inputType ?? 'text'}"${value}${change}${aria}${this.a11yAttrs(node)}${this.styleAttr(node)} />`;
   }
@@ -191,14 +192,14 @@ class ReactRenderer extends RendererBase {
 
 export function generateReact(specPath, feature) {
   const ir = specToIrFromFile(specPath);
-  const renderer = new ReactRenderer(ir, { tokenMap: {}, iconMap });
+  const renderer = new ReactRenderer(ir, { tokenMap: {}, iconMap, adapter: "react" });
   // React resolves tokens by CSS var, not tokenMap, so token() is overridden by mapToken usage.
   const code = renderer.build();
   const outDir = resolve(ROOT, 'out/react', feature);
   mkdirSync(outDir, { recursive: true });
   const file = resolve(outDir, `${ir.component}.tsx`);
   writeFileSync(file, code);
-  return { file, code, warnings: renderer.warnings, component: ir.component, usedIconsCount: renderer.usedIcons.size };
+  return { file, code, warnings: renderer.warnings, component: ir.component, usedIconsCount: renderer.usedIcons.size, ledger: renderer.ledger };
 }
 
 function main() {

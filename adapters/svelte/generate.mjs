@@ -42,9 +42,9 @@ class SvelteRenderer extends RendererBase {
   }
   a11y(node) {
     const out = [];
-    if (node.role) out.push(` role="${node.role}"`);
-    if (node.a11y?.label) out.push(this.bind('aria-label', node.a11y.label));
-    if (node.a11y?.live) out.push(` aria-live="${node.a11y.live}"`);
+    if (node.role) { out.push(` role="${node.role}"`); this.express(`role=${node.role}`, { mechanism: `role="${node.role}"` }); }
+    if (node.a11y?.label) { out.push(this.bind('aria-label', node.a11y.label)); this.express('a11y.label', { mechanism: 'aria-label' }); }
+    if (node.a11y?.live) { out.push(` aria-live="${node.a11y.live}"`); this.express(`a11y.live=${node.a11y.live}`, { mechanism: 'aria-live' }); }
     return out.join('');
   }
   idAttr(node) {
@@ -98,8 +98,8 @@ class SvelteRenderer extends RendererBase {
     const invalid = node.a11y?.invalid;
     const desc = node.a11y?.describedBy;
     let aria = '';
-    if (invalid) aria += ` aria-invalid={!!${invalid}}`;
-    if (desc) aria += invalid ? ` aria-describedby={${invalid} ? '${desc}' : undefined}` : ` aria-describedby="${desc}"`;
+    if (invalid) { aria += ` aria-invalid={!!${invalid}}`; this.express('a11y.invalid', { mechanism: 'aria-invalid' }); }
+    if (desc) { aria += invalid ? ` aria-describedby={${invalid} ? '${desc}' : undefined}` : ` aria-describedby="${desc}"`; this.express('a11y.describedBy', { mechanism: 'aria-describedby' }); }
     return `${labelEl}<input id="${id}" type="${i.inputType ?? 'text'}"${value}${change}${aria}${this.a11y(node)}${this.styleAttr(node)} />`;
   }
   visitSlot(node) {
@@ -146,13 +146,13 @@ class SvelteRenderer extends RendererBase {
 
 export function generateSvelte(specPath, feature) {
   const ir = specToIrFromFile(specPath);
-  const renderer = new SvelteRenderer(ir, { iconMap });
+  const renderer = new SvelteRenderer(ir, { iconMap, adapter: "svelte" });
   const code = renderer.build();
   const outDir = resolve(ROOT, 'out/svelte', feature);
   mkdirSync(outDir, { recursive: true });
   const file = resolve(outDir, `${ir.component}.svelte`);
   writeFileSync(file, code);
-  return { file, code, warnings: renderer.warnings, component: ir.component, usedIconsCount: renderer.usedIcons.size };
+  return { file, code, warnings: renderer.warnings, component: ir.component, usedIconsCount: renderer.usedIcons.size, ledger: renderer.ledger };
 }
 
 function main() {

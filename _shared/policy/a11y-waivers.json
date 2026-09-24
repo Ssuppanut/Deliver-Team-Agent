@@ -1,0 +1,46 @@
+{
+  "policy": "A divergence (a trait a platform genuinely cannot express) is only allowed with an explicit expiry date and an approver. No open-ended waivers. See .claude/skills/_guards/a11y-guard/SKILL.md.",
+  "note": "Each entry authorizes the Lowering Ledger (_shared/scripts/ledger-gate.mjs) to accept a `diverged` trait. A ledger entry whose waiver id is absent, expired, or missing approver/expires FAILS the gate. Adding a trait a platform CAN express never belongs here — express it instead.",
+  "waivers": {
+    "a11y-role-status": {
+      "reason": "role=status has no dedicated accessibilityRole (RN), accessibility trait (SwiftUI), or Compose Role. Conveyed via the accompanying live region (aria-live -> accessibilityLiveRegion / .updatesFrequently / liveRegion), which carries the polite-announce semantics status implies.",
+      "approver": "Ssuppanut (design-system a11y owner)",
+      "expires": "2027-06-30"
+    },
+    "a11y-role-alert": {
+      "reason": "role=alert has no SwiftUI trait or Compose Role. RN maps it to accessibilityRole=\"alert\"; on SwiftUI/Compose it is conveyed via the assertive/polite live region on the same node.",
+      "approver": "Ssuppanut (design-system a11y owner)",
+      "expires": "2027-06-30"
+    },
+    "a11y-role-group": {
+      "reason": "role=group has no native accessibilityRole / SwiftUI trait / Compose Role. The grouping container still exposes its labelled children; the group boundary itself is a documented platform gap.",
+      "approver": "Ssuppanut (design-system a11y owner)",
+      "expires": "2027-06-30"
+    },
+    "a11y-role-list": {
+      "reason": "role=list has no native accessibilityRole / SwiftUI trait / Compose Role. Native list semantics come from the platform's own list containers, not an ARIA role; the explicit role is a documented gap on a generic container.",
+      "approver": "Ssuppanut (design-system a11y owner)",
+      "expires": "2027-06-30"
+    },
+    "a11y-role-listitem": {
+      "reason": "role=listitem has no native accessibilityRole / SwiftUI trait / Compose Role. Item membership is conveyed structurally by the list container; the explicit role is a documented gap.",
+      "approver": "Ssuppanut (design-system a11y owner)",
+      "expires": "2027-06-30"
+    },
+    "a11y-role-separator": {
+      "reason": "role=separator has no native accessibilityRole / SwiftUI trait / Compose Role. The divider is decorative on native; its separating meaning is visual only, a documented gap.",
+      "approver": "Ssuppanut (design-system a11y owner)",
+      "expires": "2027-06-30"
+    },
+    "a11y-describedby-native": {
+      "reason": "aria-describedby (an id reference to describing text) has no equivalent on React Native / SwiftUI / Compose, which have no cross-node id linkage. Conveyed via an adjacent live-region Text / accessibilityHint / stateDescription instead.",
+      "approver": "Ssuppanut (design-system a11y owner)",
+      "expires": "2027-06-30"
+    },
+    "a11y-invalid-swiftui": {
+      "reason": "SwiftUI has no direct aria-invalid trait on a TextField. The invalid state is conveyed by the adjacent error Text (itself a live region); a11y-invalid maps to isError on Compose and aria-invalid on web/RN, so only SwiftUI diverges.",
+      "approver": "Ssuppanut (design-system a11y owner)",
+      "expires": "2027-06-30"
+    }
+  }
+}

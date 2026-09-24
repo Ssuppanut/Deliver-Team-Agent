@@ -30,6 +30,7 @@ import { checkPerf } from '../../.claude/skills/_guards/perf-guard/scripts/check
 import { checkSlop } from '../../.claude/skills/_guards/slop-guard/scripts/check.mjs';
 import { checkTbd } from '../../.claude/skills/_meta/critique/scripts/check-tbd.mjs';
 import { checkNativeExprLeak, checkDeclaredDropped } from './output-guards.mjs';
+import { checkLedger } from './ledger-gate.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '../..');
@@ -150,6 +151,10 @@ function main() {
   // declared prop/icon that an adapter silently drops is a failure).
   const nativeExpr = checkNativeExprLeak(ir, results);
   const declared = checkDeclaredDropped(ir, results);
+  // Layer 1 totality: every IR-declared trait on every node, across all 6
+  // adapters, must be expressed or waiver-backed diverged — else `unaccounted`.
+  const ledgerEntries = Object.values(results).flatMap((r) => r.ledger ?? []);
+  const ledger = checkLedger(ledgerEntries);
 
   console.log('\nguards:');
   console.log(`  readiness    ${fmt(tbd.ok)}  (${tbd.issues.length} unresolved TBD)`);
@@ -160,6 +165,7 @@ function main() {
   console.log(`  parity       ${fmt(parity.ok)}  (${parity.issues.length} issues)`);
   console.log(`  native-code  ${fmt(nativeExpr.ok)}  (${nativeExpr.issues.length} issues)`);
   console.log(`  declared-io  ${fmt(declared.ok)}  (${declared.issues.length} issues)`);
+  console.log(`  ledger       ${fmt(ledger.ok)}  (${ledger.summary.expressed} expressed, ${ledger.summary.diverged} diverged, ${ledger.summary.unaccounted} unaccounted)`);
 
   const allIssues = [
     ...tbd.issues.map((i) => ({ guard: 'readiness', ...i })),
@@ -170,6 +176,7 @@ function main() {
     ...parity.issues.map((msg) => ({ guard: 'parity', severity: 'serious', msg })),
     ...nativeExpr.issues.map((i) => ({ guard: 'native-code', ...i })),
     ...declared.issues.map((i) => ({ guard: 'declared-io', ...i })),
+    ...ledger.issues.map((i) => ({ guard: 'ledger', ...i })),
   ];
   const warnings = Object.entries(results).flatMap(([a, r]) => (r.warnings ?? []).map((w) => `${a}: ${w}`));
 
@@ -183,7 +190,7 @@ function main() {
   }
 
   const gatesPass = tbd.ok && a11y.ok && tokens.ok && perf.ok && slop.ok && parity.ok
-    && nativeExpr.ok && declared.ok;
+    && nativeExpr.ok && declared.ok && ledger.ok;
   const report = {
     feature,
     component: ir.component,
@@ -199,7 +206,9 @@ function main() {
       parity: { ok: parity.ok, issues: parity.issues },
       nativeCode: { ok: nativeExpr.ok, issues: nativeExpr.issues },
       declaredIo: { ok: declared.ok, issues: declared.issues },
+      ledger: { ok: ledger.ok, issues: ledger.issues, summary: ledger.summary },
     },
+    ledger: ledgerEntries,
     warnings,
     gatesPass,
   };
