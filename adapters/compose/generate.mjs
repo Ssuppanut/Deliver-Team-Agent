@@ -176,6 +176,13 @@ class ComposeRenderer extends RendererBase {
     const test = prop && prop.required === false ? `${node.when} != null` : node.when;
     return `if (${test}) {\n${indent(rendered, 2)}\n}`;
   }
+
+  condBlock(flag, thenStr, elseStr) {
+    const prop = this.ir.props.find((p) => p.name === flag);
+    const test = (prop && prop.required === false) ? `${flag} != null` : flag;
+    if (elseStr == null) return `if (${test}) {\n${indent(thenStr, 2)}\n}`;
+    return `if (${test}) {\n${indent(thenStr, 2)}\n} else {\n${indent(elseStr, 2)}\n}`;
+  }
   wrapIteration(node, rendered) {
     const { items, as } = node.each;
     return `${items}.forEach { ${as} ->\n${indent(rendered, 2)}\n}`;

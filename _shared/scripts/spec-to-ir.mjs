@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 import { loadSpec, validate } from './validate-schema.mjs';
 
 const ELEMENT_KINDS = new Set([
-  'container', 'media', 'heading', 'text', 'action', 'link', 'input', 'slot', 'icon',
+  'container', 'media', 'heading', 'text', 'action', 'link', 'input', 'slot', 'icon', 'conditional',
 ]);
 
 /** Normalize a value reference into canonical { kind, value }. */
@@ -71,7 +71,15 @@ function visit(node, tokens) {
   if (node.when) ir.when = node.when;
   if (node.each) ir.each = { key: 'id', ...node.each };
 
-  if (node.children) {
+  // F-3 conditional: `then` / optional `else` become children[0] / children[1]
+  // so every guard that walks `children` also traverses both branches. `when`
+  // (copied above) is the boolean condition, consumed by visitConditional.
+  if (node.el === 'conditional') {
+    const kids = [];
+    if (node.then) kids.push(visit(node.then, tokens));
+    if (node.else) kids.push(visit(node.else, tokens));
+    ir.children = kids;
+  } else if (node.children) {
     ir.children = node.children.map((c) => visit(c, tokens));
   }
   return ir;

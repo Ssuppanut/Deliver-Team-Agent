@@ -117,6 +117,11 @@ class RNRenderer extends RendererBase {
   wrapConditional(node, rendered) {
     return `{${node.when} && (\n${indent(rendered, 2)}\n)}`;
   }
+
+  condBlock(flag, thenStr, elseStr) {
+    if (elseStr == null) return `{${flag} && (\n${indent(thenStr, 2)}\n)}`;
+    return `{${flag} ? (\n${indent(thenStr, 2)}\n) : (\n${indent(elseStr, 2)}\n)}`;
+  }
   wrapIteration(node, rendered) {
     const { items, as, key } = node.each;
     return `{${items}.map((${as}) => (\n  <React.Fragment key={${as}.${key}}>\n${indent(rendered, 4)}\n  </React.Fragment>\n))}`;

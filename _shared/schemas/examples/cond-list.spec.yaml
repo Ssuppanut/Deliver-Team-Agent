@@ -1,0 +1,39 @@
+component: CondList
+description: F-3 shape 3 — conditional wrapping one-level iteration (isEmpty → fallback, else → list).
+category: display
+props:
+  - { name: isEmpty, type: boolean, required: true }
+  - { name: emptyMessage, type: string, required: true }
+  - { name: items, type: array, required: true, itemShape: { id: string, label: string } }
+tokens:
+  - color.fg.default
+  - color.fg.muted
+  - space.stack.sm
+  - space.inset.sm
+root:
+  el: container
+  style:
+    gap: space.stack.sm
+  children:
+    - el: conditional
+      when: isEmpty
+      then:
+        el: container
+        role: status
+        children:
+          - el: icon
+            icon: icon.info
+          - el: text
+            text: { kind: ref, value: emptyMessage }
+            style:
+              color: color.fg.muted
+      else:
+        el: container
+        each: { items: items, as: item, key: id }
+        style:
+          padding: space.inset.sm
+        children:
+          - el: text
+            text: { kind: ref, value: item.label }
+            style:
+              color: color.fg.default

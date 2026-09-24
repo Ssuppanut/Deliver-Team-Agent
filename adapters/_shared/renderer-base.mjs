@@ -79,6 +79,10 @@ export class RendererBase {
   visitSlot(_node) { throw new Error('visitSlot not implemented'); }
   visitIcon(_node) { throw new Error('visitIcon not implemented'); }
 
+  // --- Conditional (F-3): platform if / if-else syntax -----------------------
+  // elseStr is null for a one-way (show/hide) conditional.
+  condBlock(_flag, _thenStr, _elseStr) { throw new Error('condBlock not implemented'); }
+
   // --- Control-flow wrapping (adapters override) ---------------------------
   wrapConditional(_node, rendered) { return rendered; }
   wrapIteration(_node, rendered) { return rendered; }
@@ -105,12 +109,28 @@ export class RendererBase {
       case 'input': out = this.visitInput(node); break;
       case 'slot': out = this.visitSlot(node); break;
       case 'icon': out = this.visitIcon(node); break;
+      case 'conditional': out = this.visitConditional(node); break;
       default: throw new Error(`Unknown IR node kind: ${node.kind}`);
     }
-    // Conditional is applied before iteration: `each` repeats the guarded node.
-    if (node.when) out = this.wrapConditional(node, out);
+    // A `conditional` node consumes its own `when` (the branch condition) inside
+    // visitConditional, so it must NOT also be wrapped by the element-level
+    // one-way `when` here.
+    if (node.when && node.kind !== 'conditional') out = this.wrapConditional(node, out);
     if (node.each) out = this.wrapIteration(node, out);
     return out;
+  }
+
+  /**
+   * Render an F-3 conditional node. children[0] is the "then" branch; an optional
+   * children[1] is the "else" branch. Each branch is a normal node (it may carry
+   * its own `each` for the list-vs-fallback shape). Traversal is shared here; the
+   * adapter only supplies the platform if / if-else syntax via `condBlock`.
+   */
+  visitConditional(node) {
+    const kids = node.children ?? [];
+    const thenStr = kids[0] ? this.renderNode(kids[0]) : '';
+    const elseStr = kids.length > 1 ? this.renderNode(kids[1]) : null;
+    return this.condBlock(node.when, thenStr, elseStr);
   }
 
   /** Produce the full component source for this adapter. */

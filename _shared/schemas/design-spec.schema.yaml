@@ -67,7 +67,7 @@ definitions:
     properties:
       el:
         type: string
-        enum: [container, media, heading, text, action, link, input, slot, icon]
+        enum: [container, media, heading, text, action, link, input, slot, icon, conditional]
       role: { type: string }
       as: { type: string, description: "Optional semantic tag hint (e.g. section, article)." }
       id:
@@ -124,7 +124,17 @@ definitions:
         description: Prop name of the callback for el=action.
       when:
         type: string
-        description: Prop name that gates rendering (conditional child).
+        description: >
+          Boolean flag/prop name. On an ordinary element it gates one-way
+          rendering (show/hide). On an `el: conditional` node it is the branch
+          condition. Must be a plain flag, never a JS expression (an expression
+          condition is refused, like the F-9 variant discriminant).
+      then:
+        $ref: "#/definitions/element"
+        description: "The branch rendered when `when` is true (el=conditional only)."
+      else:
+        $ref: "#/definitions/element"
+        description: "Optional branch rendered when `when` is false (el=conditional only)."
       each:
         type: object
         description: Iteration binding (Strategy D single-level).
