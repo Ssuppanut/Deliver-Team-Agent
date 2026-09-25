@@ -93,8 +93,30 @@ class VueRenderer extends RendererBase {
   visitLink(node, children) {
     return `<a${this.bind('href', node.href)}${this.styleAttr(node)}>${node.label ? this.interp(node.label) : children}</a>`;
   }
+  // Control-state primitive — controlled (caller-held) two-way binding. Pure
+  // v-model on a prop mutates a read-only prop (uncontrolled); the controlled
+  // equivalent binds the value and routes change through the caller's handler.
+  renderControlState(node, cs) {
+    const id = node.id || `${this.ir.component.toLowerCase()}-${cs.value ?? 'input'}`;
+    const labelEl = node.label ? `<label for="${id}">${this.interp(node.label)}</label>\n` : '';
+    const tail = `${this.a11y(node)}${this.styleAttr(node)}`;
+    const num = (n, v) => (v == null ? '' : ` :${n}="${v}"`);
+    if (cs.kind === 'boolean') {
+      this.express('state=boolean', { mechanism: ':checked + @change (v-model-style controlled)' });
+      return `${labelEl}<input id="${id}" type="checkbox" :checked="${cs.value}" @change="${cs.change}(($event.target as HTMLInputElement).checked)"${tail} />`;
+    }
+    if (cs.kind === 'selected-value') {
+      this.express('state=selected-value', { mechanism: ':value + @change on <select> (v-model-style controlled)' });
+      return `${labelEl}<select id="${id}" :value="${cs.value}" @change="${cs.change}(($event.target as HTMLSelectElement).value)"${tail}></select>`;
+    }
+    this.express('state=numeric-range', { mechanism: ':value + @input + :min/:max/:step (v-model-style controlled)' });
+    return `${labelEl}<input id="${id}" type="range" :value="${cs.value}" @input="${cs.change}(Number(($event.target as HTMLInputElement).value))"${num('min', cs.min)}${num('max', cs.max)}${num('step', cs.step)}${tail} />`;
+  }
+
   visitInput(node) {
     const i = node.input ?? {};
+    const cs = this.controlState(node);
+    if (cs) return this.renderControlState(node, cs);
     const id = node.id || `${this.ir.component.toLowerCase()}-${i.valueProp ?? 'input'}`;
     const labelEl = node.label ? `<label for="${id}">${this.interp(node.label)}</label>\n` : '';
     const model = i.valueProp ? ` :value="${i.valueProp}"` : '';

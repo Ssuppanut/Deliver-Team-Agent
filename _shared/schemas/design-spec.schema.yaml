@@ -119,6 +119,22 @@ definitions:
           valueProp: { type: string }
           changeProp: { type: string }
           inputType: { type: string, enum: [text, number, email, password, checkbox] }
+          state:
+            type: object
+            description: >
+              Control-state primitive (el=input only). A single-value, controlled
+              (caller holds the source of truth), two-way binding. `valueProp` is
+              the bound value reference and `changeProp` is the change handler
+              reference; both must be plain refs, never expressions. min/max/step
+              apply to numeric-range only and are input constraints, not display
+              formatting (formatting is F-11/F-12, a separate concern).
+            additionalProperties: false
+            required: [kind]
+            properties:
+              kind: { type: string, enum: [boolean, selected-value, numeric-range] }
+              min: { type: [number, string], description: "numeric-range lower bound: a number literal or a plain prop ref." }
+              max: { type: [number, string], description: "numeric-range upper bound: a number literal or a plain prop ref." }
+              step: { type: [number, string], description: "numeric-range step: a number literal or a plain prop ref (optional)." }
       onEvent:
         type: string
         description: Prop name of the callback for el=action.

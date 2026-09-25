@@ -89,8 +89,30 @@ class SvelteRenderer extends RendererBase {
   visitLink(node, children) {
     return `<a${this.bind('href', node.href)}${this.styleAttr(node)}>${node.label ? this.interp(node.label) : children}</a>`;
   }
+  // Control-state primitive — controlled (caller-held) two-way binding. `bind:`
+  // to a local is the UNCONTROLLED idiom (scope guard: controlled-only), so the
+  // controlled form binds the value and routes change to the caller's handler.
+  renderControlState(node, cs) {
+    const id = node.id || `${this.ir.component.toLowerCase()}-${cs.value ?? 'input'}`;
+    const labelEl = node.label ? `<label for="${id}">${this.interp(node.label)}</label>\n` : '';
+    const tail = `${this.a11y(node)}${this.styleAttr(node)}`;
+    const num = (n, v) => (v == null ? '' : ` ${n}={${v}}`);
+    if (cs.kind === 'boolean') {
+      this.express('state=boolean', { mechanism: 'checked={} + on:change (controlled)' });
+      return `${labelEl}<input id="${id}" type="checkbox" checked={${cs.value}} on:change={(e) => ${cs.change}(e.currentTarget.checked)}${tail} />`;
+    }
+    if (cs.kind === 'selected-value') {
+      this.express('state=selected-value', { mechanism: 'value={} + on:change on <select> (controlled)' });
+      return `${labelEl}<select id="${id}" value={${cs.value}} on:change={(e) => ${cs.change}(e.currentTarget.value)}${tail}></select>`;
+    }
+    this.express('state=numeric-range', { mechanism: 'value={} + on:input + min/max/step (controlled)' });
+    return `${labelEl}<input id="${id}" type="range" value={${cs.value}} on:input={(e) => ${cs.change}(Number(e.currentTarget.value))}${num('min', cs.min)}${num('max', cs.max)}${num('step', cs.step)}${tail} />`;
+  }
+
   visitInput(node) {
     const i = node.input ?? {};
+    const cs = this.controlState(node);
+    if (cs) return this.renderControlState(node, cs);
     const id = node.id || `${this.ir.component.toLowerCase()}-${i.valueProp ?? 'input'}`;
     const labelEl = node.label ? `<label for="${id}">${this.interp(node.label)}</label>\n` : '';
     const value = i.valueProp ? ` value={${i.valueProp}}` : '';

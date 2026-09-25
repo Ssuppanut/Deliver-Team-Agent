@@ -103,8 +103,30 @@ class RNRenderer extends RendererBase {
     const press = node.href ? ` onPress={() => Linking.openURL(${this.attr(node.href)})}` : '';
     return `<Pressable accessibilityRole="link"${press}${this.style(node)}>\n  <Text>${node.label ? this.interp(node.label) : children}</Text>\n</Pressable>`;
   }
+  // Control-state primitive — controlled (caller-held) two-way binding via the
+  // native RN control's `value/selectedValue` + `onValueChange`.
+  renderControlState(node, cs) {
+    const labelEl = node.label ? `<Text>${this.interp(node.label)}</Text>\n` : '';
+    const a11yLabel = node.a11y?.label ? ` accessibilityLabel={${this.attr(node.a11y.label)}}` : '';
+    if (node.a11y?.label) this.express('a11y.label', { mechanism: 'accessibilityLabel' });
+    const style = this.style(node);
+    const num = (n, v) => (v == null ? '' : ` ${n}={${v}}`);
+    if (cs.kind === 'boolean') {
+      this.express('state=boolean', { mechanism: '<Switch value onValueChange> (controlled)' });
+      return `${labelEl}<Switch value={${cs.value}} onValueChange={${cs.change}}${a11yLabel}${style} />`;
+    }
+    if (cs.kind === 'selected-value') {
+      this.express('state=selected-value', { mechanism: '<Picker selectedValue onValueChange> (controlled)' });
+      return `${labelEl}<Picker selectedValue={${cs.value}} onValueChange={${cs.change}}${a11yLabel}${style}></Picker>`;
+    }
+    this.express('state=numeric-range', { mechanism: '<Slider value onValueChange minimumValue/maximumValue/step> (controlled)' });
+    return `${labelEl}<Slider value={${cs.value}} onValueChange={${cs.change}}${num('minimumValue', cs.min)}${num('maximumValue', cs.max)}${num('step', cs.step)}${a11yLabel}${style} />`;
+  }
+
   visitInput(node) {
     const i = node.input ?? {};
+    const cs = this.controlState(node);
+    if (cs) return this.renderControlState(node, cs);
     const role = node.role;
     // A visible label also serves as the accessible name (no htmlFor on native).
     const labelSource = node.label ?? node.a11y?.label;
@@ -176,12 +198,13 @@ class RNRenderer extends RendererBase {
     const rnImports = new Set(['View', 'Text', 'Image', 'Pressable', 'TextInput', 'Linking']);
     if (/<Switch\b/.test(root)) rnImports.add('Switch');
     const sliderImport = /<Slider\b/.test(root) ? `import Slider from '@react-native-community/slider';\n` : '';
+    const pickerImport = /<Picker\b/.test(root) ? `import { Picker } from '@react-native-picker/picker';\n` : '';
     const iconImport = this.usedIcons.size
       ? `import { ${[...this.usedIcons].join(', ')} } from '${ICON_LIB}';\n`
       : '';
     return `import React from 'react';\n`
       + `import { ${[...rnImports].join(', ')} } from 'react-native';\n`
-      + `${sliderImport}${iconImport}import { tokens } from '../../_shared/tokens/tokens-rn';\n\n`
+      + `${sliderImport}${pickerImport}${iconImport}import { tokens } from '../../_shared/tokens/tokens-rn';\n\n`
       + `export interface ${name}Props {\n${props}\n}\n\n`
       + `export function ${name}({ ${args} }: ${name}Props) {\n  return (\n${indent(root, 4)}\n  );\n}\n`;
   }

@@ -53,7 +53,23 @@ export class RendererBase {
     if (a.invalid) t.push('a11y.invalid');
     if (a.labelledBy) t.push('a11y.labelledBy');
     if (a.describedBy) t.push('a11y.describedBy');
+    // Control-state primitive: a two-way state binding is a trait every adapter
+    // must account for (express its native binding), or the ledger flags it.
+    if (node.input?.state?.kind) t.push(`state=${node.input.state.kind}`);
     return t;
+  }
+
+  /**
+   * Normalize an input node's control-state binding — the renderer-base
+   * representation of the primitive (single value, controlled-only). Adapters
+   * read this and emit their platform's native two-way binding.
+   * @returns {null | { kind, value, change, min, max, step }}
+   */
+  controlState(node) {
+    const s = node.input?.state;
+    if (!s) return null;
+    const i = node.input;
+    return { kind: s.kind, value: i.valueProp, change: i.changeProp, min: s.min, max: s.max, step: s.step };
   }
 
   /** Account for a trait: this adapter emitted it via a real platform mechanism. */

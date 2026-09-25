@@ -1,0 +1,23 @@
+component: StateBoolean
+description: Control-state primitive test — a controlled boolean (on/off) two-way binding.
+category: input
+props:
+  - { name: enabled, type: boolean, required: true }
+  - { name: onEnabledChange, type: function, required: true }
+tokens:
+  - space.stack.sm
+  - space.inset.sm
+root:
+  el: container
+  style:
+    gap: space.stack.sm
+  children:
+    - el: input
+      label: { kind: literal, value: "Enable notifications" }
+      input:
+        valueProp: enabled
+        changeProp: onEnabledChange
+        state:
+          kind: boolean
+      style:
+        padding: space.inset.sm

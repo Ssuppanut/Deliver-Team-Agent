@@ -1,0 +1,26 @@
+component: StateRange
+description: Control-state primitive test — a controlled numeric value with min/max/step range binding (constraints only, no formatting).
+category: input
+props:
+  - { name: volume, type: number, required: true }
+  - { name: onVolumeChange, type: function, required: true }
+tokens:
+  - space.stack.sm
+  - space.inset.sm
+root:
+  el: container
+  style:
+    gap: space.stack.sm
+  children:
+    - el: input
+      label: { kind: literal, value: "Volume" }
+      input:
+        valueProp: volume
+        changeProp: onVolumeChange
+        state:
+          kind: numeric-range
+          min: 0
+          max: 100
+          step: 5
+      style:
+        padding: space.inset.sm

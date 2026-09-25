@@ -115,8 +115,29 @@ class ReactRenderer extends RendererBase {
     return node.id || `${this.ir.component.toLowerCase()}-${i.valueProp ?? 'input'}`;
   }
 
+  // Control-state primitive — controlled (caller-held) two-way binding via
+  // React's `value/checked` + `onChange`.
+  renderControlState(node, cs) {
+    const id = this.inputId(node);
+    const labelEl = node.label ? `<label htmlFor="${id}">${this.interp(node.label)}</label>\n` : '';
+    const tail = `${this.a11yAttrs(node)}${this.styleAttr(node)}`;
+    const num = (n, v) => (v == null ? '' : ` ${n}={${v}}`);
+    if (cs.kind === 'boolean') {
+      this.express('state=boolean', { mechanism: 'checked + onChange (controlled)' });
+      return `${labelEl}<input id="${id}" type="checkbox" checked={${cs.value}} onChange={(e) => ${cs.change}(e.target.checked)}${tail} />`;
+    }
+    if (cs.kind === 'selected-value') {
+      this.express('state=selected-value', { mechanism: 'value + onChange on <select> (controlled)' });
+      return `${labelEl}<select id="${id}" value={${cs.value}} onChange={(e) => ${cs.change}(e.target.value)}${tail}></select>`;
+    }
+    this.express('state=numeric-range', { mechanism: 'value + onChange + min/max/step (controlled)' });
+    return `${labelEl}<input id="${id}" type="range" value={${cs.value}} onChange={(e) => ${cs.change}(Number(e.target.value))}${num('min', cs.min)}${num('max', cs.max)}${num('step', cs.step)}${tail} />`;
+  }
+
   visitInput(node) {
     const i = node.input ?? {};
+    const cs = this.controlState(node);
+    if (cs) return this.renderControlState(node, cs);
     const id = this.inputId(node);
     const labelEl = node.label ? `<label htmlFor="${id}">${this.interp(node.label)}</label>\n` : '';
     const value = i.valueProp ? ` value={${i.valueProp}}` : '';
