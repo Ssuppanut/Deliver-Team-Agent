@@ -75,6 +75,14 @@ function main() {
   try { run('node _shared/scripts/verify-patches.mjs'); }
   catch { console.error('FAIL: verify-patches'); failures++; }
 
+  // Layer 3 — gate mutation testing. Fast (~2s), so it runs on every CI: it
+  // proves each gate still goes RED on its defect class and flags any NEW blind
+  // spot. Known blind spots (logged findings) keep it GREEN; a fresh survivor or
+  // a gate regression turns it RED.
+  console.log('\n## 4. gate mutation testing (Layer 3)');
+  try { run('node _shared/scripts/mutate-gates.mjs'); }
+  catch { console.error('FAIL: mutate-gates (baseline dirty or a NEW surviving mutant / gate regression)'); failures++; }
+
   console.log(`\n${failures === 0 ? 'CI PASS' : `CI FAIL (${failures})`}`);
   process.exit(failures ? 1 : 0);
 }
