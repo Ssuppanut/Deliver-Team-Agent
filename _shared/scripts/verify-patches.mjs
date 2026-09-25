@@ -655,15 +655,16 @@ check('P43', 'ledger: a divergence needs a matching, non-expired, approved waive
 });
 
 // --- P44: Layer 3 — gate mutation testing runs, baseline clean, known-defect
-//         mutants killed per operator, only the two known blind spots survive.
-check('P44', 'mutation testing: baseline all-green; each known-defect operator kills its mutants; only known blind spots survive', () => {
+//         mutants killed per operator, only the one remaining blind spot survives.
+check('P44', 'mutation testing: baseline all-green; each killer operator kills its mutants; only F-22 survives', () => {
   const { baselineFailures, mutants, survived } = runMutationTesting();
   assert(baselineFailures.length === 0, `mutation baseline must be all-green, got RED: ${baselineFailures.map((f) => f.feature).join(', ')}`);
   assert(mutants.length > 0, 'the harness must generate mutants');
 
   // The killing operators must kill EVERY mutant they inject (each is a proven
-  // gate). If a gate regresses, one of these would survive.
-  const KILLERS = ['drop-trait', 'remove-a11y', 'native-expr-leak', 'ref-as-literal', 'hardcode-token-web', 'unresolved-tbd'];
+  // gate). hardcode-token-native is now a killer (F-21 resolved: token-guard
+  // covers native). If a gate regresses, one of these would survive.
+  const KILLERS = ['drop-trait', 'remove-a11y', 'native-expr-leak', 'ref-as-literal', 'hardcode-token-web', 'hardcode-token-native', 'unresolved-tbd'];
   for (const op of KILLERS) {
     const ms = mutants.filter((m) => m.operator === op);
     assert(ms.length > 0, `operator ${op} produced no mutants`);
@@ -681,17 +682,68 @@ check('P44', 'mutation testing: baseline all-green; each known-defect operator k
   killerGate('native-expr-leak', 'native-code');
   killerGate('ref-as-literal', 'parity');
   killerGate('hardcode-token-web', 'token');
+  killerGate('hardcode-token-native', 'token'); // F-21: native hardcode now RED via token-guard
   killerGate('unresolved-tbd', 'readiness');
 
   // Every survivor must be a KNOWN blind spot (logged finding). A new survivor
   // class is a fresh blind spot and must fail here so it cannot ship silently.
-  const KNOWN = new Set(['hardcode-token-native', 'state-by-color-only']);
+  const KNOWN = new Set(['state-by-color-only']);
   const unexpected = survived.filter((m) => !KNOWN.has(m.operator));
   assert(unexpected.length === 0, `unexpected surviving mutant (new blind spot): ${unexpected.map((m) => m.key).join(', ')}`);
-  // And the two known blind spots must actually still survive (else the finding
-  // is stale and should be closed).
-  assert(survived.some((m) => m.operator === 'hardcode-token-native'), 'F-21 blind spot (native token hardcode) expected to survive');
+  // F-21 must no longer survive (token-guard now covers native).
+  assert(!survived.some((m) => m.operator === 'hardcode-token-native'), 'F-21 must be resolved: native token hardcode must NOT survive');
+  // F-22 remains a known advisory-only survivor (intentional severity choice).
   assert(survived.some((m) => m.operator === 'state-by-color-only'), 'F-22 blind spot (state-by-color-only advisory) expected to survive');
+});
+
+// --- P45: F-21 — token-guard now covers NATIVE adapters. A hardcoded color/size
+//         literal that has a token equivalent is RED (per native adapter); a
+//         legitimate token reference is GREEN (no over-flag).
+check('P45', 'token-guard (native): hardcoded color/dimension literal FAILs per native adapter; a token reference passes', () => {
+  const irStub = { tokens: [], root: { kind: 'container' } };
+  const wrap = (adapter, code) => ({ [adapter]: { code } });
+
+  // 1. Hardcoded COLOR literal -> serious -> gate RED, naming adapter + value.
+  const colorCases = {
+    swiftui: '.background(Color(hex: "#ef4444"))',
+    compose: '.background(Color(0xFFEF4444))',
+    'react-native': 'style={{ backgroundColor: "#ef4444" }}',
+  };
+  for (const [adapter, snippet] of Object.entries(colorCases)) {
+    const r = checkTokens(irStub, wrap(adapter, snippet));
+    assert(!r.ok, `${adapter}: a hardcoded color literal must FAIL token-guard`);
+    assert(r.issues.some((i) => i.rule === 'hardcoded-color-native' && i.msg.includes(adapter)), `${adapter}: failure must name the adapter and be a native color rule`);
+  }
+
+  // 2. Hardcoded DIMENSION literal -> moderate rule present (advisory, mirrors web px).
+  const dimCases = {
+    swiftui: '.padding(12)',
+    compose: 'Modifier.padding(12.dp)',
+    'react-native': 'style={{ padding: 12 }}',
+  };
+  for (const [adapter, snippet] of Object.entries(dimCases)) {
+    const r = checkTokens(irStub, wrap(adapter, snippet));
+    assert(r.issues.some((i) => i.rule === 'hardcoded-dimension-native' && i.msg.includes(adapter)), `${adapter}: a hardcoded dimension literal must be flagged`);
+  }
+
+  // 3. Legitimate token references must NOT be flagged (no over-flag), including
+  //    the SwiftUI Color(DesignTokens.X) wrapper and the VStack `spacing: 8`
+  //    layout constant, and the 0/1 dimension exemption.
+  const legit = {
+    swiftui: 'VStack(alignment: .leading, spacing: 8) {}\n.background(Color(DesignTokens.ColorFgDefault))\n.padding(DesignTokens.SpaceInsetMd)\n.cornerRadius(DesignTokens.RadiusControl)',
+    compose: 'Column(modifier = Modifier.padding(DesignTokens.SpaceInsetSm).background(DesignTokens.ColorSuccessBg)) {}',
+    'react-native': 'style={{ backgroundColor: tokens.color.bg.default, padding: tokens.space.inset.md, borderWidth: 1, flexShrink: 0 }}',
+  };
+  for (const [adapter, snippet] of Object.entries(legit)) {
+    const r = checkTokens(irStub, wrap(adapter, snippet));
+    const native = r.issues.filter((i) => i.rule?.endsWith('-native'));
+    assert(native.length === 0, `${adapter}: legitimate token references must not be flagged, got: ${native.map((i) => i.msg).join('; ')}`);
+  }
+
+  // 4. Web behavior is unchanged: web still flags raw hex (serious) and raw px (moderate).
+  const web = checkTokens(irStub, { react: { code: "color: '#ef4444'; padding: 12px" } });
+  assert(web.issues.some((i) => i.rule === 'hardcoded-color'), 'web raw hex rule unchanged');
+  assert(web.issues.some((i) => i.rule === 'hardcoded-dimension'), 'web raw px rule unchanged');
 });
 
 console.log('\n=== verify-patches ===');

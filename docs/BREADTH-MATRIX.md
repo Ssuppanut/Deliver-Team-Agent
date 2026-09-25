@@ -820,7 +820,7 @@ Two defect classes survive every gate. Both are logged, **not fixed inline**
 
 | ID | Defect class | Finding |
 |---|---|---|
-| **F-21** | Hardcoded token on a **native** adapter | `token-guard` inspects **web** adapters only (`react`/`vue`/`svelte`) for raw hex / raw px. A raw `#ef4444` or `12px` emitted by SwiftUI / Compose / React Native passes **every** gate. 19/19 native-hardcode mutants survived; independently confirmed 0 RED gates. **Proposed minimal fix (not applied):** extend `token-guard`'s source-tier scan to the native adapters with platform-appropriate literal patterns (a Swift `Color(red:…)` / hex string, a Compose `Color(0x…)`, an RN numeric style literal). This is more than a one-line change (native color/dimension literals are not the web hex/px shapes), so it is reported for triage rather than applied here. |
+| **F-21** | Hardcoded token on a **native** adapter | **RESOLVED — see "F-21 — native token enforcement" below.** *(As found by Layer 3:)* `token-guard` inspected **web** adapters only (`react`/`vue`/`svelte`) for raw hex / raw px, so a raw `#ef4444` or `12px` emitted by SwiftUI / Compose / React Native passed **every** gate. 19/19 native-hardcode mutants survived; independently confirmed 0 RED gates. Now closed: token-guard's source scan covers the native adapters, and the 19 mutants are killed. |
 | **F-22** | State conveyed by **color alone** | `slop-guard`'s `status-color-only` rule fires but at **`minor`** severity, which is advisory and does not block the gate. Turning a good icon+color status variant into a color-only one is reported but never RED (4/4 mutants survived; `slop.ok` stays true while the issue is listed). This is an **intentional severity choice** (color-only is a smell, not always a defect — some contexts add text instead of an icon), so it is a *known* advisory gap, not necessarily a bug. **Options for triage:** leave advisory (status quo), or escalate to `serious` when a variant is color-only AND carries no adjacent text/icon anywhere. No change applied. |
 
 Everything else — every a11y trait, every token on web, every ref binding, every
@@ -855,3 +855,96 @@ any native toolchain to CI; migrate the IR off ARIA; build the control-state
 primitive or add new components; **fix** the discovered blind spots inline (F-21 /
 F-22 are logged for triage); weaken or remove any gate; or touch agents / skills /
 workflow / AI-router. F-17 / F-18 / F-19 remain deferred as before.
+
+---
+
+# F-21 — native token enforcement (resolved)
+
+Layer 3 mutation testing surfaced **F-21**: `token-guard` scanned only the web
+adapters, so a hardcoded color/size on a native adapter (SwiftUI / Compose /
+React Native) passed every gate — the same web-covered / native-leaks class as
+the a11y gap Layer 1 closed. Since the token contract is core and the upcoming
+form-input work emits many native token references, the hole is closed before
+building on top of it.
+
+## The fix — native source-tier scan in token-guard
+
+`token-guard` now scans the 3 native adapters too, with **platform-specific**
+detectors (not a copy of the web hex/px scan — native literal shapes differ):
+
+| Adapter | Color literal (serious) | Dimension literal (moderate) |
+|---|---|---|
+| **SwiftUI** | `Color(hex:…)`, `Color(red:…)`, `Color(.sRGB/.displayP3…)`, `UIColor(red:…)`, any `#rrggbb[aa]` | numeric `.padding(N)` / `.cornerRadius(N)` / `.frame(N)` / `.system(size: N)` |
+| **Compose** | `Color(0xFF…)`, `Color(red = …)`, any `#rrggbb[aa]` | `N.dp` / `N.sp` numeric literal |
+| **React Native** | `"#rrggbb[aa]"`, `"rgb(…)"`/`"rgba(…)"` string | bare number on a dimension style prop (`padding`, `margin`, `borderRadius`, `gap`, `width`, `height`, `fontSize`, `lineHeight`, insets, …) |
+
+**Principle (same as web):** a value that has a token equivalent must reference
+the token, never be inlined. Colors are `serious` (a color must always be a
+token — mirrors web raw-hex); dimensions are `moderate`/advisory (mirrors web
+raw-px). The detectors key on the **numeric/hex payload** (`hex:`, `red:`, `0x`,
+`#…`, a bare number), which a token reference never carries — so
+`Color(DesignTokens.X)`, `DesignTokens.SpaceInsetMd`, and `tokens.color.*` are
+**not** flagged.
+
+**Exception carried over (stated):** the web scan adds no numeric allowlist and
+relies on pattern narrowness; the native dimension scan mirrors that and, in
+addition, treats bare `0` and `1` as legitimate non-tokens (zero and the 1-unit
+hairline — the `0`/`1` case the brief names). These have no token equivalent and
+are universal native idioms (e.g. `borderWidth: 1`). Colors carry **no**
+exception. The SwiftUI `VStack(spacing: 8)` layout constant is not a `.padding()`
+-style token position, so it is not matched — it is not flagged.
+
+**Web behavior unchanged:** the `WEB_ADAPTERS` branch is byte-for-byte the same
+rules/severities (`hardcoded-color` serious, `hardcoded-dimension` moderate);
+native coverage is purely additive (new rules `hardcoded-color-native`,
+`hardcoded-dimension-native`).
+
+## Proof — mutation harness before / after
+
+`npm run mutate:gates`:
+
+| | total | killed | survived |
+|---|---|---|---|
+| **before** (main, F-21 open) | 251 | 228 | 23 |
+| **after** (this change) | 251 | **247** | **4** |
+
+The 19 `hardcode-token-native` mutants flip from **survived → killed** (by
+`token-guard`). The only remaining survivors are the 4 `state-by-color-only`
+mutants (**F-22**, unchanged — an intentional advisory severity). No new
+survivors, and no previously-killed mutant now survives (no gate regression) —
+the harness exit policy enforces this and the run exits 0.
+
+## Proof — manual fired-gate (before / after), per native adapter
+
+```
+[swiftui] BEFORE .foregroundColor(Color(hex: "#ef4444"))   -> RED  hardcoded-color-native: swiftui: hardcoded color literal `Color(hex: "#ef4444")`
+[swiftui] AFTER  .foregroundColor(DesignTokens.ColorDangerFg) -> GREEN
+[compose] BEFORE .background(Color(0xFFEF4444))            -> RED  hardcoded-color-native: compose: hardcoded color literal `Color(0xFFEF4444)`
+[compose] AFTER  .background(DesignTokens.ColorDangerBg)     -> GREEN
+[react-native] BEFORE backgroundColor: "#ef4444", padding: 16 -> RED color (serious) + dimension (moderate), naming the adapter
+[react-native] AFTER  backgroundColor: tokens.color.danger.bg, padding: tokens.space.inset.md -> GREEN
+```
+
+## No over-flag
+
+All 19 in-scope features stay **GREEN** under the stricter native scan — 0
+native-token issues across every component's SwiftUI / Compose / RN output
+(legitimate `DesignTokens.*` / `tokens.*` references, the `Color(DesignTokens.X)`
+wrapper, `VStack(spacing: 8)`, and `borderWidth: 1` are all correctly not
+flagged). No component's token status in the breadth matrix changes.
+
+## Regression pin
+
+`P45` — a hardcoded native color literal FAILs token-guard (serious) per adapter
+(SwiftUI / Compose / RN), naming the adapter + value; a hardcoded native
+dimension literal is flagged (moderate); a legitimate token reference and the
+`0`/`1` hairline pass; and the web hex/px rules are unchanged. `P44` now asserts
+the `hardcode-token-native` mutants are **killed** by `token-guard` and that only
+**F-22** survives. `verify-patches` → **45/45**.
+
+## Scope
+
+Only native token coverage was added. F-22 is untouched (intentional advisory
+severity). No Layer 2, no IR migration, no control-state primitive, no new
+components; no gate weakened or removed; the web token scan is unchanged; no
+agent / skill / workflow / AI-router changes.
