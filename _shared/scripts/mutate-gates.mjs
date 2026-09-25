@@ -269,12 +269,13 @@ const OPERATORS = [
     },
   },
 
-  // O4b — the SAME hardcode, but in a NATIVE adapter. token-guard only inspects
-  // web output, so nothing catches it. Included to probe the blind spot.
+  // O4b — the SAME hardcode, but in a NATIVE adapter. Since F-21, token-guard's
+  // source scan covers the native adapters, so this must now be KILLED. (Before
+  // F-21 it was the surviving blind spot.)
   {
     id: 'hardcode-token-native',
     klass: 'token-guard (native)',
-    expect: 'EXPECTED SURVIVOR — token-guard inspects web adapters only',
+    expect: 'token-guard (native color literal) — resolved by F-21 (was the blind spot)',
     sites(bundle) {
       return [{
         key: `${bundle.feature}:swiftui`,
@@ -380,7 +381,11 @@ function stripTrait(res, traitId) {
 // Known, already-logged survivors (blind spots). A survivor here is triage data,
 // not a run failure. A survivor OUTSIDE this set is a fresh blind spot and fails
 // the run so it cannot ship unnoticed.
-const KNOWN_SURVIVORS = new Set(['hardcode-token-native', 'state-by-color-only']);
+// F-21 (hardcode-token-native) was removed once token-guard gained native
+// coverage — it must now be KILLED, so a future survival is a regression, not a
+// known blind spot. Only F-22 (state-by-color-only, an intentional advisory
+// severity) remains a known survivor.
+const KNOWN_SURVIVORS = new Set(['state-by-color-only']);
 
 export function runMutationTesting() {
   const corpus = discoverCorpus();
