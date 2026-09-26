@@ -38,7 +38,12 @@
       "expires": "2027-06-30"
     },
     "a11y-invalid-swiftui": {
-      "reason": "SwiftUI has no direct aria-invalid trait on a TextField. The invalid state is conveyed by the adjacent error Text (itself a live region); a11y-invalid maps to isError on Compose and aria-invalid on web/RN, so only SwiftUI diverges.",
+      "reason": "SwiftUI has no direct aria-invalid trait on a TextField/Toggle. The invalid state is conveyed by the adjacent error Text (itself a live region); a11y-invalid maps to aria-invalid on web/RN, so SwiftUI diverges.",
+      "approver": "Ssuppanut (design-system a11y owner)",
+      "expires": "2027-06-30"
+    },
+    "a11y-invalid-compose": {
+      "reason": "A Compose Checkbox/Switch/Slider/RadioButton has no isError parameter (unlike a text field), so a11y-invalid on a non-text control has no direct trait. The invalid state is conveyed by the adjacent error Text (a live region); a11y-invalid maps to aria-invalid on web/RN, so this control diverges.",
       "approver": "Ssuppanut (design-system a11y owner)",
       "expires": "2027-06-30"
     }

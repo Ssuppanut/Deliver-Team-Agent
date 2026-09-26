@@ -886,6 +886,26 @@ check('P52', 'refusal: expression as options / bound value is refused; custom-ov
   assert(checkRefusal(sel({ valueProp: 'choice', changeProp: 'onChoice', state: { kind: 'selected-value', options: 'options' } })) === null, 'a plain option ref + plain value must pass');
 });
 
+// --- P53: describedBy / invalid accounted in control-state on all 6 (F-24) ----
+const CHECKBOX_ERROR = resolve(ROOT, '.claude/artifacts/checkbox-error/design-spec.yaml');
+check('P53', 'control-state a11y: a control with an inline error accounts describedBy + invalid on all 6 (express or waiver-backed diverge), 0 unaccounted', () => {
+  const out = genAll(CHECKBOX_ERROR, 'verify-checkbox-error');
+  for (const [ad, r] of Object.entries(out)) {
+    for (const trait of ['a11y.describedBy', 'a11y.invalid']) {
+      const e = r.ledger.find((x) => x.traitId === trait);
+      assert(e, `${ad}: ${trait} must be in the ledger`);
+      assert(e.status === 'expressed' || (e.status === 'diverged' && e.waiver), `${ad}: ${trait} must be expressed or waiver-backed diverged, got ${e.status}`);
+    }
+    assert(!r.ledger.some((x) => x.status === 'unaccounted'), `${ad}: no trait may be unaccounted`);
+  }
+  // Web expresses the real ARIA attributes in output; the whole feature's ledger passes.
+  for (const ad of ['react', 'vue', 'svelte']) {
+    assert(/aria-invalid/.test(out[ad].code) && /aria-describedby/.test(out[ad].code), `${ad}: must emit aria-invalid + aria-describedby`);
+  }
+  const ledger = Object.values(out).flatMap((r) => r.ledger);
+  assert(checkLedger(ledger).ok, 'checkbox-error ledger gate must pass (describedBy/invalid accounted)');
+});
+
 console.log('\n=== verify-patches ===');
 console.log(results.join('\n'));
 console.log(`\n${pass} passed, ${fail} failed\n`);

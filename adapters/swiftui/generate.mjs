@@ -141,6 +141,8 @@ class SwiftUIRenderer extends RendererBase {
     const role = node.role;
     const title = this.plain(node.label ?? node.a11y?.label);
     if (node.a11y?.label) this.express('a11y.label', { mechanism: 'label (accessible name)' });
+    if (node.a11y?.describedBy) this.diverge('a11y.describedBy', { reason: 'SwiftUI has no aria-describedby', fallback: '.accessibilityHint / adjacent Text', waiver: 'a11y-describedby-native' });
+    if (node.a11y?.invalid) this.diverge('a11y.invalid', { reason: 'SwiftUI has no direct aria-invalid trait', fallback: 'label / adjacent error Text conveys the invalid state', waiver: 'a11y-invalid-swiftui' });
     const num = (v) => (typeof v === 'number' ? String(v) : safe(String(v)));
     const bind = `Binding(get: { ${safe(cs.value)} }, set: { ${safe(cs.change)}($0) })`;
     if (cs.kind === 'boolean') {

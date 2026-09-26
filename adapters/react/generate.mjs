@@ -117,10 +117,23 @@ class ReactRenderer extends RendererBase {
 
   // Control-state primitive — controlled (caller-held) two-way binding via
   // React's `value/checked` + `onChange`.
+  // describedBy / invalid accounting for control-state controls (mirrors visitInput).
+  inputAria(node) {
+    let aria = '';
+    const invalid = node.a11y?.invalid;
+    const desc = node.a11y?.describedBy;
+    if (invalid) { aria += ` aria-invalid={!!${invalid}}`; this.express('a11y.invalid', { mechanism: 'aria-invalid' }); }
+    if (desc) {
+      aria += invalid ? ` aria-describedby={${invalid} ? "${desc}" : undefined}` : ` aria-describedby="${desc}"`;
+      this.express('a11y.describedBy', { mechanism: 'aria-describedby' });
+    }
+    return aria;
+  }
+
   renderControlState(node, cs) {
     const id = this.inputId(node);
     const labelEl = node.label ? `<label htmlFor="${id}">${this.interp(node.label)}</label>\n` : '';
-    const tail = `${this.a11yAttrs(node)}${this.styleAttr(node)}`;
+    const tail = `${this.a11yAttrs(node)}${this.inputAria(node)}${this.styleAttr(node)}`;
     const num = (n, v) => (v == null ? '' : ` ${n}={${v}}`);
     if (cs.kind === 'boolean') {
       this.express('state=boolean', { mechanism: 'checked + onChange (controlled)' });

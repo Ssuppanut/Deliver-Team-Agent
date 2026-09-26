@@ -176,6 +176,8 @@ class ComposeRenderer extends RendererBase {
   renderControlState(node, cs) {
     const role = node.role;
     if (node.a11y?.label) this.express('a11y.label', { mechanism: 'contentDescription (label)' });
+    if (node.a11y?.describedBy) this.diverge('a11y.describedBy', { reason: 'Compose has no aria-describedby', fallback: 'adjacent Text / stateDescription', waiver: 'a11y-describedby-native' });
+    if (node.a11y?.invalid) this.diverge('a11y.invalid', { reason: 'Compose control has no isError in this position', fallback: 'adjacent error Text conveys the invalid state', waiver: 'a11y-invalid-compose' });
     // A visible label (Compose controls have no label param) is rendered as an
     // adjacent Text inside a Column, so the label prop is honored, not dropped.
     const label = this.plain(node.label);

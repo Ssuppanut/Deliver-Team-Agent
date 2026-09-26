@@ -1,0 +1,19 @@
+component: CheckboxError
+purpose: A controlled checkbox with an optional inline error — exercises describedBy + invalid on a control-state control.
+audience: End users filling validated forms.
+platforms: [react, vue, svelte, react-native, swiftui, compose]
+variants: []
+states: [unchecked, checked, invalid]
+interaction: controlled
+a11y:
+  - "role=checkbox + controlled boolean"
+  - "invalid state exposed (aria-invalid / documented native divergence)"
+  - "error linked via aria-describedby (documented native divergence); announced (role=alert + live)"
+scope:
+  in:
+    - "control-state boolean binding"
+    - "describedBy + invalid accounting (F-24)"
+    - "conditional error text (F-3)"
+  out:
+    - "validation logic (caller owns it)"
+composes: "control-state(boolean) + role=checkbox + describedBy/invalid + conditional(F-3) + tokens"

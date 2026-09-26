@@ -1217,3 +1217,64 @@ regression.
 `P51` (RadioGroup renders role=radiogroup + per-option selection on all 6, role +
 state accounted), `P52` (expression-as-options / bound value refused; overlay
 select refused). `verify-patches` → **52/52**.
+
+---
+
+# F-24 — describedBy / invalid in control-state
+
+The control-state render path (`renderControlState`) accounted for `state`,
+`role`, and `label`, but **not** `a11y.describedBy` / `a11y.invalid` — a
+control-state control with an inline error/description left those traits
+`unaccounted` → ledger FAIL. F-24 wires both into all 6 adapters, using each
+platform's real mechanism, mirroring the non-state `visitInput` path.
+
+## Wiring per adapter
+
+| trait | React / Vue / Svelte | React Native | SwiftUI | Compose |
+|---|---|---|---|---|
+| `a11y.invalid` | `aria-invalid` (express) | `aria-invalid` (express) | diverge `a11y-invalid-swiftui` | diverge `a11y-invalid-compose` |
+| `a11y.describedBy` | `aria-describedby` (express) | diverge `a11y-describedby-native` | diverge `a11y-describedby-native` | diverge `a11y-describedby-native` |
+
+A platform that genuinely cannot express a trait **diverges** (waiver-backed),
+never silently drops it. Added `a11y-invalid-compose` to the waiver registry (a
+Compose Checkbox/Switch/Slider/RadioButton has no `isError`, unlike a text
+field). All waivers carry an approver + expiry.
+
+## Proof — inline-error control accounted on all 6, revert → FAIL → restore
+
+Test spec `checkbox-error` (controlled checkbox + `a11y.invalid` + `a11y.describedBy`
++ a conditional F-3 error text):
+
+```
+describedBy + invalid accounting per adapter:
+  react/vue/svelte  describedBy=expressed(aria-describedby)  invalid=expressed(aria-invalid)
+  react-native      describedBy=diverged(a11y-describedby-native)  invalid=expressed(aria-invalid)
+  swiftui           describedBy=diverged(a11y-describedby-native)  invalid=diverged(a11y-invalid-swiftui)
+  compose           describedBy=diverged(a11y-describedby-native)  invalid=diverged(a11y-invalid-compose)
+
+ledger PASS (29 expressed, 7 diverged, 0 unaccounted)   gates: PASS
+```
+
+Revert proof (drop the F-24 wiring from React):
+```
+BEFORE  ledger PASS (0 unaccounted)   gates: PASS
+AFTER   ledger FAIL — react drops `a11y.invalid` + `a11y.describedBy` (unaccounted)
+RESTORE ledger PASS (0 unaccounted)   gates: PASS
+```
+
+## Findings
+
+- **F-24 — RESOLVED.** `renderControlState` now accounts for describedBy +
+  invalid on all 6 (express or waiver-backed diverge); a control with an inline
+  error is fully accounted, 0 unaccounted.
+
+## Mutation harness
+
+Corpus 28 → **29** (checkbox-error). `380/376/4 → **417 / 413 / 4**` — only F-22
+survives; no new survivor, no regression.
+
+## Regression pin
+
+`P53` (a control with an inline error accounts describedBy + invalid on all 6,
+0 unaccounted; web emits real ARIA attrs; ledger gate passes). `verify-patches`
+→ **53/53**.

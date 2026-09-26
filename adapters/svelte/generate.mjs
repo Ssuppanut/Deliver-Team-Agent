@@ -92,10 +92,19 @@ class SvelteRenderer extends RendererBase {
   // Control-state primitive — controlled (caller-held) two-way binding. `bind:`
   // to a local is the UNCONTROLLED idiom (scope guard: controlled-only), so the
   // controlled form binds the value and routes change to the caller's handler.
+  inputAria(node) {
+    let aria = '';
+    const invalid = node.a11y?.invalid;
+    const desc = node.a11y?.describedBy;
+    if (invalid) { aria += ` aria-invalid={!!${invalid}}`; this.express('a11y.invalid', { mechanism: 'aria-invalid' }); }
+    if (desc) { aria += invalid ? ` aria-describedby={${invalid} ? '${desc}' : undefined}` : ` aria-describedby="${desc}"`; this.express('a11y.describedBy', { mechanism: 'aria-describedby' }); }
+    return aria;
+  }
+
   renderControlState(node, cs) {
     const id = node.id || `${this.ir.component.toLowerCase()}-${cs.value ?? 'input'}`;
     const labelEl = node.label ? `<label for="${id}">${this.interp(node.label)}</label>\n` : '';
-    const tail = `${this.a11y(node)}${this.styleAttr(node)}`;
+    const tail = `${this.a11y(node)}${this.inputAria(node)}${this.styleAttr(node)}`;
     const num = (n, v) => (v == null ? '' : ` ${n}={${v}}`);
     if (cs.kind === 'boolean') {
       this.express('state=boolean', { mechanism: 'checked={} + on:change (controlled)' });
