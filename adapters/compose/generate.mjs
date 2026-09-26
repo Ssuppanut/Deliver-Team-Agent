@@ -171,8 +171,32 @@ class ComposeRenderer extends RendererBase {
     if (!vr) return null;
     return vr.kind === 'literal' ? JSON.stringify(String(vr.value)) : vr.value;
   }
+  // Control-state primitive — controlled via Compose state hoisting: value +
+  // onValueChange, with the state held at the caller.
+  renderControlState(node, cs) {
+    if (node.a11y?.label) this.express('a11y.label', { mechanism: 'contentDescription (label)' });
+    if (cs.kind === 'boolean') {
+      this.express('state=boolean', { mechanism: 'Checkbox(checked, onCheckedChange) — hoisted state' });
+      return `Checkbox(checked = ${cs.value}, onCheckedChange = ${cs.change})`;
+    }
+    if (cs.kind === 'selected-value') {
+      this.express('state=selected-value', { mechanism: 'hoisted single-select state (value + onValueChange)' });
+      return `Column {\n  // one-of-N; options rendered by the component. Selection state hoisted to the caller:\n  val selectedValue = ${cs.value}\n  val onSelectedChange = ${cs.change}\n}`;
+    }
+    const n = (v) => (typeof v === 'number' ? `${v}f` : v);
+    let steps = '';
+    if (typeof cs.min === 'number' && typeof cs.max === 'number' && typeof cs.step === 'number' && cs.step > 0) {
+      const c = Math.round((cs.max - cs.min) / cs.step) - 1;
+      if (c > 0) steps = `, steps = ${c}`;
+    }
+    this.express('state=numeric-range', { mechanism: 'Slider(value, onValueChange, valueRange, steps) — hoisted state' });
+    return `Slider(value = ${cs.value}, onValueChange = ${cs.change}, valueRange = ${n(cs.min)}..${n(cs.max)}${steps})`;
+  }
+
   visitInput(node) {
     const i = node.input ?? {};
+    const cs = this.controlState(node);
+    if (cs) return this.renderControlState(node, cs);
     const role = node.role;
     if (node.a11y?.describedBy) this.diverge('a11y.describedBy', { reason: 'Compose has no aria-describedby', fallback: 'adjacent Text / stateDescription', waiver: 'a11y-describedby-native' });
     // The accessible name for a bare Compose control (which has no text-label param)

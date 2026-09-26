@@ -134,8 +134,31 @@ class SwiftUIRenderer extends RendererBase {
     if (!vr) return fallback;
     return vr.kind === 'literal' ? JSON.stringify(String(vr.value)) : safe(vr.value);
   }
+  // Control-state primitive — controlled (caller-held) two-way binding. The
+  // @Binding is constructed from the caller's value + handler, so the caller
+  // holds the source of truth (controlled-only).
+  renderControlState(node, cs) {
+    const title = this.plain(node.label ?? node.a11y?.label);
+    if (node.a11y?.label) this.express('a11y.label', { mechanism: 'label (accessible name)' });
+    const num = (v) => (typeof v === 'number' ? String(v) : safe(String(v)));
+    const bind = `Binding(get: { ${safe(cs.value)} }, set: { ${safe(cs.change)}($0) })`;
+    if (cs.kind === 'boolean') {
+      this.express('state=boolean', { mechanism: 'Toggle(isOn: @Binding get/set from caller)' });
+      return `Toggle(${title}, isOn: ${bind})${this.modifiers(node)}`;
+    }
+    if (cs.kind === 'selected-value') {
+      this.express('state=selected-value', { mechanism: 'Picker(selection: @Binding get/set from caller)' });
+      return `Picker(${title}, selection: ${bind}) {\n  // one-of-N options supplied by the component\n}${this.modifiers(node)}`;
+    }
+    const stepArg = cs.step != null ? `, step: ${num(cs.step)}` : '';
+    this.express('state=numeric-range', { mechanism: 'Slider(value: @Binding, in: min...max, step:)' });
+    return `Slider(value: ${bind}, in: ${num(cs.min)}...${num(cs.max)}${stepArg})${this.modifiers(node)}`;
+  }
+
   visitInput(node) {
     const i = node.input ?? {};
+    const cs = this.controlState(node);
+    if (cs) return this.renderControlState(node, cs);
     const role = node.role;
     const title = this.plain(node.label ?? node.a11y?.label);
     if (node.a11y?.describedBy) this.diverge('a11y.describedBy', { reason: 'SwiftUI has no aria-describedby', fallback: '.accessibilityHint / adjacent Text', waiver: 'a11y-describedby-native' });

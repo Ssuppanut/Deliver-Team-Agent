@@ -688,8 +688,8 @@ Cell legend as above (`✓` correct · `⚠` documented divergence).
 | ID | Status | Note |
 |---|---|---|
 | **F-14** | **Resolved** | Form-control roles (`checkbox`/`switch`/`slider`) silently dropped on all 3 natives while gates stayed green. Now (a) **structurally impossible** to drop silently — the Lowering Ledger fails any unaccounted trait; and (b) the three roles are **expressed** as real native controls. |
-| **F-15** | **Partially resolved — residual logged** | The a11y **trait** level is done: checkbox/switch checked-state is expressed via `accessibilityState={{checked}}` / `isOn:` binding / `Role.Checkbox`+`Role.Switch` semantics. A full **control-state primitive** (a schema-level bound state contract shared across all stateful controls, beyond a11y traits) is **not** built here — logged as the next roadmap item. Not expanded per scope lock. |
-| **F-16** | **Partially resolved — residual logged** | Slider `role=slider` is expressed as a real adjustable control with a value channel (`accessibilityValue` / native `Slider`). Full **range semantics** (`min`/`max`/`step` as a first-class schema contract, and `valueRange`/`steps` wired natively) remain — logged (overlaps **F-19**). Not built here. |
+| **F-15** | **RESOLVED — see "Control-state primitive" below.** | The control-state primitive now provides a schema-level bound state contract (`input.state.kind: boolean \| selected-value`) generated as each platform's native two-way binding across all 6 adapters, and the ledger accounts for it (`state=<kind>`). The a11y-trait portion was done in Layer 1; the binding is now done here. |
+| **F-16** | **RESOLVED — see "Control-state primitive" below.** | `numeric-range` state (`min`/`max`/`step`) is now a first-class binding contract, wired natively (`Slider(in: min...max, step:)` / `valueRange`/`steps` / `minimumValue`/`maximumValue`/`step`). **Residual (unchanged):** display *formatting* ("$1,234.50") remains **F-11/F-12** — a distinct concern, deliberately not pulled in. `textarea` (multiline) remains **F-19**. |
 | **F-17** | Logged (unchanged) | Radio + single-select group semantics (one-of-N) — deferred, not in this layer's scope. |
 | **F-18** | Logged (unchanged) | Native `select` + option list — deferred. |
 | **F-19** | Logged (unchanged) | `min`/`max`/`step` numeric constraints and `textarea` (multiline) — deferred (overlaps F-16 residual). |
@@ -948,3 +948,95 @@ Only native token coverage was added. F-22 is untouched (intentional advisory
 severity). No Layer 2, no IR migration, no control-state primitive, no new
 components; no gate weakened or removed; the web token scan is unchanged; no
 agent / skill / workflow / AI-router changes.
+
+---
+
+# Control-state primitive (F-15 / F-16 resolved)
+
+Batch ก (form inputs) revealed the missing root: Checkbox/Switch/Slider had
+their a11y traits expressed (Layer 1) but **no real two-way state binding**. The
+control-state primitive is a renderer-base-level capability (like the F-3
+conditional): a spec declares a single-value, controlled, two-way binding on an
+input, generated as each platform's native state-binding mechanism across all 6
+adapters. **Primitive only this phase — no components** (proven with test specs,
+exactly like F-3). Checkbox/Switch/Radio/Select/Slider components come next.
+
+## IR design
+
+An `input` node carries a `state` binding:
+
+```yaml
+input:
+  valueProp: <ref>     # bound value — the caller's source of truth (controlled)
+  changeProp: <ref>    # change handler — the caller updates state through it
+  state:
+    kind: boolean | selected-value | numeric-range
+    min: <number | ref>   # numeric-range only (input constraint, NOT formatting)
+    max: <number | ref>   # numeric-range only
+    step: <number | ref>  # numeric-range only (optional)
+```
+
+The base normalizes it via `controlState(node)` → `{ kind, value, change, min,
+max, step }`; each adapter's `renderControlState` emits the platform binding. The
+base also adds a `state=<kind>` **declared trait**, so the ledger requires every
+adapter to account for the binding (a dropped binding → `unaccounted` → FAIL).
+
+## Per-adapter mapping (controlled-only)
+
+| kind | React | Vue | Svelte | React Native | SwiftUI | Compose |
+|---|---|---|---|---|---|---|
+| boolean | `checked={v} onChange` | `:checked + @change` | `checked={v} on:change` | `<Switch value onValueChange>` | `Toggle(isOn: Binding(get/set))` | `Checkbox(checked, onCheckedChange)` |
+| selected-value | `<select value onChange>` | `<select :value @change>` | `<select value on:change>` | `<Picker selectedValue onValueChange>` | `Picker(selection: Binding(get/set))` | hoisted `selectedValue` + `onSelectedChange` |
+| numeric-range | `type="range" value onChange min/max/step` | `:value @input :min/:max/:step` | `value on:input min/max/step` | `<Slider value onValueChange minimumValue/maximumValue/step>` | `Slider(value: Binding, in: min...max, step:)` | `Slider(value, onValueChange, valueRange, steps)` |
+
+**Controlled-only note.** Scope guard #2 forbids uncontrolled/internal state.
+Pure `v-model="x"` / `bind:checked={x}` mutate a read-only prop / a local — that
+is the *uncontrolled* idiom. The controlled equivalent binds the value **and**
+routes change through the caller's handler, which is what `v-model` / `bind:`
+desugar to; that is what every adapter emits, so the caller always holds the
+source of truth. SwiftUI's `Binding(get:{v}, set:{onChange($0)})` is a `@Binding`
+constructed from the caller's value + handler; Compose uses state hoisting
+(value + onValueChange at the caller). Every adapter references **both** the
+value and the handler prop, so parity holds.
+
+## Proofs
+
+- **boolean / selected-value / numeric-range** each render the native two-way
+  binding on all 6 adapters — see `.claude/artifacts/{state-boolean,state-select,state-range}/`.
+  Example (numeric-range): SwiftUI `Slider(value: Binding(get: { volume }, set: { onVolumeChange($0) }), in: 0...100, step: 5)`; Compose `Slider(value = volume, onValueChange = onVolumeChange, valueRange = 0f..100f, steps = 19)`.
+- **Refusal** — an expression used as the bound value, change handler, or a
+  numeric-range ref is **refused** (`expression-binding`) with the ref redirect,
+  consistent with the F-9 variant / F-3 condition refusals; a plain ref (and a
+  numeric literal, and a plain-identifier range ref) generates and passes.
+- **Ledger** — `state=<kind>` is expressed on all 6 for every test spec
+  (`6 expressed, 0 diverged, 0 unaccounted`).
+- **native-code does NOT over-flag** the native binding constructs — SwiftUI
+  `Binding(get:/set:)` and Compose hoisting are native code, not JS-expression
+  leaks; `native-code` stays green.
+- **Mutation harness** — corpus grew 19 → 22 (the 3 test specs). Before (main,
+  post-F-21): `251 mutants / 247 killed / 4 survived`; after:
+  **`284 mutants / 280 killed / 4 survived`**. The only survivors remain the 4
+  `state-by-color-only` (F-22, unchanged). No new survivor, and every killer
+  operator still kills all its mutants — including `drop-trait` on the new
+  `state=<kind>` traits (all killed by the ledger). **No gate regression.**
+
+## Scope guards honored
+
+1. **Single-value only** — one value per control; no multi-value/object/
+   whole-form/nested binding.
+2. **Controlled-only** — the caller holds state on every platform; no
+   uncontrolled/internal-state mode.
+3. **numeric-range is a value constraint, not formatting** — `min`/`max`/`step`
+   are input constraints; display formatting stays F-11/F-12 (P48 asserts no
+   `toFixed`/`NumberFormat`/`NumberFormatter` appears).
+
+No component shipped (primitive + 3 test specs only); no Layer 2, no IR/ARIA
+migration; no gate or the ledger weakened; no agent / skill / workflow / AI-router
+changes.
+
+## Regression pins
+
+`P46` (boolean binding across 6 + state trait accounted), `P47` (selected-value
+across 6 + Picker import), `P48` (numeric-range value+min/max/step across 6, no
+formatting), `P49` (expression-as-binding refused; plain refs pass; F-9 variant
+refusal unchanged). `verify-patches` → **49/49**.

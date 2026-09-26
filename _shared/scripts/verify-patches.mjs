@@ -746,6 +746,93 @@ check('P45', 'token-guard (native): hardcoded color/dimension literal FAILs per 
   assert(web.issues.some((i) => i.rule === 'hardcoded-dimension'), 'web raw px rule unchanged');
 });
 
+// --- Control-state primitive (P46-P49) ---------------------------------------
+const STATE_BOOL = resolve(ROOT, '.claude/artifacts/state-boolean/design-spec.yaml');
+const STATE_SELECT = resolve(ROOT, '.claude/artifacts/state-select/design-spec.yaml');
+const STATE_RANGE = resolve(ROOT, '.claude/artifacts/state-range/design-spec.yaml');
+const genAll = (spec, feat) => ({
+  react: generateReact(spec, feat),
+  vue: generateVue(spec, feat),
+  svelte: generateSvelte(spec, feat),
+  'react-native': generateReactNative(spec, feat),
+  swiftui: generateSwiftUI(spec, feat),
+  compose: generateCompose(spec, feat),
+});
+// Every adapter must express the state trait (no unaccounted) for the feature.
+const assertStateExpressed = (out, kind) => {
+  for (const [ad, r] of Object.entries(out)) {
+    const e = r.ledger.find((x) => x.traitId === `state=${kind}`);
+    assert(e && e.status === 'expressed' && e.mechanism, `${ad}: state=${kind} must be expressed with a mechanism`);
+    assert(!r.ledger.some((x) => x.status === 'unaccounted'), `${ad}: no trait may be unaccounted`);
+  }
+};
+
+// --- P46: boolean control-state binding across all 6 adapters ----------------
+check('P46', 'control-state: a boolean binding renders as a native two-way binding on all 6, state trait accounted', () => {
+  const out = genAll(STATE_BOOL, 'verify-state-boolean');
+  const pat = {
+    react: /type="checkbox" checked=\{enabled\} onChange=\{\(e\) => onEnabledChange\(e\.target\.checked\)\}/,
+    vue: /type="checkbox" :checked="enabled" @change="onEnabledChange\(/,
+    svelte: /type="checkbox" checked=\{enabled\} on:change=\{\(e\) => onEnabledChange\(e\.currentTarget\.checked\)\}/,
+    'react-native': /<Switch value=\{enabled\} onValueChange=\{onEnabledChange\}/,
+    swiftui: /Toggle\([^)]*isOn: Binding\(get: \{ enabled \}, set: \{ onEnabledChange\(\$0\) \}\)\)/,
+    compose: /Checkbox\(checked = enabled, onCheckedChange = onEnabledChange\)/,
+  };
+  for (const [ad, re] of Object.entries(pat)) assert(re.test(out[ad].code), `${ad}: boolean two-way binding not found`);
+  assertStateExpressed(out, 'boolean');
+});
+
+// --- P47: selected-value (one-of-N) binding across all 6 ---------------------
+check('P47', 'control-state: a selected-value binding renders as a native one-of-N binding on all 6, state trait accounted', () => {
+  const out = genAll(STATE_SELECT, 'verify-state-select');
+  const pat = {
+    react: /<select [^>]*value=\{choice\} onChange=\{\(e\) => onChoiceChange\(e\.target\.value\)\}/,
+    vue: /<select [^>]*:value="choice" @change="onChoiceChange\(/,
+    svelte: /<select [^>]*value=\{choice\} on:change=\{\(e\) => onChoiceChange\(e\.currentTarget\.value\)\}/,
+    'react-native': /<Picker selectedValue=\{choice\} onValueChange=\{onChoiceChange\}/,
+    swiftui: /Picker\([^)]*selection: Binding\(get: \{ choice \}, set: \{ onChoiceChange\(\$0\) \}\)\)/,
+    compose: /val selectedValue = choice[\s\S]*val onSelectedChange = onChoiceChange/,
+  };
+  for (const [ad, re] of Object.entries(pat)) assert(re.test(out[ad].code), `${ad}: selected-value binding not found`);
+  assertStateExpressed(out, 'selected-value');
+  // RN pulls in the Picker import.
+  assert(/@react-native-picker\/picker/.test(out['react-native'].code), 'react-native must import Picker');
+});
+
+// --- P48: numeric-range value + min/max/step across all 6 (no formatting) ----
+check('P48', 'control-state: a numeric-range binding renders value + min/max/step on all 6, no formatting, state trait accounted', () => {
+  const out = genAll(STATE_RANGE, 'verify-state-range');
+  const pat = {
+    react: /type="range" value=\{volume\} onChange=\{\(e\) => onVolumeChange\(Number\(e\.target\.value\)\)\} min=\{0\} max=\{100\} step=\{5\}/,
+    vue: /type="range" :value="volume" @input="onVolumeChange\(Number\([^"]*\)\)" :min="0" :max="100" :step="5"/,
+    svelte: /type="range" value=\{volume\} on:input=\{\(e\) => onVolumeChange\(Number\(e\.currentTarget\.value\)\)\} min=\{0\} max=\{100\} step=\{5\}/,
+    'react-native': /<Slider value=\{volume\} onValueChange=\{onVolumeChange\} minimumValue=\{0\} maximumValue=\{100\} step=\{5\}/,
+    swiftui: /Slider\(value: Binding\(get: \{ volume \}, set: \{ onVolumeChange\(\$0\) \}\), in: 0\.\.\.100, step: 5\)/,
+    compose: /Slider\(value = volume, onValueChange = onVolumeChange, valueRange = 0f\.\.100f, steps = 19\)/,
+  };
+  for (const [ad, re] of Object.entries(pat)) assert(re.test(out[ad].code), `${ad}: numeric-range binding not found`);
+  assertStateExpressed(out, 'numeric-range');
+  // Scope guard 3: range is a value constraint, NOT display formatting.
+  for (const [ad, r] of Object.entries(out)) {
+    assert(!/toFixed|NumberFormat|NumberFormatter/.test(r.code), `${ad}: numeric-range must not introduce number formatting`);
+  }
+});
+
+// --- P49: an expression used as a control-state binding is REFUSED -----------
+check('P49', 'refusal: an expression as bound value / handler / range-ref is refused with the ref redirect; plain refs pass', () => {
+  const mk = (input) => ({ category: 'input', root: { el: 'container', children: [{ el: 'input', label: { kind: 'literal', value: 'x' }, input }] } });
+  const exprVal = checkRefusal(mk({ valueProp: 'items.length > 0', changeProp: 'onX', state: { kind: 'boolean' } }));
+  assert(exprVal?.category === 'expression-binding' && /ref/.test(exprVal.redirect), 'an expression bound value must be refused with a ref redirect');
+  assert(checkRefusal(mk({ valueProp: 'x', changeProp: 'v => setX(v)', state: { kind: 'boolean' } }))?.category === 'expression-binding', 'an expression change handler must be refused');
+  assert(checkRefusal(mk({ valueProp: 'x', changeProp: 'onX', state: { kind: 'numeric-range', min: 'a - 1', max: 100 } }))?.category === 'expression-binding', 'an expression range ref must be refused');
+  // Plain refs / numeric literals / plain-identifier refs are NOT refused.
+  assert(checkRefusal(mk({ valueProp: 'enabled', changeProp: 'onEnabledChange', state: { kind: 'boolean' } })) === null, 'a plain boolean binding must pass');
+  assert(checkRefusal(mk({ valueProp: 'volume', changeProp: 'onVolumeChange', state: { kind: 'numeric-range', min: 0, max: 100, step: 5 } })) === null, 'plain numeric-range with literal constraints must pass');
+  assert(checkRefusal(mk({ valueProp: 'v', changeProp: 'onV', state: { kind: 'numeric-range', min: 'lo', max: 'hi' } })) === null, 'plain-identifier range refs must pass');
+  // The F-9 variant-expression refusal is unchanged (regression guard).
+  assert(checkRefusal({ root: { el: 'container', variant: { prop: "d >= 0 ? 'a' : 'b'", cases: { a: {} } } } })?.category === 'expression-variant', 'variant-expression refusal must be unchanged');
+});
+
 console.log('\n=== verify-patches ===');
 console.log(results.join('\n'));
 console.log(`\n${pass} passed, ${fail} failed\n`);

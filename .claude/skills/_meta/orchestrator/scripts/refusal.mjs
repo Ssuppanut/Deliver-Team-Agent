@@ -38,12 +38,34 @@ const EXPRESSION_VARIANT = {
   reference: 'knowledge/pattern-library/references/expression-variant.md',
 };
 
+/**
+ * A control-state binding reference (bound value, change handler, or a
+ * numeric-range min/max/step given as a ref) must be a plain identifier — a
+ * caller-supplied ref — never an embedded expression. An expression here is the
+ * F-9 anti-pattern re-entering through the state binding: refuse it and redirect
+ * to a plain ref computed in the data layer, consistent with the variant /
+ * condition refusals.
+ */
+function findBadBinding(node) {
+  const st = node.input?.state;
+  if (!st) return null;
+  const i = node.input ?? {};
+  const bad = (v) => typeof v === 'string' && !PLAIN_FLAG.test(v.trim());
+  for (const [slot, v] of [['bound value', i.valueProp], ['change handler', i.changeProp], ['min', st.min], ['max', st.max], ['step', st.step]]) {
+    // Numbers are literal constraints (fine); only a non-plain STRING is an expression.
+    if (bad(v)) return { slot, expr: String(v).trim() };
+  }
+  return null;
+}
+
 /** Walk the spec tree (children + conditional then/else) for a refusable condition. */
 function findBadCondition(node) {
   if (!node || typeof node !== 'object') return null;
   const vp = node.variant?.prop;
   if (typeof vp === 'string' && !PLAIN_DISCRIMINANT.test(vp.trim())) return { kind: 'variant', expr: vp.trim() };
   if (typeof node.when === 'string' && !PLAIN_FLAG.test(node.when.trim())) return { kind: 'condition', expr: node.when.trim() };
+  const badBinding = findBadBinding(node);
+  if (badBinding) return { kind: 'binding', expr: badBinding.expr, slot: badBinding.slot };
   for (const c of node.children ?? []) { const hit = findBadCondition(c); if (hit) return hit; }
   for (const b of [node.then, node.else]) { if (b) { const hit = findBadCondition(b); if (hit) return hit; } }
   return null;
@@ -72,6 +94,14 @@ export function checkRefusal(spec) {
       category: 'expression-condition',
       reason: `a condition must be a plain boolean flag prop, not an embedded expression (found: \`${bad.expr}\`) — compute the boolean in the data layer`,
       redirect: "pass a boolean flag prop (e.g. when: isEmpty) computed in the data layer, not a JS expression",
+      reference: 'knowledge/pattern-library/references/expression-variant.md',
+    };
+  }
+  if (bad?.kind === 'binding') {
+    return {
+      category: 'expression-binding',
+      reason: `a control-state ${bad.slot} must be a plain caller-supplied ref, not an embedded expression (found: \`${bad.expr}\`) — a computed binding is presentation logic that belongs in the data layer`,
+      redirect: "pass a plain ref (a value prop + a change-handler prop, e.g. valueProp: checked, changeProp: onToggle) computed in the data layer, not a JS expression",
       reference: 'knowledge/pattern-library/references/expression-variant.md',
     };
   }

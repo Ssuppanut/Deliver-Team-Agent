@@ -1,0 +1,23 @@
+component: StateSelect
+description: Control-state primitive test — a controlled one-of-N (selected value) two-way binding.
+category: input
+props:
+  - { name: choice, type: string, required: true }
+  - { name: onChoiceChange, type: function, required: true }
+tokens:
+  - space.stack.sm
+  - space.inset.sm
+root:
+  el: container
+  style:
+    gap: space.stack.sm
+  children:
+    - el: input
+      label: { kind: literal, value: "Choose a plan" }
+      input:
+        valueProp: choice
+        changeProp: onChoiceChange
+        state:
+          kind: selected-value
+      style:
+        padding: space.inset.sm
