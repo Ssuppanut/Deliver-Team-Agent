@@ -110,7 +110,8 @@ class VueRenderer extends RendererBase {
       return `${labelEl}<select id="${id}" :value="${cs.value}" @change="${cs.change}(($event.target as HTMLSelectElement).value)"${tail}></select>`;
     }
     this.express('state=numeric-range', { mechanism: ':value + @input + :min/:max/:step (v-model-style controlled)' });
-    return `${labelEl}<input id="${id}" type="range" :value="${cs.value}" @input="${cs.change}(Number(($event.target as HTMLInputElement).value))"${num('min', cs.min)}${num('max', cs.max)}${num('step', cs.step)}${tail} />`;
+    const t = node.input?.inputType === 'number' ? 'number' : 'range';
+    return `${labelEl}<input id="${id}" type="${t}" :value="${cs.value}" @input="${cs.change}(Number(($event.target as HTMLInputElement).value))"${num('min', cs.min)}${num('max', cs.max)}${num('step', cs.step)}${tail} />`;
   }
 
   visitInput(node) {

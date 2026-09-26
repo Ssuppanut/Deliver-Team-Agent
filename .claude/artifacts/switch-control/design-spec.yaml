@@ -1,0 +1,20 @@
+component: SwitchControl
+description: Labeled controlled on/off switch (boolean control-state).
+category: input
+props:
+  - { name: label, type: string, required: true }
+  - { name: on, type: boolean, required: true }
+  - { name: onToggle, type: function, required: true }
+tokens:
+  - space.inset.sm
+root:
+  el: input
+  role: switch
+  label: { kind: ref, value: label }
+  input:
+    valueProp: on
+    changeProp: onToggle
+    state:
+      kind: boolean
+  style:
+    padding: space.inset.sm

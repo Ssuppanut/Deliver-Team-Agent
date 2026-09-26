@@ -1,0 +1,21 @@
+component: CheckboxControl
+description: Labeled controlled checkbox (boolean control-state) with role=checkbox across all 6 adapters.
+category: input
+props:
+  - { name: label, type: string, required: true }
+  - { name: checked, type: boolean, required: true }
+  - { name: onCheckedChange, type: function, required: true }
+tokens:
+  - color.fg.default
+  - space.inset.sm
+root:
+  el: input
+  role: checkbox
+  label: { kind: ref, value: label }
+  input:
+    valueProp: checked
+    changeProp: onCheckedChange
+    state:
+      kind: boolean
+  style:
+    padding: space.inset.sm

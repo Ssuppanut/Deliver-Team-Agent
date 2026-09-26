@@ -106,21 +106,36 @@ class RNRenderer extends RendererBase {
   // Control-state primitive — controlled (caller-held) two-way binding via the
   // native RN control's `value/selectedValue` + `onValueChange`.
   renderControlState(node, cs) {
+    const role = node.role;
     const labelEl = node.label ? `<Text>${this.interp(node.label)}</Text>\n` : '';
     const a11yLabel = node.a11y?.label ? ` accessibilityLabel={${this.attr(node.a11y.label)}}` : '';
     if (node.a11y?.label) this.express('a11y.label', { mechanism: 'accessibilityLabel' });
     const style = this.style(node);
     const num = (n, v) => (v == null ? '' : ` ${n}={${v}}`);
     if (cs.kind === 'boolean') {
+      // checkbox and switch both use RN <Switch>; accessibilityRole differentiates.
+      const r = role === 'switch' ? 'switch' : 'checkbox';
+      const roleAttr = role ? ` accessibilityRole="${r}" accessibilityState={{ checked: ${cs.value} }}` : '';
+      if (role) this.express(`role=${role}`, { mechanism: `accessibilityRole="${r}" + accessibilityState={{checked}}` });
       this.express('state=boolean', { mechanism: '<Switch value onValueChange> (controlled)' });
-      return `${labelEl}<Switch value={${cs.value}} onValueChange={${cs.change}}${a11yLabel}${style} />`;
+      return `${labelEl}<Switch value={${cs.value}} onValueChange={${cs.change}}${roleAttr}${a11yLabel}${style} />`;
     }
     if (cs.kind === 'selected-value') {
+      if (role) this.diverge(`role=${role}`, { reason: `no direct React Native accessibilityRole for "${role}"`, fallback: 'Picker conveys single-select', waiver: `a11y-role-${role}` });
       this.express('state=selected-value', { mechanism: '<Picker selectedValue onValueChange> (controlled)' });
       return `${labelEl}<Picker selectedValue={${cs.value}} onValueChange={${cs.change}}${a11yLabel}${style}></Picker>`;
     }
-    this.express('state=numeric-range', { mechanism: '<Slider value onValueChange minimumValue/maximumValue/step> (controlled)' });
-    return `${labelEl}<Slider value={${cs.value}} onValueChange={${cs.change}}${num('minimumValue', cs.min)}${num('maximumValue', cs.max)}${num('step', cs.step)}${a11yLabel}${style} />`;
+    // numeric-range: a numeric text field (inputType=number, NumberInput) or a Slider.
+    const numberField = node.input?.inputType === 'number';
+    if (!numberField) {
+      if (role === 'slider') this.express('role=slider', { mechanism: 'accessibilityRole="adjustable" + accessibilityValue' });
+      else if (role) this.diverge(`role=${role}`, { reason: `no direct React Native accessibilityRole for "${role}"`, fallback: 'Slider conveys the adjustable value', waiver: `a11y-role-${role}` });
+      this.express('state=numeric-range', { mechanism: '<Slider value onValueChange minimumValue/maximumValue/step> (controlled)' });
+      return `${labelEl}<Slider value={${cs.value}} onValueChange={${cs.change}} accessibilityRole="adjustable" accessibilityValue={{ now: ${cs.value} }}${num('minimumValue', cs.min)}${num('maximumValue', cs.max)}${num('step', cs.step)}${a11yLabel}${style} />`;
+    }
+    if (role) this.diverge(`role=${role}`, { reason: `no direct React Native accessibilityRole for "${role}"`, fallback: 'numeric TextInput conveys the value', waiver: `a11y-role-${role}` });
+    this.express('state=numeric-range', { mechanism: '<TextInput keyboardType="numeric" value onChangeText> (controlled)' });
+    return `${labelEl}<TextInput keyboardType="numeric" value={String(${cs.value})} onChangeText={(t) => ${cs.change}(Number(t))}${a11yLabel}${style} />`;
   }
 
   visitInput(node) {

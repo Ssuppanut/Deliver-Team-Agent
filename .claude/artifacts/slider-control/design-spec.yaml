@@ -1,0 +1,28 @@
+component: SliderControl
+description: Labeled controlled range slider (numeric-range control-state, constraints only, no formatting).
+category: input
+props:
+  - { name: label, type: string, required: true }
+  - { name: value, type: number, required: true }
+  - { name: onValueChange, type: function, required: true }
+tokens:
+  - space.stack.sm
+  - space.inset.sm
+root:
+  el: container
+  style:
+    gap: space.stack.sm
+  children:
+    - el: input
+      role: slider
+      label: { kind: ref, value: label }
+      input:
+        valueProp: value
+        changeProp: onValueChange
+        state:
+          kind: numeric-range
+          min: 0
+          max: 100
+          step: 1
+      style:
+        padding: space.inset.sm

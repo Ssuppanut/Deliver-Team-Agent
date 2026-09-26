@@ -1,0 +1,17 @@
+component: NumberInput
+purpose: A labeled numeric text field with a controlled value and min/max/step constraints (no formatting).
+audience: End users entering a number.
+platforms: [react, vue, svelte, react-native, swiftui, compose]
+variants: []
+states: [default]
+interaction: controlled
+a11y:
+  - "visible label as the accessible name"
+  - "numeric input with min/max/step constraints"
+scope:
+  in:
+    - "controlled numeric value + onChange (control-state primitive: kind=numeric-range)"
+    - "min/max/step constraints (F-19 numeric portion)"
+  out:
+    - "number/currency/locale formatting (F-11/F-12 — explicitly out)"
+composes: "control-state(numeric-range, no slider role) + tokens"

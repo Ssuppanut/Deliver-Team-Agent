@@ -1,0 +1,28 @@
+component: NumberInput
+description: Labeled controlled numeric text field (numeric-range control-state, constraints only, no formatting).
+category: input
+props:
+  - { name: label, type: string, required: true }
+  - { name: amount, type: number, required: true }
+  - { name: onAmountChange, type: function, required: true }
+tokens:
+  - space.stack.sm
+  - space.inset.sm
+root:
+  el: container
+  style:
+    gap: space.stack.sm
+  children:
+    - el: input
+      label: { kind: ref, value: label }
+      input:
+        valueProp: amount
+        changeProp: onAmountChange
+        inputType: number
+        state:
+          kind: numeric-range
+          min: 0
+          max: 999
+          step: 1
+      style:
+        padding: space.inset.sm
