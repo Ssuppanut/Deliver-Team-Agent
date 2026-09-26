@@ -174,23 +174,48 @@ class ComposeRenderer extends RendererBase {
   // Control-state primitive — controlled via Compose state hoisting: value +
   // onValueChange, with the state held at the caller.
   renderControlState(node, cs) {
+    const role = node.role;
     if (node.a11y?.label) this.express('a11y.label', { mechanism: 'contentDescription (label)' });
+    // A visible label (Compose controls have no label param) is rendered as an
+    // adjacent Text inside a Column, so the label prop is honored, not dropped.
+    const label = this.plain(node.label);
+    const withLabel = (control) => (label ? `Column {\n  Text(text = ${label})\n  ${control}\n}` : control);
+
+    let control;
     if (cs.kind === 'boolean') {
-      this.express('state=boolean', { mechanism: 'Checkbox(checked, onCheckedChange) — hoisted state' });
-      return `Checkbox(checked = ${cs.value}, onCheckedChange = ${cs.change})`;
-    }
-    if (cs.kind === 'selected-value') {
+      // switch -> Switch + Role.Switch; checkbox (or default) -> Checkbox + Role.Checkbox.
+      const isSwitch = role === 'switch';
+      const ctrl = isSwitch ? 'Switch' : 'Checkbox';
+      const roleName = isSwitch ? 'Role.Switch' : 'Role.Checkbox';
+      const sem = role ? `, modifier = Modifier.semantics { role = ${roleName} }` : '';
+      if (role) this.express(`role=${role}`, { mechanism: `${ctrl} + Modifier.semantics { role = ${roleName} }` });
+      this.express('state=boolean', { mechanism: `${ctrl}(checked, onCheckedChange) — hoisted state` });
+      control = `${ctrl}(checked = ${cs.value}, onCheckedChange = ${cs.change}${sem})`;
+    } else if (cs.kind === 'selected-value') {
+      if (role) this.diverge(`role=${role}`, { reason: `no Compose Role for role "${role}" here`, fallback: 'hoisted single-select state', waiver: `a11y-role-${role}` });
       this.express('state=selected-value', { mechanism: 'hoisted single-select state (value + onValueChange)' });
-      return `Column {\n  // one-of-N; options rendered by the component. Selection state hoisted to the caller:\n  val selectedValue = ${cs.value}\n  val onSelectedChange = ${cs.change}\n}`;
+      control = `Column {\n  // one-of-N; options rendered by the component. Selection state hoisted to the caller:\n  val selectedValue = ${cs.value}\n  val onSelectedChange = ${cs.change}\n}`;
+    } else {
+      const n = (v) => (typeof v === 'number' ? `${v}f` : v);
+      const numberField = node.input?.inputType === 'number';
+      if (!numberField) {
+        let steps = '';
+        if (typeof cs.min === 'number' && typeof cs.max === 'number' && typeof cs.step === 'number' && cs.step > 0) {
+          const c = Math.round((cs.max - cs.min) / cs.step) - 1;
+          if (c > 0) steps = `, steps = ${c}`;
+        }
+        if (role === 'slider') this.express('role=slider', { mechanism: 'Slider — built-in progressBarRangeInfo semantics' });
+        else if (role) this.diverge(`role=${role}`, { reason: `no Compose Role for role "${role}" here`, fallback: 'Slider conveys the adjustable value', waiver: `a11y-role-${role}` });
+        this.express('state=numeric-range', { mechanism: 'Slider(value, onValueChange, valueRange, steps) — hoisted state' });
+        control = `Slider(value = ${cs.value}, onValueChange = ${cs.change}, valueRange = ${n(cs.min)}..${n(cs.max)}${steps})`;
+      } else {
+        // NumberInput: numeric text field (value <-> text via toString / toFloatOrNull; no locale formatting).
+        if (role) this.diverge(`role=${role}`, { reason: `no Compose Role for role "${role}" here`, fallback: 'numeric text field conveys the value', waiver: `a11y-role-${role}` });
+        this.express('state=numeric-range', { mechanism: 'OutlinedTextField(value.toString(), onValueChange -> toFloatOrNull) — hoisted state' });
+        control = `OutlinedTextField(value = ${cs.value}.toString(), onValueChange = { ${cs.change}(it.toFloatOrNull() ?: ${cs.value}) })`;
+      }
     }
-    const n = (v) => (typeof v === 'number' ? `${v}f` : v);
-    let steps = '';
-    if (typeof cs.min === 'number' && typeof cs.max === 'number' && typeof cs.step === 'number' && cs.step > 0) {
-      const c = Math.round((cs.max - cs.min) / cs.step) - 1;
-      if (c > 0) steps = `, steps = ${c}`;
-    }
-    this.express('state=numeric-range', { mechanism: 'Slider(value, onValueChange, valueRange, steps) — hoisted state' });
-    return `Slider(value = ${cs.value}, onValueChange = ${cs.change}, valueRange = ${n(cs.min)}..${n(cs.max)}${steps})`;
+    return withLabel(control);
   }
 
   visitInput(node) {

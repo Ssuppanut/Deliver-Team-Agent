@@ -806,7 +806,7 @@ check('P48', 'control-state: a numeric-range binding renders value + min/max/ste
     react: /type="range" value=\{volume\} onChange=\{\(e\) => onVolumeChange\(Number\(e\.target\.value\)\)\} min=\{0\} max=\{100\} step=\{5\}/,
     vue: /type="range" :value="volume" @input="onVolumeChange\(Number\([^"]*\)\)" :min="0" :max="100" :step="5"/,
     svelte: /type="range" value=\{volume\} on:input=\{\(e\) => onVolumeChange\(Number\(e\.currentTarget\.value\)\)\} min=\{0\} max=\{100\} step=\{5\}/,
-    'react-native': /<Slider value=\{volume\} onValueChange=\{onVolumeChange\} minimumValue=\{0\} maximumValue=\{100\} step=\{5\}/,
+    'react-native': /<Slider value=\{volume\} onValueChange=\{onVolumeChange\}[^/]*minimumValue=\{0\} maximumValue=\{100\} step=\{5\}/,
     swiftui: /Slider\(value: Binding\(get: \{ volume \}, set: \{ onVolumeChange\(\$0\) \}\), in: 0\.\.\.100, step: 5\)/,
     compose: /Slider\(value = volume, onValueChange = onVolumeChange, valueRange = 0f\.\.100f, steps = 19\)/,
   };

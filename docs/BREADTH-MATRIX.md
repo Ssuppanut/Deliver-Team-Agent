@@ -1040,3 +1040,93 @@ changes.
 across 6 + Picker import), `P48` (numeric-range value+min/max/step across 6, no
 formatting), `P49` (expression-as-binding refused; plain refs pass; F-9 variant
 refusal unchanged). `verify-patches` → **49/49**.
+
+---
+
+# Form-input batch — shipping components on the roots (the payoff test)
+
+With the roots in place (conditional F-3, control-state primitive F-15/F-16, and
+the full defense stack: ledger, native token enforcement, mutation harness), this
+batch **ships** form components by **composing existing capabilities** — no new
+renderer-base capability. It is the payoff test: the components that were
+silent-drops in batch ก should now PASS across native.
+
+Cell legend: `✓` correct · `⚠` documented divergence. "Gates 9/9" = readiness,
+a11y, token, perf, slop, parity, native-code, declared-io, ledger.
+
+| Component | React | Vue | Svelte | RN | SwiftUI | Compose | Gates | Outcome | Composes |
+|---|---|---|---|---|---|---|---|---|---|
+| **Checkbox** (`checkbox-control`) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 9/9 | **PASS** | control-state(boolean) + role=checkbox + tokens |
+| **Switch** (`switch-control`) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 9/9 | **PASS** | control-state(boolean) + role=switch + tokens |
+| **Slider** (`slider-control`) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 9/9 | **PASS** | control-state(numeric-range) + role=slider + tokens |
+| **NumberInput** (`number-input`) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 9/9 | **PASS** | control-state(numeric-range, inputType=number) + tokens |
+| **Native Select** | — | — | — | — | — | — | n/a | **BLOCKED — capability F-23** | selected-value binding works, but option children do not render inside the bound control |
+| **Radio + RadioGroup** | — | — | — | — | — | — | n/a | **BLOCKED — capability F-23 (+ per-item selection)** | needs option children + per-radio selection-from-value |
+| **Custom-overlay Select** | | | | | | | n/a | **REFUSE-correct** | overlay boundary still refuses (`category: overlay` → refused) |
+
+## The payoff — Checkbox / Switch / Slider now PASS (were silent-drops in ก)
+
+All three now generate **real native controls with expressed roles and a working
+two-way binding, 0 unaccounted in the ledger**:
+
+- **Checkbox** — React `<input type="checkbox" checked={checked} onChange role="checkbox">`; RN `<Switch value onValueChange accessibilityRole="checkbox" accessibilityState={{checked}}>`; SwiftUI `Toggle(label, isOn: Binding(get:/set:))`; Compose `Checkbox(checked, onCheckedChange, Modifier.semantics { role = Role.Checkbox })`.
+- **Switch** — same binding, `role=switch`: web `role="switch"`, RN `accessibilityRole="switch"`, Compose `Switch(... Role.Switch)`. **Distinct from Checkbox on native** — the exact thing that was a silent drop before.
+- **Slider** — web `<input type="range" min/max/step role="slider">`; RN `<Slider accessibilityRole="adjustable" accessibilityValue minimumValue/maximumValue/step>`; SwiftUI `Slider(value: Binding, in: 0...100, step: 1)`; Compose `Slider(value, onValueChange, valueRange = 0f..100f, steps = 99)`.
+
+Each: `ledger PASS (12 expressed, 0 diverged, 0 unaccounted)`; `native-code` green
+(the `@Binding(get:/set:)` / Compose hoisting are recognized as native, not
+JS-expression leaks); `token-guard` green (specs use tokens, native enforcement
+does not fire).
+
+## Composition wiring (adapter-level, not renderer-base)
+
+To ship distinct components the native `renderControlState` was made
+**role-aware** — it carries the node's `role` through the existing Layer-1 role
+mechanisms (Checkbox vs Switch control choice + role trait; Slider vs numeric
+text field by `inputType`; the visible `label` rendered natively). This is
+composition glue reusing existing a11y/role handling; **no new IR kind, traversal
+mode, or binding kind was added.**
+
+## F-17 / F-18 / F-19 status
+
+- **F-19 (numeric input)** — **numeric portion RESOLVED.** NumberInput ships with
+  `min`/`max`/`step` constraints on all 6 (web `type="number"`, RN numeric
+  `TextInput`, SwiftUI `Stepper(in:step:)`, Compose `OutlinedTextField` with
+  `toString`/`toFloatOrNull`). **No formatting** — display formatting stays
+  **F-11/F-12** (P48 asserts no `toFixed`/`NumberFormat`). `textarea` (multiline)
+  remains residual under F-19.
+- **F-17 (radio) / F-18 (native select)** — **RESIDUAL, blocked on a capability
+  (F-23 below).** The selected-value *binding* is in place, but a bound control
+  cannot render iterated option children, so Select renders an empty `<select>`
+  and Radio cannot render per-option radios. Not resolved this batch; logged, not
+  built (scope: don't add renderer-base capability inline).
+
+## New findings
+
+| ID | Status | Note |
+|---|---|---|
+| **F-23** | **Logged (new) — capability gap, report first** | A control-state–bound control cannot render **iterated option children**. Probe: an `el: input` (state=selected-value) with `each`-iterated option children emits an **empty** `<select></select>` — the options are silently dropped (`visitInput`/`renderControlState` is a leaf; it never renders children). Confirmed no gate catches the dropped children (parity passed because the `options` prop appears in the type signature; the children are neither a prop, icon, nor trait). **Needed by Native Select (F-18) and Radio/RadioGroup (F-17).** Radio additionally needs per-option "selected = (value === option)", which is a comparison expression (currently refused as F-9). This is a genuine new capability ("a bound control that renders bound option children") — deserves its own phase, like the control-state primitive did. Do not build inline. |
+| **F-24** | **Logged (new) — small composition residual** | `renderControlState` (the control-state render path) accounts for `state`, `role`, and the visible `label`, but **not** `a11y.describedBy` / `a11y.invalid`. A control-state control with an inline error/description leaves those traits `unaccounted` → ledger FAIL. (The non-state `visitInput` path already handles them; the state path needs the same wiring.) Checkbox was scoped to omit describedBy this batch to stay clean; the wiring is a small follow-up. |
+| **F-22** | Unchanged | `slop` `status-color-only` remains advisory (intentional). |
+
+## Mutation harness (payoff: defense holds as breadth grows)
+
+Corpus grew 22 → **26** (the 4 new components). Before: `284 / 280 / 4`; after:
+**`350 mutants / 346 killed / 4 survived`**. The only survivors remain the 4
+`state-by-color-only` (F-22). No new survivor, no previously-killed mutant now
+surviving — **no gate regression** as the component surface grew. In particular
+`drop-trait` on the new `state=<kind>` and `role=` traits of the 4 components is
+killed by the ledger.
+
+## ci.mjs status
+
+`rm -rf out/ && node _shared/scripts/ci.mjs` → **exit 0**. 26 features PASS, 2
+refused (data-grid, modal), `verify-patches` **49/49**, mutation testing
+`350 / 346 / 4`.
+
+## Scope
+
+No renderer-base capability added (composition glue only); no number formatting
+(NumberInput is plain numeric + constraints); custom-overlay select still refused;
+no gate or the ledger weakened; no agent / skill / workflow / AI-router changes.
+F-23 / F-24 logged for triage, not built.

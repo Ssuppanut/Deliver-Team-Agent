@@ -1,0 +1,17 @@
+component: SwitchControl
+purpose: A labeled on/off switch with a controlled boolean value.
+audience: End users toggling settings.
+platforms: [react, vue, svelte, react-native, swiftui, compose]
+variants: []
+states: [off, on]
+interaction: controlled
+a11y:
+  - "role=switch with the on/off state exposed"
+  - "visible label as the accessible name"
+scope:
+  in:
+    - "controlled boolean value + onChange (control-state primitive: kind=boolean)"
+    - "switch role across all 6 adapters"
+  out:
+    - "validation logic"
+composes: "control-state(boolean) + role=switch a11y + tokens"

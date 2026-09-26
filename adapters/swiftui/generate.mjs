@@ -138,21 +138,36 @@ class SwiftUIRenderer extends RendererBase {
   // @Binding is constructed from the caller's value + handler, so the caller
   // holds the source of truth (controlled-only).
   renderControlState(node, cs) {
+    const role = node.role;
     const title = this.plain(node.label ?? node.a11y?.label);
     if (node.a11y?.label) this.express('a11y.label', { mechanism: 'label (accessible name)' });
     const num = (v) => (typeof v === 'number' ? String(v) : safe(String(v)));
     const bind = `Binding(get: { ${safe(cs.value)} }, set: { ${safe(cs.change)}($0) })`;
     if (cs.kind === 'boolean') {
+      // Toggle is SwiftUI's control for both checkbox and switch; it conveys the role.
+      if (role) this.express(`role=${role}`, { mechanism: 'Toggle conveys the on/off role' });
       this.express('state=boolean', { mechanism: 'Toggle(isOn: @Binding get/set from caller)' });
       return `Toggle(${title}, isOn: ${bind})${this.modifiers(node)}`;
     }
     if (cs.kind === 'selected-value') {
+      if (role) this.diverge(`role=${role}`, { reason: `no direct SwiftUI trait for role "${role}"`, fallback: 'Picker conveys single-select', waiver: `a11y-role-${role}` });
       this.express('state=selected-value', { mechanism: 'Picker(selection: @Binding get/set from caller)' });
       return `Picker(${title}, selection: ${bind}) {\n  // one-of-N options supplied by the component\n}${this.modifiers(node)}`;
     }
+    // numeric-range: a Stepper number input (inputType=number, NumberInput) or a Slider.
     const stepArg = cs.step != null ? `, step: ${num(cs.step)}` : '';
-    this.express('state=numeric-range', { mechanism: 'Slider(value: @Binding, in: min...max, step:)' });
-    return `Slider(value: ${bind}, in: ${num(cs.min)}...${num(cs.max)}${stepArg})${this.modifiers(node)}`;
+    const numberField = node.input?.inputType === 'number';
+    if (!numberField) {
+      if (role === 'slider') this.express('role=slider', { mechanism: 'Slider conveys the adjustable role' });
+      else if (role) this.diverge(`role=${role}`, { reason: `no direct SwiftUI trait for role "${role}"`, fallback: 'Slider conveys the adjustable value', waiver: `a11y-role-${role}` });
+      this.express('state=numeric-range', { mechanism: 'Slider(value: @Binding, in: min...max, step:)' });
+      // Slider has no title argument, so the visible label rides an explicit modifier.
+      const labelMod = node.label ? `\n  .accessibilityLabel(${title})` : '';
+      return `Slider(value: ${bind}, in: ${num(cs.min)}...${num(cs.max)}${stepArg})${labelMod}${this.modifiers(node)}`;
+    }
+    if (role) this.diverge(`role=${role}`, { reason: `no direct SwiftUI trait for role "${role}"`, fallback: 'Stepper conveys the numeric value', waiver: `a11y-role-${role}` });
+    this.express('state=numeric-range', { mechanism: 'Stepper(value: @Binding, in: min...max, step:) — no formatting' });
+    return `Stepper(${title}, value: ${bind}, in: ${num(cs.min)}...${num(cs.max)}${stepArg})${this.modifiers(node)}`;
   }
 
   visitInput(node) {

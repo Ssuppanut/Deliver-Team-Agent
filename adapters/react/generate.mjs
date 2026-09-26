@@ -131,7 +131,8 @@ class ReactRenderer extends RendererBase {
       return `${labelEl}<select id="${id}" value={${cs.value}} onChange={(e) => ${cs.change}(e.target.value)}${tail}></select>`;
     }
     this.express('state=numeric-range', { mechanism: 'value + onChange + min/max/step (controlled)' });
-    return `${labelEl}<input id="${id}" type="range" value={${cs.value}} onChange={(e) => ${cs.change}(Number(e.target.value))}${num('min', cs.min)}${num('max', cs.max)}${num('step', cs.step)}${tail} />`;
+    const t = node.input?.inputType === 'number' ? 'number' : 'range';
+    return `${labelEl}<input id="${id}" type="${t}" value={${cs.value}} onChange={(e) => ${cs.change}(Number(e.target.value))}${num('min', cs.min)}${num('max', cs.max)}${num('step', cs.step)}${tail} />`;
   }
 
   visitInput(node) {

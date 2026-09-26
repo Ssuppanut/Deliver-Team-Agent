@@ -106,7 +106,8 @@ class SvelteRenderer extends RendererBase {
       return `${labelEl}<select id="${id}" value={${cs.value}} on:change={(e) => ${cs.change}(e.currentTarget.value)}${tail}></select>`;
     }
     this.express('state=numeric-range', { mechanism: 'value={} + on:input + min/max/step (controlled)' });
-    return `${labelEl}<input id="${id}" type="range" value={${cs.value}} on:input={(e) => ${cs.change}(Number(e.currentTarget.value))}${num('min', cs.min)}${num('max', cs.max)}${num('step', cs.step)}${tail} />`;
+    const t = node.input?.inputType === 'number' ? 'number' : 'range';
+    return `${labelEl}<input id="${id}" type="${t}" value={${cs.value}} on:input={(e) => ${cs.change}(Number(e.currentTarget.value))}${num('min', cs.min)}${num('max', cs.max)}${num('step', cs.step)}${tail} />`;
   }
 
   visitInput(node) {

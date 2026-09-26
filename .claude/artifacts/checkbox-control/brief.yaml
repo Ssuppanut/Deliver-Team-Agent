@@ -1,0 +1,19 @@
+component: CheckboxControl
+purpose: A labeled binary checkbox with a controlled boolean value.
+audience: End users filling forms.
+platforms: [react, vue, svelte, react-native, swiftui, compose]
+variants: []
+states: [unchecked, checked]
+interaction: controlled
+a11y:
+  - "role=checkbox with the checked state exposed (aria-checked / accessibilityState / semantics)"
+  - "visible label as the accessible name"
+scope:
+  in:
+    - "controlled boolean value + onChange (control-state primitive: kind=boolean)"
+    - "checkbox role across all 6 adapters"
+  out:
+    - "validation logic (caller owns it)"
+    - "indeterminate / tri-state (single boolean only)"
+    - "inline error text with describedby (control-state a11y-describedby wiring is a logged residual this batch)"
+composes: "control-state(boolean) + role=checkbox a11y + tokens"
