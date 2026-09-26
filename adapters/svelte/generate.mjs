@@ -102,8 +102,18 @@ class SvelteRenderer extends RendererBase {
       return `${labelEl}<input id="${id}" type="checkbox" checked={${cs.value}} on:change={(e) => ${cs.change}(e.currentTarget.checked)}${tail} />`;
     }
     if (cs.kind === 'selected-value') {
-      this.express('state=selected-value', { mechanism: 'value={} + on:change on <select> (controlled)' });
-      return `${labelEl}<select id="${id}" value={${cs.value}} on:change={(e) => ${cs.change}(e.currentTarget.value)}${tail}></select>`;
+      if (node.role === 'radiogroup') {
+        this.express('state=selected-value', { mechanism: 'radiogroup: name-grouped radios, checked from bound value + on:change (controlled)' });
+        const items = cs.options
+          ? `\n  {#each ${cs.options} as opt (opt.value)}\n    <label>\n      <input type="radio" name="${id}" value={opt.value} checked={${cs.value} === opt.value} on:change={() => ${cs.change}(opt.value)} />\n      {opt.label}\n    </label>\n  {/each}\n`
+          : '';
+        return `${labelEl}<div id="${id}"${tail}>${items}</div>`;
+      }
+      this.express('state=selected-value', { mechanism: 'value={} + on:change on <select> with <option> children (controlled)' });
+      const items = cs.options
+        ? `\n  {#each ${cs.options} as opt (opt.value)}\n    <option value={opt.value}>{opt.label}</option>\n  {/each}\n`
+        : '';
+      return `${labelEl}<select id="${id}" value={${cs.value}} on:change={(e) => ${cs.change}(e.currentTarget.value)}${tail}>${items}</select>`;
     }
     this.express('state=numeric-range', { mechanism: 'value={} + on:input + min/max/step (controlled)' });
     const t = node.input?.inputType === 'number' ? 'number' : 'range';

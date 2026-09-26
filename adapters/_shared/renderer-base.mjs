@@ -69,7 +69,7 @@ export class RendererBase {
     const s = node.input?.state;
     if (!s) return null;
     const i = node.input;
-    return { kind: s.kind, value: i.valueProp, change: i.changeProp, min: s.min, max: s.max, step: s.step };
+    return { kind: s.kind, value: i.valueProp, change: i.changeProp, min: s.min, max: s.max, step: s.step, options: s.options };
   }
 
   /** Account for a trait: this adapter emitted it via a real platform mechanism. */

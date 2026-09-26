@@ -106,8 +106,18 @@ class VueRenderer extends RendererBase {
       return `${labelEl}<input id="${id}" type="checkbox" :checked="${cs.value}" @change="${cs.change}(($event.target as HTMLInputElement).checked)"${tail} />`;
     }
     if (cs.kind === 'selected-value') {
-      this.express('state=selected-value', { mechanism: ':value + @change on <select> (v-model-style controlled)' });
-      return `${labelEl}<select id="${id}" :value="${cs.value}" @change="${cs.change}(($event.target as HTMLSelectElement).value)"${tail}></select>`;
+      if (node.role === 'radiogroup') {
+        this.express('state=selected-value', { mechanism: 'radiogroup: name-grouped radios, :checked from bound value + @change (controlled)' });
+        const items = cs.options
+          ? `\n  <label v-for="opt in ${cs.options}" :key="opt.value">\n    <input type="radio" name="${id}" :value="opt.value" :checked="${cs.value} === opt.value" @change="${cs.change}(opt.value)" />\n    {{ opt.label }}\n  </label>\n`
+          : '';
+        return `${labelEl}<div id="${id}"${tail}>${items}</div>`;
+      }
+      this.express('state=selected-value', { mechanism: ':value + @change on <select> with <option> children (controlled)' });
+      const items = cs.options
+        ? `\n  <option v-for="opt in ${cs.options}" :key="opt.value" :value="opt.value">{{ opt.label }}</option>\n`
+        : '';
+      return `${labelEl}<select id="${id}" :value="${cs.value}" @change="${cs.change}(($event.target as HTMLSelectElement).value)"${tail}>${items}</select>`;
     }
     this.express('state=numeric-range', { mechanism: ':value + @input + :min/:max/:step (v-model-style controlled)' });
     const t = node.input?.inputType === 'number' ? 'number' : 'range';

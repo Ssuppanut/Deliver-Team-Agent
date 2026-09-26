@@ -192,9 +192,15 @@ class ComposeRenderer extends RendererBase {
       this.express('state=boolean', { mechanism: `${ctrl}(checked, onCheckedChange) — hoisted state` });
       control = `${ctrl}(checked = ${cs.value}, onCheckedChange = ${cs.change}${sem})`;
     } else if (cs.kind === 'selected-value') {
-      if (role) this.diverge(`role=${role}`, { reason: `no Compose Role for role "${role}" here`, fallback: 'hoisted single-select state', waiver: `a11y-role-${role}` });
-      this.express('state=selected-value', { mechanism: 'hoisted single-select state (value + onValueChange)' });
-      control = `Column {\n  // one-of-N; options rendered by the component. Selection state hoisted to the caller:\n  val selectedValue = ${cs.value}\n  val onSelectedChange = ${cs.change}\n}`;
+      if (role === 'radiogroup') this.express('role=radiogroup', { mechanism: 'Modifier.selectableGroup() + RadioButton per option' });
+      else if (role) this.diverge(`role=${role}`, { reason: `no Compose Role for role "${role}" here`, fallback: 'selectable RadioButton group', waiver: `a11y-role-${role}` });
+      this.express('state=selected-value', { mechanism: 'RadioButton group over options (selected = bound == option.value; hoisted onClick) — native match' });
+      const items = cs.options
+        ? `${cs.options}.forEach { opt ->\n    Row {\n      RadioButton(selected = ${cs.value} == opt.value, onClick = { ${cs.change}(opt.value) })\n      Text(text = opt.label)\n    }\n  }`
+        // No option list: hoist the selection state to the caller (the options
+        // are supplied by a component built on this primitive).
+        : `val selectedValue = ${cs.value}\n  val onSelectedChange = ${cs.change}`;
+      control = `Column(modifier = Modifier.selectableGroup()) {\n  ${items}\n}`;
     } else {
       const n = (v) => (typeof v === 'number' ? `${v}f` : v);
       const numberField = node.input?.inputType === 'number';
@@ -307,7 +313,8 @@ class ComposeRenderer extends RendererBase {
     // Semantics extras are imported only when the body actually emits them.
     const semExtra =
       (/\brole = Role\./.test(root) ? `import androidx.compose.ui.semantics.role\nimport androidx.compose.ui.semantics.Role\n` : '')
-      + (/\bliveRegion = LiveRegionMode\./.test(root) ? `import androidx.compose.ui.semantics.liveRegion\nimport androidx.compose.ui.semantics.LiveRegionMode\n` : '');
+      + (/\bliveRegion = LiveRegionMode\./.test(root) ? `import androidx.compose.ui.semantics.liveRegion\nimport androidx.compose.ui.semantics.LiveRegionMode\n` : '')
+      + (/\.selectableGroup\(\)/.test(root) ? `import androidx.compose.foundation.selection.selectableGroup\n` : '');
     return `import androidx.compose.foundation.layout.*\n`
       + `import androidx.compose.foundation.background\n`
       + `import androidx.compose.foundation.shape.RoundedCornerShape\n`

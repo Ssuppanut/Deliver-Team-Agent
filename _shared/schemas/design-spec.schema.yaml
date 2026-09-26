@@ -135,6 +135,7 @@ definitions:
               min: { type: [number, string], description: "numeric-range lower bound: a number literal or a plain prop ref." }
               max: { type: [number, string], description: "numeric-range upper bound: a number literal or a plain prop ref." }
               step: { type: [number, string], description: "numeric-range step: a number literal or a plain prop ref (optional)." }
+              options: { type: string, description: "selected-value only: plain prop ref of the option array (items { value, label, disabled? }). Options render inside the bound control (Select / RadioGroup); the control does the selection matching — no per-option expression is authored in the spec." }
       onEvent:
         type: string
         description: Prop name of the callback for el=action.

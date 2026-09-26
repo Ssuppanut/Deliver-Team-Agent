@@ -121,9 +121,21 @@ class RNRenderer extends RendererBase {
       return `${labelEl}<Switch value={${cs.value}} onValueChange={${cs.change}}${roleAttr}${a11yLabel}${style} />`;
     }
     if (cs.kind === 'selected-value') {
+      if (role === 'radiogroup') {
+        // RN has no radio primitive: Pressable per option with radio semantics.
+        this.express('role=radiogroup', { mechanism: 'accessibilityRole="radiogroup"' });
+        this.express('state=selected-value', { mechanism: 'radio group: Pressable per option + accessibilityRole="radio" + accessibilityState={{selected}}' });
+        const items = cs.options
+          ? `\n  {${cs.options}.map((opt) => (\n    <Pressable key={opt.value} accessibilityRole="radio" accessibilityState={{ selected: ${cs.value} === opt.value }} onPress={() => ${cs.change}(opt.value)}>\n      <Text>{opt.label}</Text>\n    </Pressable>\n  ))}\n`
+          : '';
+        return `${labelEl}<View accessibilityRole="radiogroup"${a11yLabel}${style}>${items}</View>`;
+      }
       if (role) this.diverge(`role=${role}`, { reason: `no direct React Native accessibilityRole for "${role}"`, fallback: 'Picker conveys single-select', waiver: `a11y-role-${role}` });
-      this.express('state=selected-value', { mechanism: '<Picker selectedValue onValueChange> (controlled)' });
-      return `${labelEl}<Picker selectedValue={${cs.value}} onValueChange={${cs.change}}${a11yLabel}${style}></Picker>`;
+      this.express('state=selected-value', { mechanism: '<Picker selectedValue onValueChange> + Picker.Item children (controlled, native match)' });
+      const items = cs.options
+        ? `\n  {${cs.options}.map((opt) => (\n    <Picker.Item key={opt.value} label={opt.label} value={opt.value} />\n  ))}\n`
+        : '';
+      return `${labelEl}<Picker selectedValue={${cs.value}} onValueChange={${cs.change}}${a11yLabel}${style}>${items}</Picker>`;
     }
     // numeric-range: a numeric text field (inputType=number, NumberInput) or a Slider.
     const numberField = node.input?.inputType === 'number';

@@ -150,9 +150,13 @@ class SwiftUIRenderer extends RendererBase {
       return `Toggle(${title}, isOn: ${bind})${this.modifiers(node)}`;
     }
     if (cs.kind === 'selected-value') {
-      if (role) this.diverge(`role=${role}`, { reason: `no direct SwiftUI trait for role "${role}"`, fallback: 'Picker conveys single-select', waiver: `a11y-role-${role}` });
-      this.express('state=selected-value', { mechanism: 'Picker(selection: @Binding get/set from caller)' });
-      return `Picker(${title}, selection: ${bind}) {\n  // one-of-N options supplied by the component\n}${this.modifiers(node)}`;
+      if (role === 'radiogroup') this.express('role=radiogroup', { mechanism: 'Picker (single-select group)' });
+      else if (role) this.diverge(`role=${role}`, { reason: `no direct SwiftUI trait for role "${role}"`, fallback: 'Picker conveys single-select', waiver: `a11y-role-${role}` });
+      this.express('state=selected-value', { mechanism: 'Picker(selection: @Binding) + ForEach options with .tag (native match, no expression)' });
+      const items = cs.options
+        ? `\n  ForEach(${safe(cs.options)}, id: \\.value) { opt in\n    Text(opt.label).tag(opt.value)\n  }\n`
+        : `\n  // options supplied by the component\n`;
+      return `Picker(${title}, selection: ${bind}) {${items}}${this.modifiers(node)}`;
     }
     // numeric-range: a Stepper number input (inputType=number, NumberInput) or a Slider.
     const stepArg = cs.step != null ? `, step: ${num(cs.step)}` : '';

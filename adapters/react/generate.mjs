@@ -127,8 +127,20 @@ class ReactRenderer extends RendererBase {
       return `${labelEl}<input id="${id}" type="checkbox" checked={${cs.value}} onChange={(e) => ${cs.change}(e.target.checked)}${tail} />`;
     }
     if (cs.kind === 'selected-value') {
-      this.express('state=selected-value', { mechanism: 'value + onChange on <select> (controlled)' });
-      return `${labelEl}<select id="${id}" value={${cs.value}} onChange={(e) => ${cs.change}(e.target.value)}${tail}></select>`;
+      if (node.role === 'radiogroup') {
+        // Native radio group: name-grouped <input type="radio">; the browser
+        // enforces single-select, checked reflects the bound value.
+        this.express('state=selected-value', { mechanism: 'radiogroup: name-grouped <input type="radio"> + checked/onChange (controlled)' });
+        const items = cs.options
+          ? `\n  {${cs.options}.map((opt) => (\n    <label key={opt.value}>\n      <input type="radio" name="${id}" value={opt.value} checked={${cs.value} === opt.value} onChange={() => ${cs.change}(opt.value)} />\n      {opt.label}\n    </label>\n  ))}\n`
+          : '';
+        return `${labelEl}<div id="${id}"${tail}>${items}</div>`;
+      }
+      this.express('state=selected-value', { mechanism: 'value + onChange on <select> with <option> children (controlled)' });
+      const items = cs.options
+        ? `\n  {${cs.options}.map((opt) => (\n    <option key={opt.value} value={opt.value}>{opt.label}</option>\n  ))}\n`
+        : '';
+      return `${labelEl}<select id="${id}" value={${cs.value}} onChange={(e) => ${cs.change}(e.target.value)}${tail}>${items}</select>`;
     }
     this.express('state=numeric-range', { mechanism: 'value + onChange + min/max/step (controlled)' });
     const t = node.input?.inputType === 'number' ? 'number' : 'range';
