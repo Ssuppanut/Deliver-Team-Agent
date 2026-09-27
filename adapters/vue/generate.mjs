@@ -96,18 +96,37 @@ class VueRenderer extends RendererBase {
   // Control-state primitive — controlled (caller-held) two-way binding. Pure
   // v-model on a prop mutates a read-only prop (uncontrolled); the controlled
   // equivalent binds the value and routes change through the caller's handler.
+  inputAria(node) {
+    let aria = '';
+    const invalid = node.a11y?.invalid;
+    const desc = node.a11y?.describedBy;
+    if (invalid) { aria += ` :aria-invalid="!!${invalid}"`; this.express('a11y.invalid', { mechanism: 'aria-invalid' }); }
+    if (desc) { aria += invalid ? ` :aria-describedby="${invalid} ? '${desc}' : undefined"` : ` aria-describedby="${desc}"`; this.express('a11y.describedBy', { mechanism: 'aria-describedby' }); }
+    return aria;
+  }
+
   renderControlState(node, cs) {
     const id = node.id || `${this.ir.component.toLowerCase()}-${cs.value ?? 'input'}`;
     const labelEl = node.label ? `<label for="${id}">${this.interp(node.label)}</label>\n` : '';
-    const tail = `${this.a11y(node)}${this.styleAttr(node)}`;
+    const tail = `${this.a11y(node)}${this.inputAria(node)}${this.styleAttr(node)}`;
     const num = (n, v) => (v == null ? '' : ` :${n}="${v}"`);
     if (cs.kind === 'boolean') {
       this.express('state=boolean', { mechanism: ':checked + @change (v-model-style controlled)' });
       return `${labelEl}<input id="${id}" type="checkbox" :checked="${cs.value}" @change="${cs.change}(($event.target as HTMLInputElement).checked)"${tail} />`;
     }
     if (cs.kind === 'selected-value') {
-      this.express('state=selected-value', { mechanism: ':value + @change on <select> (v-model-style controlled)' });
-      return `${labelEl}<select id="${id}" :value="${cs.value}" @change="${cs.change}(($event.target as HTMLSelectElement).value)"${tail}></select>`;
+      if (node.role === 'radiogroup') {
+        this.express('state=selected-value', { mechanism: 'radiogroup: name-grouped radios, :checked from bound value + @change (controlled)' });
+        const items = cs.options
+          ? `\n  <label v-for="opt in ${cs.options}" :key="opt.value">\n    <input type="radio" name="${id}" :value="opt.value" :checked="${cs.value} === opt.value" @change="${cs.change}(opt.value)" />\n    {{ opt.label }}\n  </label>\n`
+          : '';
+        return `${labelEl}<div id="${id}"${tail}>${items}</div>`;
+      }
+      this.express('state=selected-value', { mechanism: ':value + @change on <select> with <option> children (controlled)' });
+      const items = cs.options
+        ? `\n  <option v-for="opt in ${cs.options}" :key="opt.value" :value="opt.value">{{ opt.label }}</option>\n`
+        : '';
+      return `${labelEl}<select id="${id}" :value="${cs.value}" @change="${cs.change}(($event.target as HTMLSelectElement).value)"${tail}>${items}</select>`;
     }
     this.express('state=numeric-range', { mechanism: ':value + @input + :min/:max/:step (v-model-style controlled)' });
     const t = node.input?.inputType === 'number' ? 'number' : 'range';

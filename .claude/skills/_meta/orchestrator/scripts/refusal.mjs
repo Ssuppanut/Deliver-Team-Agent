@@ -51,7 +51,7 @@ function findBadBinding(node) {
   if (!st) return null;
   const i = node.input ?? {};
   const bad = (v) => typeof v === 'string' && !PLAIN_FLAG.test(v.trim());
-  for (const [slot, v] of [['bound value', i.valueProp], ['change handler', i.changeProp], ['min', st.min], ['max', st.max], ['step', st.step]]) {
+  for (const [slot, v] of [['bound value', i.valueProp], ['change handler', i.changeProp], ['min', st.min], ['max', st.max], ['step', st.step], ['options', st.options]]) {
     // Numbers are literal constraints (fine); only a non-plain STRING is an expression.
     if (bad(v)) return { slot, expr: String(v).trim() };
   }

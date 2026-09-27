@@ -92,18 +92,37 @@ class SvelteRenderer extends RendererBase {
   // Control-state primitive — controlled (caller-held) two-way binding. `bind:`
   // to a local is the UNCONTROLLED idiom (scope guard: controlled-only), so the
   // controlled form binds the value and routes change to the caller's handler.
+  inputAria(node) {
+    let aria = '';
+    const invalid = node.a11y?.invalid;
+    const desc = node.a11y?.describedBy;
+    if (invalid) { aria += ` aria-invalid={!!${invalid}}`; this.express('a11y.invalid', { mechanism: 'aria-invalid' }); }
+    if (desc) { aria += invalid ? ` aria-describedby={${invalid} ? '${desc}' : undefined}` : ` aria-describedby="${desc}"`; this.express('a11y.describedBy', { mechanism: 'aria-describedby' }); }
+    return aria;
+  }
+
   renderControlState(node, cs) {
     const id = node.id || `${this.ir.component.toLowerCase()}-${cs.value ?? 'input'}`;
     const labelEl = node.label ? `<label for="${id}">${this.interp(node.label)}</label>\n` : '';
-    const tail = `${this.a11y(node)}${this.styleAttr(node)}`;
+    const tail = `${this.a11y(node)}${this.inputAria(node)}${this.styleAttr(node)}`;
     const num = (n, v) => (v == null ? '' : ` ${n}={${v}}`);
     if (cs.kind === 'boolean') {
       this.express('state=boolean', { mechanism: 'checked={} + on:change (controlled)' });
       return `${labelEl}<input id="${id}" type="checkbox" checked={${cs.value}} on:change={(e) => ${cs.change}(e.currentTarget.checked)}${tail} />`;
     }
     if (cs.kind === 'selected-value') {
-      this.express('state=selected-value', { mechanism: 'value={} + on:change on <select> (controlled)' });
-      return `${labelEl}<select id="${id}" value={${cs.value}} on:change={(e) => ${cs.change}(e.currentTarget.value)}${tail}></select>`;
+      if (node.role === 'radiogroup') {
+        this.express('state=selected-value', { mechanism: 'radiogroup: name-grouped radios, checked from bound value + on:change (controlled)' });
+        const items = cs.options
+          ? `\n  {#each ${cs.options} as opt (opt.value)}\n    <label>\n      <input type="radio" name="${id}" value={opt.value} checked={${cs.value} === opt.value} on:change={() => ${cs.change}(opt.value)} />\n      {opt.label}\n    </label>\n  {/each}\n`
+          : '';
+        return `${labelEl}<div id="${id}"${tail}>${items}</div>`;
+      }
+      this.express('state=selected-value', { mechanism: 'value={} + on:change on <select> with <option> children (controlled)' });
+      const items = cs.options
+        ? `\n  {#each ${cs.options} as opt (opt.value)}\n    <option value={opt.value}>{opt.label}</option>\n  {/each}\n`
+        : '';
+      return `${labelEl}<select id="${id}" value={${cs.value}} on:change={(e) => ${cs.change}(e.currentTarget.value)}${tail}>${items}</select>`;
     }
     this.express('state=numeric-range', { mechanism: 'value={} + on:input + min/max/step (controlled)' });
     const t = node.input?.inputType === 'number' ? 'number' : 'range';

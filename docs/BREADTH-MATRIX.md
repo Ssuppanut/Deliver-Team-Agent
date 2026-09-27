@@ -1130,3 +1130,151 @@ No renderer-base capability added (composition glue only); no number formatting
 (NumberInput is plain numeric + constraints); custom-overlay select still refused;
 no gate or the ledger weakened; no agent / skill / workflow / AI-router changes.
 F-23 / F-24 logged for triage, not built.
+
+---
+
+# F-23 — option-children capability (Radio + Select now ship)
+
+The form-input batch left Radio + Select BLOCKED: a control-state–bound control
+was a leaf (`renderControlState` rendered no children), so a Select emitted an
+empty `<select></select>`. F-23 adds **option-children**: a selected-value control
+renders an iterated option list, so **native Select (F-18)** and **Radio +
+RadioGroup (F-17)** ship.
+
+## Design — spec authors no selection expression
+
+The spec supplies the **single bound value** (existing control-state
+selected-value binding) + an **option list** (`state.options` = a plain prop ref
+to an array of `{ value, label }`). The presentation is chosen by role:
+`role=radiogroup` → radio group, else → native single-select. **No per-option
+comparison or JS expression is authored in the spec** — the option ref and bound
+value are plain refs (an expression there is refused as `expression-binding`,
+F-9-consistent). Each adapter emits its platform's native selection construct and
+owns the matching:
+
+| | Select (role: listbox/none) | RadioGroup (role=radiogroup) |
+|---|---|---|
+| React | `<select value>` + `<option>` map | name-grouped `<input type="radio" checked={value===opt.value}>` |
+| Vue | `<select :value>` + `<option v-for>` | radios `:checked="value===opt.value"` |
+| Svelte | `<select value>` + `{#each}` `<option>` | radios `checked={value===opt.value}` |
+| React Native | `<Picker selectedValue>` + `<Picker.Item>` | `<View role=radiogroup>` + `<Pressable role=radio accessibilityState={{selected}}>` |
+| SwiftUI | `Picker(selection:)` + `ForEach { Text.tag(value) }` | same `Picker` (single-select group) |
+| Compose | `Column(selectableGroup)` + `RadioButton(selected = value == opt.value)` | same RadioButton group |
+
+## Selection-match audit (no spec expression; native idiom only)
+
+The **spec** contains zero selection expressions (proven — options carry only
+`value`/`label`; refusal blocks an expression options-ref or bound value). In
+**generated** code, the value-matched controls are comparison-free
+(`<select value>`, `Picker(selection:)`, RN `Picker`); the platforms whose radio
+primitive takes a per-option boolean emit the **native value-match** the task's
+own examples specify (web radio `checked`, RN `accessibilityState.selected`,
+Compose `RadioButton(selected = …)`):
+
+| adapter | Select | RadioGroup |
+|---|---|---|
+| React / Vue / Svelte | comparison-free (`<select value>`) | native `checked={value===opt.value}` |
+| React Native | comparison-free (`<Picker>`) | native `accessibilityState.selected` |
+| SwiftUI | comparison-free (`Picker`+`.tag`) | comparison-free (`Picker`) |
+| Compose | `RadioButton(selected==)`¹ | `RadioButton(selected==)` |
+
+¹ Compose has no simple dropdown primitive, so Select also renders a
+`RadioButton` group. None of these are F-9 spec expressions or un-evaluatable JS
+leaks — `native-code` stays green on all output.
+
+## Matrix — the two blocked components now PASS
+
+| Component | React | Vue | Svelte | RN | SwiftUI | Compose | Gates | Outcome |
+|---|---|---|---|---|---|---|---|---|
+| **Native Select** (`native-select`) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 9/9 | **PASS** (was BLOCKED) |
+| **Radio + RadioGroup** (`radio-group`) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 9/9 | **PASS** (was BLOCKED) |
+| Custom-overlay Select | | | | | | | n/a | **REFUSE-correct** (overlay boundary holds) |
+
+Both: `ledger 0-unaccounted` (Select `6 expressed`, RadioGroup `12 expressed`
+incl. `role=radiogroup`); `native-code` green; `token-guard` green.
+
+## Findings
+
+- **F-17 (radio) — RESOLVED.** RadioGroup ships with radiogroup/radio roles +
+  option children + single-select via native binding on all 6.
+- **F-18 (native select) — RESOLVED.** Native Select ships with option children
+  rendered inside the bound control on all 6.
+- **F-23 — RESOLVED.** Option-children capability added under control-state
+  (Select + RadioGroup only; not generalized to arbitrary iterated children).
+- **New residual — F-25:** rich/nested option children (icon+text, per-option
+  `disabled`) are **not** supported — options are `{value,label}` only. Logged,
+  not built (per scope).
+
+## Mutation harness
+
+Corpus 26 → **28** (native-select, radio-group). `350/346/4 → **380 / 376 / 4**`.
+Only survivors remain the 4 `state-by-color-only` (F-22). No new survivor, no
+regression.
+
+## Regression pins
+
+`P50` (Select renders option children in the value-matched control on all 6),
+`P51` (RadioGroup renders role=radiogroup + per-option selection on all 6, role +
+state accounted), `P52` (expression-as-options / bound value refused; overlay
+select refused). `verify-patches` → **52/52**.
+
+---
+
+# F-24 — describedBy / invalid in control-state
+
+The control-state render path (`renderControlState`) accounted for `state`,
+`role`, and `label`, but **not** `a11y.describedBy` / `a11y.invalid` — a
+control-state control with an inline error/description left those traits
+`unaccounted` → ledger FAIL. F-24 wires both into all 6 adapters, using each
+platform's real mechanism, mirroring the non-state `visitInput` path.
+
+## Wiring per adapter
+
+| trait | React / Vue / Svelte | React Native | SwiftUI | Compose |
+|---|---|---|---|---|
+| `a11y.invalid` | `aria-invalid` (express) | `aria-invalid` (express) | diverge `a11y-invalid-swiftui` | diverge `a11y-invalid-compose` |
+| `a11y.describedBy` | `aria-describedby` (express) | diverge `a11y-describedby-native` | diverge `a11y-describedby-native` | diverge `a11y-describedby-native` |
+
+A platform that genuinely cannot express a trait **diverges** (waiver-backed),
+never silently drops it. Added `a11y-invalid-compose` to the waiver registry (a
+Compose Checkbox/Switch/Slider/RadioButton has no `isError`, unlike a text
+field). All waivers carry an approver + expiry.
+
+## Proof — inline-error control accounted on all 6, revert → FAIL → restore
+
+Test spec `checkbox-error` (controlled checkbox + `a11y.invalid` + `a11y.describedBy`
++ a conditional F-3 error text):
+
+```
+describedBy + invalid accounting per adapter:
+  react/vue/svelte  describedBy=expressed(aria-describedby)  invalid=expressed(aria-invalid)
+  react-native      describedBy=diverged(a11y-describedby-native)  invalid=expressed(aria-invalid)
+  swiftui           describedBy=diverged(a11y-describedby-native)  invalid=diverged(a11y-invalid-swiftui)
+  compose           describedBy=diverged(a11y-describedby-native)  invalid=diverged(a11y-invalid-compose)
+
+ledger PASS (29 expressed, 7 diverged, 0 unaccounted)   gates: PASS
+```
+
+Revert proof (drop the F-24 wiring from React):
+```
+BEFORE  ledger PASS (0 unaccounted)   gates: PASS
+AFTER   ledger FAIL — react drops `a11y.invalid` + `a11y.describedBy` (unaccounted)
+RESTORE ledger PASS (0 unaccounted)   gates: PASS
+```
+
+## Findings
+
+- **F-24 — RESOLVED.** `renderControlState` now accounts for describedBy +
+  invalid on all 6 (express or waiver-backed diverge); a control with an inline
+  error is fully accounted, 0 unaccounted.
+
+## Mutation harness
+
+Corpus 28 → **29** (checkbox-error). `380/376/4 → **417 / 413 / 4**` — only F-22
+survives; no new survivor, no regression.
+
+## Regression pin
+
+`P53` (a control with an inline error accounts describedBy + invalid on all 6,
+0 unaccounted; web emits real ARIA attrs; ledger gate passes). `verify-patches`
+→ **53/53**.

@@ -1,0 +1,24 @@
+component: NativeSelect
+description: Labeled native single-select (control-state selected-value) with option children on all 6 adapters.
+category: input
+props:
+  - { name: label, type: string, required: true }
+  - { name: choice, type: string, required: true }
+  - { name: onChoiceChange, type: function, required: true }
+  - name: options
+    type: array
+    required: true
+    itemShape: { value: string, label: string }
+tokens:
+  - space.inset.sm
+root:
+  el: input
+  label: { kind: ref, value: label }
+  input:
+    valueProp: choice
+    changeProp: onChoiceChange
+    state:
+      kind: selected-value
+      options: options
+  style:
+    padding: space.inset.sm

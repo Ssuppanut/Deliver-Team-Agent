@@ -141,6 +141,8 @@ class SwiftUIRenderer extends RendererBase {
     const role = node.role;
     const title = this.plain(node.label ?? node.a11y?.label);
     if (node.a11y?.label) this.express('a11y.label', { mechanism: 'label (accessible name)' });
+    if (node.a11y?.describedBy) this.diverge('a11y.describedBy', { reason: 'SwiftUI has no aria-describedby', fallback: '.accessibilityHint / adjacent Text', waiver: 'a11y-describedby-native' });
+    if (node.a11y?.invalid) this.diverge('a11y.invalid', { reason: 'SwiftUI has no direct aria-invalid trait', fallback: 'label / adjacent error Text conveys the invalid state', waiver: 'a11y-invalid-swiftui' });
     const num = (v) => (typeof v === 'number' ? String(v) : safe(String(v)));
     const bind = `Binding(get: { ${safe(cs.value)} }, set: { ${safe(cs.change)}($0) })`;
     if (cs.kind === 'boolean') {
@@ -150,9 +152,13 @@ class SwiftUIRenderer extends RendererBase {
       return `Toggle(${title}, isOn: ${bind})${this.modifiers(node)}`;
     }
     if (cs.kind === 'selected-value') {
-      if (role) this.diverge(`role=${role}`, { reason: `no direct SwiftUI trait for role "${role}"`, fallback: 'Picker conveys single-select', waiver: `a11y-role-${role}` });
-      this.express('state=selected-value', { mechanism: 'Picker(selection: @Binding get/set from caller)' });
-      return `Picker(${title}, selection: ${bind}) {\n  // one-of-N options supplied by the component\n}${this.modifiers(node)}`;
+      if (role === 'radiogroup') this.express('role=radiogroup', { mechanism: 'Picker (single-select group)' });
+      else if (role) this.diverge(`role=${role}`, { reason: `no direct SwiftUI trait for role "${role}"`, fallback: 'Picker conveys single-select', waiver: `a11y-role-${role}` });
+      this.express('state=selected-value', { mechanism: 'Picker(selection: @Binding) + ForEach options with .tag (native match, no expression)' });
+      const items = cs.options
+        ? `\n  ForEach(${safe(cs.options)}, id: \\.value) { opt in\n    Text(opt.label).tag(opt.value)\n  }\n`
+        : `\n  // options supplied by the component\n`;
+      return `Picker(${title}, selection: ${bind}) {${items}}${this.modifiers(node)}`;
     }
     // numeric-range: a Stepper number input (inputType=number, NumberInput) or a Slider.
     const stepArg = cs.step != null ? `, step: ${num(cs.step)}` : '';

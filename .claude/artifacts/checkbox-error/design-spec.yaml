@@ -1,0 +1,40 @@
+component: CheckboxError
+description: Controlled checkbox (boolean control-state) with describedBy + invalid + an optional inline error text.
+category: input
+props:
+  - { name: label, type: string, required: true }
+  - { name: checked, type: boolean, required: true }
+  - { name: onCheckedChange, type: function, required: true }
+  - { name: error, type: string, required: false }
+tokens:
+  - color.danger.fg
+  - space.stack.sm
+  - space.inset.sm
+root:
+  el: container
+  style:
+    gap: space.stack.sm
+  children:
+    - el: input
+      id: checkbox-error-field
+      role: checkbox
+      label: { kind: ref, value: label }
+      input:
+        valueProp: checked
+        changeProp: onCheckedChange
+        state:
+          kind: boolean
+      a11y:
+        invalid: error
+        describedBy: checkbox-error-msg
+      style:
+        padding: space.inset.sm
+    - el: text
+      id: checkbox-error-msg
+      when: error
+      role: alert
+      text: { kind: ref, value: error }
+      a11y:
+        live: polite
+      style:
+        color: color.danger.fg

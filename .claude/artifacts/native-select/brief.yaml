@@ -1,0 +1,18 @@
+component: NativeSelect
+purpose: A labeled native single-select over a list of options, controlled by a bound value.
+audience: End users choosing one of N options.
+platforms: [react, vue, svelte, react-native, swiftui, compose]
+variants: []
+states: [default]
+interaction: controlled
+a11y:
+  - "native single-select control; the control matches the bound value (no per-option expression in the spec)"
+  - "visible label as the accessible name"
+scope:
+  in:
+    - "controlled selected value + onChange (control-state selected-value)"
+    - "option list ({value,label}) rendered inside the bound control (option-children)"
+  out:
+    - "custom-overlay / combobox select (REFUSED — overlay boundary)"
+    - "rich/nested option children (value+label only; logged if needed)"
+composes: "control-state(selected-value) + option-children + tokens"

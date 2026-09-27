@@ -833,6 +833,79 @@ check('P49', 'refusal: an expression as bound value / handler / range-ref is ref
   assert(checkRefusal({ root: { el: 'container', variant: { prop: "d >= 0 ? 'a' : 'b'", cases: { a: {} } } } })?.category === 'expression-variant', 'variant-expression refusal must be unchanged');
 });
 
+// --- Option-children capability (F-23): Select + RadioGroup (P50-P52) --------
+const NATIVE_SELECT = resolve(ROOT, '.claude/artifacts/native-select/design-spec.yaml');
+const RADIO_GROUP = resolve(ROOT, '.claude/artifacts/radio-group/design-spec.yaml');
+
+// --- P50: native Select renders option children inside the bound control on all 6
+check('P50', 'option-children: native Select renders <option>/items inside the value-matched control on all 6; state accounted', () => {
+  const out = genAll(NATIVE_SELECT, 'verify-native-select');
+  // Options are iterated inside the control on every adapter (not an empty control).
+  const pat = {
+    react: /<select [^>]*value=\{choice\}[\s\S]*options\.map\(\(opt\) =>[\s\S]*<option key=\{opt\.value\} value=\{opt\.value\}>\{opt\.label\}<\/option>[\s\S]*<\/select>/,
+    vue: /<select [^>]*:value="choice"[\s\S]*<option v-for="opt in options" :key="opt\.value" :value="opt\.value">\{\{ opt\.label \}\}<\/option>[\s\S]*<\/select>/,
+    svelte: /<select [^>]*value=\{choice\}[\s\S]*\{#each options as opt \(opt\.value\)\}[\s\S]*<option value=\{opt\.value\}>\{opt\.label\}<\/option>/,
+    'react-native': /<Picker selectedValue=\{choice\}[\s\S]*options\.map\(\(opt\) =>[\s\S]*<Picker\.Item key=\{opt\.value\} label=\{opt\.label\} value=\{opt\.value\} \/>/,
+    swiftui: /Picker\([^)]*selection: Binding[\s\S]*ForEach\(options, id: \\\.value\) \{ opt in[\s\S]*Text\(opt\.label\)\.tag\(opt\.value\)/,
+    compose: /Column\(modifier = Modifier\.selectableGroup\(\)\) \{[\s\S]*options\.forEach \{ opt ->[\s\S]*RadioButton\(selected = choice == opt\.value, onClick = \{ onChoiceChange\(opt\.value\) \}\)/,
+  };
+  for (const [ad, re] of Object.entries(pat)) assert(re.test(out[ad].code), `${ad}: Select must render option children in the bound control`);
+  assertStateExpressed(out, 'selected-value');
+  // The SPEC authored no selection expression; native-code must stay green
+  // (no un-evaluatable JS discriminant leaked into native output).
+  for (const ad of ['swiftui', 'compose']) {
+    assert(!/\?[^:]*:/.test(out[ad].code.replace(/https?:\/\//g, '')), `${ad}: no ternary/JS expression should leak into native output`);
+  }
+});
+
+// --- P51: RadioGroup renders radiogroup/radio + options on all 6 --------------
+check('P51', 'option-children: RadioGroup renders role=radiogroup + per-option radios/native match on all 6; role + state accounted', () => {
+  const out = genAll(RADIO_GROUP, 'verify-radio-group');
+  const pat = {
+    react: /role="radiogroup"[\s\S]*options\.map\(\(opt\) =>[\s\S]*<input type="radio" name="[^"]*" value=\{opt\.value\} checked=\{choice === opt\.value\} onChange=\{\(\) => onChoiceChange\(opt\.value\)\}/,
+    vue: /role="radiogroup"[\s\S]*<input type="radio" name="[^"]*" :value="opt\.value" :checked="choice === opt\.value" @change="onChoiceChange\(opt\.value\)"/,
+    svelte: /role="radiogroup"[\s\S]*<input type="radio" name="[^"]*" value=\{opt\.value\} checked=\{choice === opt\.value\} on:change=\{\(\) => onChoiceChange\(opt\.value\)\}/,
+    'react-native': /<View accessibilityRole="radiogroup"[\s\S]*<Pressable key=\{opt\.value\} accessibilityRole="radio" accessibilityState=\{\{ selected: choice === opt\.value \}\} onPress=\{\(\) => onChoiceChange\(opt\.value\)\}/,
+    swiftui: /Picker\([^)]*selection: Binding[\s\S]*ForEach\(options, id: \\\.value\) \{ opt in/,
+    compose: /RadioButton\(selected = choice == opt\.value, onClick = \{ onChoiceChange\(opt\.value\) \}\)/,
+  };
+  for (const [ad, re] of Object.entries(pat)) assert(re.test(out[ad].code), `${ad}: RadioGroup must render radiogroup + per-option selection`);
+  // role=radiogroup expressed (web via role=, RN via accessibilityRole, SwiftUI via Picker, Compose via selectableGroup) and state accounted.
+  for (const [ad, r] of Object.entries(out)) {
+    assert(r.ledger.some((x) => x.traitId === 'role=radiogroup' && x.status === 'expressed'), `${ad}: role=radiogroup must be expressed`);
+  }
+  assertStateExpressed(out, 'selected-value');
+});
+
+// --- P52: selection refusals intact (F-9 boundary + overlay) ------------------
+check('P52', 'refusal: expression as options / bound value is refused; custom-overlay select refused; plain option ref passes', () => {
+  const sel = (input) => ({ category: 'input', root: { el: 'input', label: { kind: 'literal', value: 'x' }, input } });
+  assert(checkRefusal({ category: 'overlay', root: { el: 'container' } })?.category === 'overlay', 'custom-overlay select must stay refused');
+  assert(checkRefusal(sel({ valueProp: 'choice', changeProp: 'onChoice', state: { kind: 'selected-value', options: 'items.filter(x => x.ok)' } }))?.category === 'expression-binding', 'an expression options ref must be refused');
+  assert(checkRefusal(sel({ valueProp: 'sel === "a" ? 1 : 2', changeProp: 'onChoice', state: { kind: 'selected-value', options: 'options' } }))?.category === 'expression-binding', 'an expression bound value must be refused');
+  assert(checkRefusal(sel({ valueProp: 'choice', changeProp: 'onChoice', state: { kind: 'selected-value', options: 'options' } })) === null, 'a plain option ref + plain value must pass');
+});
+
+// --- P53: describedBy / invalid accounted in control-state on all 6 (F-24) ----
+const CHECKBOX_ERROR = resolve(ROOT, '.claude/artifacts/checkbox-error/design-spec.yaml');
+check('P53', 'control-state a11y: a control with an inline error accounts describedBy + invalid on all 6 (express or waiver-backed diverge), 0 unaccounted', () => {
+  const out = genAll(CHECKBOX_ERROR, 'verify-checkbox-error');
+  for (const [ad, r] of Object.entries(out)) {
+    for (const trait of ['a11y.describedBy', 'a11y.invalid']) {
+      const e = r.ledger.find((x) => x.traitId === trait);
+      assert(e, `${ad}: ${trait} must be in the ledger`);
+      assert(e.status === 'expressed' || (e.status === 'diverged' && e.waiver), `${ad}: ${trait} must be expressed or waiver-backed diverged, got ${e.status}`);
+    }
+    assert(!r.ledger.some((x) => x.status === 'unaccounted'), `${ad}: no trait may be unaccounted`);
+  }
+  // Web expresses the real ARIA attributes in output; the whole feature's ledger passes.
+  for (const ad of ['react', 'vue', 'svelte']) {
+    assert(/aria-invalid/.test(out[ad].code) && /aria-describedby/.test(out[ad].code), `${ad}: must emit aria-invalid + aria-describedby`);
+  }
+  const ledger = Object.values(out).flatMap((r) => r.ledger);
+  assert(checkLedger(ledger).ok, 'checkbox-error ledger gate must pass (describedBy/invalid accounted)');
+});
+
 console.log('\n=== verify-patches ===');
 console.log(results.join('\n'));
 console.log(`\n${pass} passed, ${fail} failed\n`);

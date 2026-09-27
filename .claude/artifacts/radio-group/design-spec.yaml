@@ -1,0 +1,25 @@
+component: RadioGroup
+description: Labeled single-select radio group (control-state selected-value) with radiogroup/radio roles and option children.
+category: input
+props:
+  - { name: label, type: string, required: true }
+  - { name: choice, type: string, required: true }
+  - { name: onChoiceChange, type: function, required: true }
+  - name: options
+    type: array
+    required: true
+    itemShape: { value: string, label: string }
+tokens:
+  - space.stack.sm
+root:
+  el: input
+  role: radiogroup
+  label: { kind: ref, value: label }
+  input:
+    valueProp: choice
+    changeProp: onChoiceChange
+    state:
+      kind: selected-value
+      options: options
+  style:
+    gap: space.stack.sm
