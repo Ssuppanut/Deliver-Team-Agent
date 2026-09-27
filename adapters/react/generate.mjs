@@ -33,6 +33,11 @@ class ReactRenderer extends RendererBase {
     const base = node.style
       ? Object.entries(node.style).map(([slot, token]) => `${STYLE_PROP[slot] ?? slot}: '${mapToken(token)}'`)
       : [];
+    // F-7 size slot: a dimension TOKEN drives width/height (never a raw px).
+    if (node.size) {
+      base.push(`width: '${mapToken(node.size)}'`, `height: '${mapToken(node.size)}'`);
+      this.express('size', { mechanism: 'width/height (dimension token)' });
+    }
     let spread = '';
     const v = this.variantData(node);
     if (v) {
@@ -50,6 +55,20 @@ class ReactRenderer extends RendererBase {
 
   idAttr(node) {
     return node.id ? ` id="${node.id}"` : '';
+  }
+
+  // F-4 orientation: WAI-ARIA semantic on the container (correct for separator).
+  orientationAttr(node) {
+    if (!node.orientation) return '';
+    this.express(`orientation=${node.orientation}`, { mechanism: `aria-orientation="${node.orientation}"` });
+    return ` aria-orientation="${node.orientation}"`;
+  }
+
+  // F-5 boolean-attribute binding: a caller boolean flag ref -> HTML `disabled`.
+  disabledAttr(node) {
+    if (!node.disabled) return '';
+    this.express('disabled', { mechanism: 'disabled={flag}' });
+    return ` disabled={${node.disabled}}`;
   }
 
   a11yAttrs(node) {
@@ -71,7 +90,7 @@ class ReactRenderer extends RendererBase {
 
   visitContainer(node, children) {
     const tag = node.as || 'div';
-    const open = `<${tag}${this.idAttr(node)}${this.a11yAttrs(node)}${this.styleAttr(node)}>`;
+    const open = `<${tag}${this.idAttr(node)}${this.a11yAttrs(node)}${this.orientationAttr(node)}${this.styleAttr(node)}>`;
     const lead = this.variantIcon(node);
     const inner = lead ? `${lead}\n${children}` : children;
     return `${open}\n${indent(inner, 2)}\n</${tag}>`;
@@ -95,7 +114,7 @@ class ReactRenderer extends RendererBase {
     const handler = node.onEvent ? ` onClick={${node.onEvent}}` : '';
     const label = node.label ? this.interp(node.label) : '';
     const icon = node.icon ? `<${this.icon(node.icon)} aria-hidden="true" />` : '';
-    return `<button type="button"${handler}${this.a11yAttrs(node)}${this.styleAttr(node)}>${icon}${label}</button>`;
+    return `<button type="button"${handler}${this.disabledAttr(node)}${this.a11yAttrs(node)}${this.styleAttr(node)}>${icon}${label}</button>`;
   }
 
   visitIcon(node) {
@@ -176,6 +195,11 @@ class ReactRenderer extends RendererBase {
       // Only point at the description while it is actually rendered.
       aria += invalid ? ` aria-describedby={${invalid} ? "${desc}" : undefined}` : ` aria-describedby="${desc}"`;
       this.express('a11y.describedBy', { mechanism: 'aria-describedby' });
+    }
+    // F-19 textarea: a multi-line text input renders as <textarea>.
+    if (i.multiline) {
+      this.express('input.multiline', { mechanism: '<textarea>' });
+      return `${labelEl}<textarea id="${id}"${value}${change}${aria}${this.a11yAttrs(node)}${this.styleAttr(node)} />`;
     }
     return `${labelEl}<input id="${id}" type="${i.inputType ?? 'text'}"${value}${change}${aria}${this.a11yAttrs(node)}${this.styleAttr(node)} />`;
   }

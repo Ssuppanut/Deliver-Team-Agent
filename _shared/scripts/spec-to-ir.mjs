@@ -40,6 +40,11 @@ function visit(node, tokens) {
   if (node.as) ir.as = node.as;
   if (node.id) ir.id = node.id;
   if (node.level) ir.level = node.level;
+  if (node.orientation) ir.orientation = node.orientation;
+  if (node.disabled) ir.disabled = node.disabled;
+  // `size` is a dimension TOKEN reference — collect it so token-guard validates
+  // it exists in the registry (and it renders as a token, never a literal).
+  if (node.size) { ir.size = node.size; tokens.add(node.size); }
   if (node.icon) { ir.icon = node.icon; tokens.add(node.icon); }
 
   for (const field of ['text', 'src', 'alt', 'href', 'label']) {

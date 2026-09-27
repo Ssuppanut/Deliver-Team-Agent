@@ -240,10 +240,10 @@ schema design pass later.
 | F-1 | **Fixed (B1.1)** | SwiftUI ref label stringified as its own name. |
 | F-2 | **Fixed (B1.1)** | Native adapters dropped `role`/`aria-live` from output. |
 | F-3 | **Fixed (F-3 pass)** | Conditional rendering shapes 1–3 (`el: conditional`: if / if-else / conditional-wrapping-iteration) on all 6 adapters; condition is a boolean flag, expression conditions refused. |
-| F-4 | Logged | No orientation / dimension axis (e.g. Divider vertical). |
-| F-5 | Logged | No boolean-attribute binding (e.g. Button `disabled`). |
+| F-4 | **Resolved (Phase H)** | `orientation` (horizontal/vertical) slot — web `aria-orientation` (semantic) + native layout axis (HStack/Row vs VStack/Column, RN `flexDirection`). Divider vertical renders on all 6; trait ledger-accounted. |
+| F-5 | **Resolved (Phase H)** | `disabled` boolean-attribute binding (a plain caller flag ref; expressions refused as `expression-boolean-attr`) — web/RN `disabled`, SwiftUI `.disabled()`, Compose `enabled = !flag`. Button disabled renders on all 6. |
 | F-6 | Logged (minor) | Variant icon bound to the state, not a free per-instance toggle (Badge). |
-| F-7 | Logged | No size slot (e.g. Spinner sizes). |
+| F-7 | **Resolved (Phase H)** | `size` slot referencing a **dimension token** (width/height; SwiftUI `.frame`, Compose `.size`). Hardcoded native sizes FAIL token-guard. Spinner sized from `space.6` on all 6. **Residual:** no dedicated `size.*` scale — existing `font.size.*`/`space.*` tokens are reused. |
 | F-8 | Logged (by design) | No animation primitive (shimmer / spin). |
 | F-9 | **Resolved — REFUSE (Phase B)** | Expression-driven variant discriminant is now refused by the orchestrator with an enum redirect (`expression-variant`). `native-code` gate stays as defense in depth. |
 | F-10 | **Fixed (Phase B)** | Added the first-class `el: icon` element; a standalone icon renders on all 6 via the icon-map, decorative by default / labeled when `a11y.label` set. |
@@ -1278,3 +1278,108 @@ survives; no new survivor, no regression.
 `P53` (a control with an inline error accounts describedBy + invalid on all 6,
 0 unaccounted; web emits real ARIA attrs; ledger gate passes). `verify-patches`
 → **53/53**.
+
+---
+
+# Phase H — Schema-expressiveness long-tail (F-4 / F-5 / F-7 / F-19 / F-25)
+
+With the control-state primitive and form inputs complete, this phase closes the
+remaining schema-expressiveness gaps so the ledger stays clean. Each item is a
+**leaf prop/slot addition** (schema + `declaredTraits` + per-adapter express),
+not a new renderer-base capability. Every addition is ledger-accounted (0
+unaccounted) and proven on all 6 adapters via the full hardened stack.
+
+## What shipped
+
+| Finding | Slot | Web | React Native | SwiftUI | Compose |
+|---|---|---|---|---|---|
+| **F-4** orientation | `orientation: horizontal\|vertical` | `aria-orientation` (semantic) | `flexDirection` axis | `HStack`/`VStack` axis | `Row`/`Column` axis |
+| **F-5** disabled | `disabled: <flag ref>` | `disabled` / `:disabled` | `disabled` + `accessibilityState` | `.disabled(flag)` | `enabled = !flag` |
+| **F-7** size | `size: <dimension token>` | `width`/`height` (var) | `width`/`height` (`tokens.*`) | `.frame(width:height:)` | `.size(DesignTokens.*)` |
+| **F-19** textarea | `input.multiline: true` | `<textarea>` | `<TextInput multiline>` | `TextField(axis: .vertical)` | `TextField(singleLine = false)` |
+
+Design principle held throughout: **no expressions** (F-9-consistent). `disabled`
+is a plain boolean flag ref — an expression as `disabled` is refused
+(`expression-boolean-attr`), exactly like the variant discriminant, the `when`
+condition, and the control-state bindings. `size` must be a **token** — a
+hardcoded native dimension FAILs token-guard (the F-21 enforcement).
+
+## Breadth matrix — Phase H proofs
+
+Cell legend as above (`✓` correct · `⚠` documented divergence).
+
+| Component | React | Vue | Svelte | RN | SwiftUI | Compose | Gates | Outcome | Notes |
+|---|---|---|---|---|---|---|---|---|---|
+| **Divider** (F-4) | ✓ | ✓ | ✓ | ✓ | ⚠ | ⚠ | 9/9 pass | **PASS** | `orientation: vertical` → web `role="separator" aria-orientation="vertical"`; RN `flexDirection: "column"`; SwiftUI `VStack` / Compose `Column` layout axis. `role=separator` remains a documented native divergence (unchanged). `orientation=vertical` expressed on all 6. |
+| **Button** (F-5) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 9/9 pass | **PASS** | `disabled: disabled` (flag ref) → `disabled={disabled}` / `:disabled` / RN `disabled + accessibilityState` / SwiftUI `.disabled(disabled)` / Compose `enabled = !disabled`. `disabled` trait expressed on all 6; an expression as `disabled` is refused. |
+| **Spinner** (F-7) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 9/9 pass | **PASS** | `size: space.6` → token-referenced width/height on all 6 (`.frame(width: DesignTokens.Space6…)`, `.size(DesignTokens.Space6)`, `tokens.space.6`). token-guard green (a hardcoded native size would FAIL). `size` expressed on all 6. |
+| **Textarea** (F-19) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 9/9 pass | **PASS** | `input.multiline: true` → web `<textarea>`, RN `<TextInput multiline>`, SwiftUI `TextField(axis: .vertical)`, Compose `TextField(singleLine = false)`. `input.multiline` expressed on all 6. Closes the F-19 textarea residual. |
+
+("Gates 9/9" = the seven prior gates + native-code + the ledger.)
+
+## Fired-gate proofs
+
+Orientation / disabled / size / multiline are all declared traits, so dropping
+any adapter's expression turns the ledger RED (unaccounted) — verified via the
+mutation harness (the trait-drop operator kills them). Additional targeted
+proofs:
+
+```
+# F-5 — an expression as `disabled` is REFUSED (F-9-consistent)
+disabled: "isBusy || n > 3"   → REFUSED  category=expression-boolean-attr
+disabled: "shouldDisable()"   → REFUSED  category=expression-boolean-attr
+disabled: "disabled"          → PASS     (plain flag ref)
+
+# F-7 — a hardcoded native size FAILs token-guard; a token reference passes
+size: space.6 (token)         → token-guard PASS  (.frame(width: DesignTokens.Space6…))
+(hardcoded .frame(width: 24)  → token-guard FAIL  hardcoded-dimension-native)
+```
+
+## Findings ledger — update
+
+| ID | Status | Note |
+|---|---|---|
+| **F-4** | **RESOLVED** | Orientation slot shipped (semantic `aria-orientation` on web + native layout axis). Divider vertical on all 6, ledger-accounted. |
+| **F-5** | **RESOLVED** | Boolean-attribute binding (`disabled`) shipped as a plain flag ref; expression-as-disabled refused. Button disabled on all 6, ledger-accounted. |
+| **F-7** | **RESOLVED (with residual)** | Size slot shipped as a **token-referenced** dimension. **Residual:** there is no dedicated `size.*` token scale yet, so existing `font.size.*` / `space.*` tokens are reused; a runtime size *scale* (enum→token map) is a natural extension but out of scope (the existing `variant` mechanism already covers per-value style tables). |
+| **F-19** | **RESOLVED (fully)** | `textarea` (multiline) shipped on all 6. The F-19 numeric-constraint portion was already resolved by the control-state primitive (F-16); this closes the textarea residual, so F-19 is now fully resolved. |
+| **F-25** | **Logged — not built (scope-locked outcome)** | Rich option children (icon / per-option `disabled`). Building it exceeds *leaf enrichment*: (1) a per-option **icon** is a **runtime** value (`opt.icon`), but the engine's icon idiom resolves icon tokens at **compile time** (the `usedIcons` import set) — a runtime icon breaks that idiom and needs a new capability; (2) HTML `<option>` and RN `Picker.Item` are **text-only** and cannot host an icon at all, so the Select presentation could never show it — only the radio presentation could, giving a non-uniform half-feature; (3) it forces changes to the F-23 option-children iteration. Per the phase's explicit scope-lock ("if it needs more than leaf enrichment … STOP and LOG — 'log it' is an acceptable outcome"), it is logged, not built. **Per-option `disabled`** is likewise logged: trivial and uniform for the radio presentation, but not expressible on RN `Picker.Item` (no per-item disabled) and unreliable on SwiftUI `Picker` tags — the same non-uniform-across-Select problem — so shipping it would be an inconsistent half-feature. Both are clean future design passes, not leaf additions. |
+
+## Regression pins
+
+- **P54** — orientation (F-4): Divider vertical renders `aria-orientation` on web
+  + layout axis on native across all 6; `orientation=vertical` expressed, 0
+  unaccounted.
+- **P55** — boolean-attr (F-5): Button `disabled` flag-ref renders the platform
+  disabled mechanism on all 6; an expression-as-disabled is refused, a plain flag
+  passes; `disabled` expressed.
+- **P56** — size (F-7): Spinner `size` renders as a token-referenced width/height
+  on all 6; token-guard stays green (a hardcoded native size would FAIL); `size`
+  expressed.
+- **P57** — textarea (F-19): a multiline text input renders the textarea variant
+  on all 6; `input.multiline` expressed, 0 unaccounted.
+
+`verify-patches` → **57/57** (was 53/53).
+
+## Mutation harness
+
+Corpus auto-discovers the new specs (divider / spinner / button / textarea).
+Baseline clean, **no new survivor, no regression** — only the known
+`state-by-color-only` (F-22) blind spot survives, exactly as before.
+
+## ci.mjs status under Phase H
+
+`rm -rf out/ && node _shared/scripts/ci.mjs` → **exit 0**. All in-scope features
+PASS, refused categories still refuse, `verify-patches` **57/57**, mutation
+testing green (only F-22 survives), `0` unaccounted across the ledger.
+
+## Scope — logged, not built
+
+Per the Phase-H scope lock, this change is **only** the four leaf slots (F-4 /
+F-5 / F-7 / F-19) plus the F-25 finding. It does **not**: accept expressions for
+the boolean-attribute or the selection idiom (flag/value refs only); allow
+arbitrary nested components in options or change the F-23 selection idiom;
+hardcode native sizes; build Layer 2 / the IR-ARIA migration / number formatting
+(F-12) / nested conditionals (F-13); weaken or remove any gate or the ledger; or
+touch agents / skills / workflow / AI-router. F-25 is logged for a future design
+pass.

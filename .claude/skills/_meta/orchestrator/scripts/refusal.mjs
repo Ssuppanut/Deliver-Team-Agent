@@ -64,6 +64,11 @@ function findBadCondition(node) {
   const vp = node.variant?.prop;
   if (typeof vp === 'string' && !PLAIN_DISCRIMINANT.test(vp.trim())) return { kind: 'variant', expr: vp.trim() };
   if (typeof node.when === 'string' && !PLAIN_FLAG.test(node.when.trim())) return { kind: 'condition', expr: node.when.trim() };
+  // F-5 boolean-attribute binding (`disabled`): must be a plain boolean flag
+  // ref, never a JS expression — the F-9 anti-pattern re-entering through the
+  // attribute. Refuse it, consistent with the variant / condition / state-binding
+  // refusals, and redirect to a computed boolean flag from the data layer.
+  if (typeof node.disabled === 'string' && !PLAIN_FLAG.test(node.disabled.trim())) return { kind: 'boolean-attr', expr: node.disabled.trim() };
   const badBinding = findBadBinding(node);
   if (badBinding) return { kind: 'binding', expr: badBinding.expr, slot: badBinding.slot };
   for (const c of node.children ?? []) { const hit = findBadCondition(c); if (hit) return hit; }
@@ -94,6 +99,14 @@ export function checkRefusal(spec) {
       category: 'expression-condition',
       reason: `a condition must be a plain boolean flag prop, not an embedded expression (found: \`${bad.expr}\`) — compute the boolean in the data layer`,
       redirect: "pass a boolean flag prop (e.g. when: isEmpty) computed in the data layer, not a JS expression",
+      reference: 'knowledge/pattern-library/references/expression-variant.md',
+    };
+  }
+  if (bad?.kind === 'boolean-attr') {
+    return {
+      category: 'expression-boolean-attr',
+      reason: `a boolean-attribute binding (disabled) must be a plain caller-supplied flag ref, not an embedded expression (found: \`${bad.expr}\`) — a computed attribute is presentation logic that belongs in the data layer`,
+      redirect: "pass a plain boolean flag prop (e.g. disabled: isBusy) computed in the data layer, not a JS expression",
       reference: 'knowledge/pattern-library/references/expression-variant.md',
     };
   }

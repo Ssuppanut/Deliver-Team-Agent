@@ -56,6 +56,12 @@ export class RendererBase {
     // Control-state primitive: a two-way state binding is a trait every adapter
     // must account for (express its native binding), or the ledger flags it.
     if (node.input?.state?.kind) t.push(`state=${node.input.state.kind}`);
+    // Schema-expressiveness long-tail (Phase H): each is a leaf trait every
+    // adapter must express (or the ledger flags it unaccounted).
+    if (node.orientation) t.push(`orientation=${node.orientation}`); // F-4
+    if (node.disabled) t.push('disabled');                           // F-5
+    if (node.size) t.push('size');                                   // F-7
+    if (node.input?.multiline) t.push('input.multiline');            // F-19
     return t;
   }
 
