@@ -24,24 +24,41 @@ class VueRenderer extends RendererBase {
   }
   styleAttr(node) {
     const v = this.variantData(node);
-    if (!node.style && !v) return '';
+    // F-7 size slot: a dimension TOKEN drives width/height (never a raw px).
+    if (node.size) this.express('size', { mechanism: 'width/height (dimension token)' });
+    if (!node.style && !v && !node.size) return '';
     if (!v) {
-      const entries = Object.entries(node.style)
-        .map(([slot, token]) => `${STYLE_PROP[slot] ?? slot}: ${mapToken(token)}`);
+      const entries = [
+        ...(node.style ? Object.entries(node.style).map(([slot, token]) => `${STYLE_PROP[slot] ?? slot}: ${mapToken(token)}`) : []),
+        ...(node.size ? [`width: ${mapToken(node.size)}`, `height: ${mapToken(node.size)}`] : []),
+      ];
       return ` style="${entries.join('; ')}"`;
     }
     // Dynamic :style object binding so the variant resolves at runtime.
     const base = node.style
       ? Object.entries(node.style).map(([slot, token]) => `'${STYLE_PROP[slot] ?? slot}': '${mapToken(token)}'`)
       : [];
+    const sizeObj = node.size ? [`'width': '${mapToken(node.size)}'`, `'height': '${mapToken(node.size)}'`] : [];
     const cases = Object.entries(v.styleCases)
       .map(([value, slots]) => {
         const inner = Object.entries(slots).map(([s, t]) => `'${STYLE_PROP[s] ?? s}': '${mapToken(t)}'`).join(', ');
         return `${JSON.stringify(value)}: { ${inner} }`;
       })
       .join(', ');
-    const inner = [...base, `...({ ${cases} })[${v.prop}]`].filter(Boolean).join(', ');
+    const inner = [...base, ...sizeObj, `...({ ${cases} })[${v.prop}]`].filter(Boolean).join(', ');
     return ` :style="{ ${inner} }"`;
+  }
+  // F-4 orientation: WAI-ARIA semantic on the container (correct for separator).
+  orientationAttr(node) {
+    if (!node.orientation) return '';
+    this.express(`orientation=${node.orientation}`, { mechanism: `aria-orientation="${node.orientation}"` });
+    return ` aria-orientation="${node.orientation}"`;
+  }
+  // F-5 boolean-attribute binding: a caller boolean flag ref -> bound `:disabled`.
+  disabledAttr(node) {
+    if (!node.disabled) return '';
+    this.express('disabled', { mechanism: ':disabled (bound flag)' });
+    return ` :disabled="${node.disabled}"`;
   }
   a11y(node) {
     const out = [];
@@ -65,7 +82,7 @@ class VueRenderer extends RendererBase {
     const tag = node.as || 'div';
     const lead = this.variantIcon(node);
     const inner = lead ? `${lead}\n${children}` : children;
-    return `<${tag}${this.idAttr(node)}${this.a11y(node)}${this.styleAttr(node)}>\n${indent(inner, 2)}\n</${tag}>`;
+    return `<${tag}${this.idAttr(node)}${this.a11y(node)}${this.orientationAttr(node)}${this.styleAttr(node)}>\n${indent(inner, 2)}\n</${tag}>`;
   }
   visitMedia(node) {
     return `<img${this.bind('src', node.src)}${this.bind('alt', node.alt ?? { kind: 'literal', value: '' })}${this.styleAttr(node)} />`;
@@ -81,7 +98,7 @@ class VueRenderer extends RendererBase {
   visitAction(node) {
     const handler = node.onEvent ? ` @click="${node.onEvent}"` : '';
     const icon = node.icon ? `<${this.icon(node.icon)} aria-hidden="true" />` : '';
-    return `<button type="button"${handler}${this.a11y(node)}${this.styleAttr(node)}>${icon}${node.label ? this.interp(node.label) : ''}</button>`;
+    return `<button type="button"${handler}${this.disabledAttr(node)}${this.a11y(node)}${this.styleAttr(node)}>${icon}${node.label ? this.interp(node.label) : ''}</button>`;
   }
   visitIcon(node) {
     const sym = this.icon(node.icon);
@@ -146,6 +163,11 @@ class VueRenderer extends RendererBase {
     let aria = '';
     if (invalid) { aria += ` :aria-invalid="!!${invalid}"`; this.express('a11y.invalid', { mechanism: 'aria-invalid' }); }
     if (desc) { aria += invalid ? ` :aria-describedby="${invalid} ? '${desc}' : undefined"` : ` aria-describedby="${desc}"`; this.express('a11y.describedBy', { mechanism: 'aria-describedby' }); }
+    // F-19 textarea: a multi-line text input renders as <textarea>.
+    if (i.multiline) {
+      this.express('input.multiline', { mechanism: '<textarea>' });
+      return `${labelEl}<textarea id="${id}"${model}${change}${aria}${this.a11y(node)}${this.styleAttr(node)}></textarea>`;
+    }
     return `${labelEl}<input id="${id}" type="${i.inputType ?? 'text'}"${model}${change}${aria}${this.a11y(node)}${this.styleAttr(node)} />`;
   }
   visitSlot(node) {

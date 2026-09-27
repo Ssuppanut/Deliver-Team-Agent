@@ -1,10 +1,11 @@
 component: Divider
-description: Horizontal separator rule drawn from a border-color token.
+description: Vertical separator rule drawn from a border-color token.
 category: layout
 tokens:
   - color.border.default
 root:
   el: container
   role: separator
+  orientation: vertical
   style:
     background: color.border.default

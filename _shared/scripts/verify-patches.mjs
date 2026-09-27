@@ -906,6 +906,86 @@ check('P53', 'control-state a11y: a control with an inline error accounts descri
   assert(checkLedger(ledger).ok, 'checkbox-error ledger gate must pass (describedBy/invalid accounted)');
 });
 
+// --- Schema-expressiveness long-tail (Phase H): P54-P57 ----------------------
+const DIVIDER = resolve(ROOT, '.claude/artifacts/divider/design-spec.yaml');
+const TEXTAREA = resolve(ROOT, '.claude/artifacts/textarea/design-spec.yaml');
+const assertTraitExpressed = (out, traitId) => {
+  for (const [ad, r] of Object.entries(out)) {
+    const e = r.ledger.find((x) => x.traitId === traitId);
+    assert(e && e.status === 'expressed' && e.mechanism, `${ad}: ${traitId} must be expressed with a mechanism`);
+    assert(!r.ledger.some((x) => x.status === 'unaccounted'), `${ad}: no trait may be unaccounted`);
+  }
+};
+
+// --- P54: F-4 orientation renders on all 6 (web aria-orientation, native axis)
+check('P54', 'orientation (F-4): Divider vertical renders aria-orientation on web + layout axis on native across all 6; trait expressed, 0 unaccounted', () => {
+  const out = genAll(DIVIDER, 'verify-divider');
+  const pat = {
+    react: /role="separator" aria-orientation="vertical"/,
+    vue: /role="separator" aria-orientation="vertical"/,
+    svelte: /role="separator" aria-orientation="vertical"/,
+    'react-native': /flexDirection: "column"/,
+    swiftui: /VStack\(alignment: \.leading/,
+    compose: /Column\(modifier = Modifier\.background\(DesignTokens\.ColorBorderDefault\)\)/,
+  };
+  for (const [ad, re] of Object.entries(pat)) assert(re.test(out[ad].code), `${ad}: orientation not rendered as expected`);
+  assertTraitExpressed(out, 'orientation=vertical');
+});
+
+// --- P55: F-5 boolean-attribute binding (disabled) on all 6 + expression refused
+check('P55', 'boolean-attr (F-5): Button disabled flag-ref renders the platform disabled mechanism on all 6; expression-as-disabled is refused, plain flag passes', () => {
+  const out = genAll(BUTTON, 'verify-button-disabled');
+  const pat = {
+    react: /disabled=\{disabled\}/,
+    vue: /:disabled="disabled"/,
+    svelte: /disabled=\{disabled\}/,
+    'react-native': /disabled=\{disabled\} accessibilityState=\{\{ disabled: disabled \}\}/,
+    swiftui: /\.disabled\(disabled\)/,
+    compose: /enabled = !disabled/,
+  };
+  for (const [ad, re] of Object.entries(pat)) assert(re.test(out[ad].code), `${ad}: disabled binding not found`);
+  assertTraitExpressed(out, 'disabled');
+  // Refusal: an expression as `disabled` is refused (F-9-consistent); a plain flag passes.
+  const mk = (disabled) => ({ category: 'input', root: { el: 'action', label: { kind: 'literal', value: 'x' }, onEvent: 'onClick', disabled } });
+  assert(checkRefusal(mk('isBusy || n > 3'))?.category === 'expression-boolean-attr', 'an expression as disabled must be refused');
+  assert(checkRefusal(mk('shouldDisable()'))?.category === 'expression-boolean-attr', 'a call as disabled must be refused');
+  assert(checkRefusal(mk('disabled')) === null, 'a plain boolean flag ref must pass');
+});
+
+// --- P56: F-7 size slot references a dimension TOKEN (no hardcoded native size)
+check('P56', 'size (F-7): Spinner size renders as a token-referenced width/height on all 6; token-guard stays green (no hardcoded native size), trait expressed', () => {
+  const out = genAll(SPINNER, 'verify-spinner-size');
+  const pat = {
+    react: /width: 'var\(--space-6\)', height: 'var\(--space-6\)'/,
+    vue: /width: var\(--space-6\); height: var\(--space-6\)/,
+    svelte: /width: var\(--space-6\); height: var\(--space-6\)/,
+    'react-native': /width: tokens\.space\.6, height: tokens\.space\.6/,
+    swiftui: /\.frame\(width: DesignTokens\.Space6, height: DesignTokens\.Space6\)/,
+    compose: /\.size\(DesignTokens\.Space6\)/,
+  };
+  for (const [ad, re] of Object.entries(pat)) assert(re.test(out[ad].code), `${ad}: size not rendered as a token dimension`);
+  assertTraitExpressed(out, 'size');
+  // The whole point of F-7: a size must be token-driven — token-guard must pass
+  // (a hardcoded native dimension would FAIL here).
+  const ir = specToIrFromFile(SPINNER);
+  assert(checkTokens(ir, out).ok, 'token-guard must pass for a token-referenced size (no hardcoded dimension)');
+});
+
+// --- P57: F-19 textarea (multiline) renders on all 6 -------------------------
+check('P57', 'textarea (F-19): a multiline text input renders the textarea variant on all 6; input.multiline expressed, 0 unaccounted', () => {
+  const out = genAll(TEXTAREA, 'verify-textarea');
+  const pat = {
+    react: /<textarea id="[^"]*" value=\{value\} onChange=/,
+    vue: /<textarea id="[^"]*" :value="value" @input=[^>]*><\/textarea>/,
+    svelte: /<textarea id="[^"]*" value=\{value\} on:input=\{[\s\S]*?\}><\/textarea>/,
+    'react-native': /<TextInput multiline value=\{value\} onChangeText=\{onChange\}/,
+    swiftui: /TextField\(label, text: Binding\(get: \{ value \}, set: \{ onChange\(\$0\) \}\), axis: \.vertical\)/,
+    compose: /TextField\(value = value, onValueChange = onChange, label = \{ Text\(label\) \}, singleLine = false\)/,
+  };
+  for (const [ad, re] of Object.entries(pat)) assert(re.test(out[ad].code), `${ad}: textarea variant not rendered as expected`);
+  assertTraitExpressed(out, 'input.multiline');
+});
+
 console.log('\n=== verify-patches ===');
 console.log(results.join('\n'));
 console.log(`\n${pass} passed, ${fail} failed\n`);

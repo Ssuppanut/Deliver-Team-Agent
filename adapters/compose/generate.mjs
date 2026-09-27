@@ -42,6 +42,11 @@ class ComposeRenderer extends RendererBase {
         else if (slot === 'radius') chain.push(`.clip(RoundedCornerShape(${t}))`);
       }
     }
+    // F-7 size slot: a dimension TOKEN drives .size() (never a literal `.dp`).
+    if (node.size) {
+      chain.push(`.size(${mapToken(node.size)})`);
+      this.express('size', { mechanism: '.size() (dimension token)' });
+    }
     const v = this.variantData(node);
     if (v) {
       const whenExpr = (slot, fallback) => {
@@ -119,7 +124,12 @@ class ComposeRenderer extends RendererBase {
     else if (sem) modArg = `modifier = Modifier${sem}`;
     const lead = this.variantIcon(node);
     const inner = lead ? `${lead}\n${children}` : children;
-    return `Column(${modArg}) {\n${indent(inner, 2)}\n}`;
+    // F-4 orientation: the container's main layout axis. horizontal -> Row,
+    // vertical (or unset) -> Column. Express the trait when the IR declares it.
+    const horizontal = node.orientation === 'horizontal';
+    if (node.orientation) this.express(`orientation=${node.orientation}`, { mechanism: `${horizontal ? 'Row' : 'Column'} layout axis` });
+    const layout = horizontal ? 'Row' : 'Column';
+    return `${layout}(${modArg}) {\n${indent(inner, 2)}\n}`;
   }
   visitMedia(node) {
     return `AsyncImage(model = ${this.strExpr(node.src)}, contentDescription = ${this.strExpr(node.alt ?? { kind: 'literal', value: '' })}${this._mod(node)})`;
@@ -152,7 +162,10 @@ class ComposeRenderer extends RendererBase {
     if (mod && sem) modArg = `, modifier = ${mod}${sem}`;
     else if (mod) modArg = `, modifier = ${mod}`;
     else if (sem) modArg = `, modifier = Modifier${sem}`;
-    return `Button(onClick = ${onClick}${modArg}) {\n  ${inner}\n}`;
+    // F-5 boolean-attribute binding: a caller boolean flag ref -> enabled = !flag.
+    let enabledArg = '';
+    if (node.disabled) { enabledArg = `, enabled = !${node.disabled}`; this.express('disabled', { mechanism: 'enabled = !flag' }); }
+    return `Button(onClick = ${onClick}${enabledArg}${modArg}) {\n  ${inner}\n}`;
   }
   visitIcon(node) {
     const sym = this.icon(node.icon);
@@ -263,6 +276,8 @@ class ComposeRenderer extends RendererBase {
     if (label) parts.push(`label = { Text(${label}) }`);
     if (node.a11y?.invalid) { parts.push(`isError = ${node.a11y.invalid} != null`); this.express('a11y.invalid', { mechanism: 'isError' }); }
     if (role) this.diverge(`role=${role}`, { reason: `no Compose Role for role "${role}" on a text field`, fallback: 'label conveys intent', waiver: `a11y-role-${role}` });
+    // F-19 textarea: a multi-line text field is a TextField with singleLine = false.
+    if (i.multiline) { parts.push('singleLine = false'); this.express('input.multiline', { mechanism: 'TextField(singleLine = false)' }); }
     const mod = this.modifierArg(node);
     if (mod) parts.push(mod);
     return `TextField(${parts.join(', ')})`;

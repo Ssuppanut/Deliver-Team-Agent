@@ -1,11 +1,13 @@
 component: Spinner
-description: Indeterminate busy indicator exposed as a polite status region.
+description: Indeterminate busy indicator exposed as a polite status region, sized from a dimension token.
 category: feedback
 tokens:
   - color.fg.muted
+  - space.6
 root:
   el: container
   role: status
+  size: space.6
   a11y:
     live: polite
   children:

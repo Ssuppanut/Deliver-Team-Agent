@@ -1,0 +1,16 @@
+component: Textarea
+description: Multi-line free text input (textarea) bound to a controlled value.
+category: input
+props:
+  - { name: value, type: string, required: true }
+  - { name: onChange, type: function, required: true }
+  - { name: label, type: string, required: true }
+tokens: []
+root:
+  el: input
+  label: { kind: ref, value: label }
+  input:
+    valueProp: value
+    changeProp: onChange
+    inputType: text
+    multiline: true

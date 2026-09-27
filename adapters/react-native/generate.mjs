@@ -26,6 +26,16 @@ class RNRenderer extends RendererBase {
     const base = node.style
       ? Object.entries(node.style).map(([slot, token]) => `${STYLE_PROP[slot] ?? slot}: ${mapToken(token)}`)
       : [];
+    // F-7 size slot: a dimension TOKEN drives width/height (never a raw number).
+    if (node.size) {
+      base.push(`width: ${mapToken(node.size)}`, `height: ${mapToken(node.size)}`);
+      this.express('size', { mechanism: 'width/height (dimension token)' });
+    }
+    // F-4 orientation: the container's main layout axis.
+    if (node.orientation) {
+      base.push(`flexDirection: ${JSON.stringify(node.orientation === 'horizontal' ? 'row' : 'column')}`);
+      this.express(`orientation=${node.orientation}`, { mechanism: 'flexDirection layout axis' });
+    }
     let spread = '';
     const v = this.variantData(node);
     if (v) {
@@ -84,13 +94,20 @@ class RNRenderer extends RendererBase {
   visitText(node) {
     return `<Text${this.a11yProps(node)}${this.style(node)}>${this.interp(node.text)}</Text>`;
   }
+  // F-5 boolean-attribute binding: a caller boolean flag ref -> Pressable
+  // `disabled` + the a11y disabled state.
+  disabledProps(node) {
+    if (!node.disabled) return '';
+    this.express('disabled', { mechanism: 'disabled + accessibilityState={{disabled}}' });
+    return ` disabled={${node.disabled}} accessibilityState={{ disabled: ${node.disabled} }}`;
+  }
   visitAction(node) {
     const press = node.onEvent ? ` onPress={${node.onEvent}}` : '';
     const icon = node.icon ? `<${this.icon(node.icon)} />` : '';
     // a11yProps accounts for an explicit accessibilityLabel / live on the button
     // (role is already fixed to "button" here). Without this the IR's a11y.label
     // was silently dropped — caught by the Lowering Ledger.
-    return `<Pressable accessibilityRole="button"${press}${this.a11yProps(node)}${this.style(node)}>\n  ${icon}<Text>${node.label ? this.interp(node.label) : ''}</Text>\n</Pressable>`;
+    return `<Pressable accessibilityRole="button"${press}${this.disabledProps(node)}${this.a11yProps(node)}${this.style(node)}>\n  ${icon}<Text>${node.label ? this.interp(node.label) : ''}</Text>\n</Pressable>`;
   }
   visitIcon(node) {
     const sym = this.icon(node.icon);
@@ -188,7 +205,10 @@ class RNRenderer extends RendererBase {
       if (r) { roleAttr = ` accessibilityRole="${r}"`; this.express(`role=${role}`, { mechanism: `accessibilityRole="${r}"` }); }
       else this.diverge(`role=${role}`, { reason: `no React Native accessibilityRole for "${role}"`, fallback: 'label', waiver: `a11y-role-${role}` });
     }
-    return `${labelEl}<TextInput${value}${change}${a11yLabel}${invalidAttr}${roleAttr}${this.style(node)} />`;
+    // F-19 textarea: a multi-line text input is a multiline TextInput.
+    let multiline = '';
+    if (i.multiline) { multiline = ' multiline'; this.express('input.multiline', { mechanism: '<TextInput multiline>' }); }
+    return `${labelEl}<TextInput${multiline}${value}${change}${a11yLabel}${invalidAttr}${roleAttr}${this.style(node)} />`;
   }
   visitSlot(node) {
     const name = node.label?.value ?? 'children';

@@ -70,6 +70,28 @@ definitions:
         enum: [container, media, heading, text, action, link, input, slot, icon, conditional]
       role: { type: string }
       as: { type: string, description: "Optional semantic tag hint (e.g. section, article)." }
+      orientation:
+        type: string
+        enum: [horizontal, vertical]
+        description: >
+          Layout / semantic orientation of the element. On web a role-bearing
+          element also carries the semantic aria-orientation; every platform
+          conveys it as the container's main layout axis (row = horizontal,
+          column = vertical).
+      size:
+        type: string
+        description: >
+          Dimension token name (e.g. font.size.lg, space.6) driving the
+          element's width/height. MUST be a token reference — a hardcoded native
+          size is rejected by token-guard. There is no dedicated size.* scale
+          yet, so existing font.size.* / space.* tokens are reused.
+      disabled:
+        type: string
+        description: >
+          Boolean-attribute binding: the name of a caller-supplied boolean flag
+          prop that disables the control (el=action). Must be a plain flag ref,
+          never a JS expression (an expression is refused, like the F-9 variant
+          discriminant and the control-state binding).
       id:
         type: string
         description: >
@@ -119,6 +141,13 @@ definitions:
           valueProp: { type: string }
           changeProp: { type: string }
           inputType: { type: string, enum: [text, number, email, password, checkbox] }
+          multiline:
+            type: boolean
+            description: >
+              Textarea variant of a text input (F-19). When true a plain text
+              input renders as a multi-line control (web <textarea>, RN multiline
+              TextInput, SwiftUI TextField axis: .vertical, Compose singleLine =
+              false). Applies to plain text inputs, not to control-state kinds.
           state:
             type: object
             description: >

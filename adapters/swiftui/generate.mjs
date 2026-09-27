@@ -42,6 +42,11 @@ class SwiftUIRenderer extends RendererBase {
         if (MODIFIER[slot]) out.push(`\n  ${MODIFIER[slot](mapToken(token))}`);
       }
     }
+    // F-7 size slot: a dimension TOKEN drives .frame(width:height:) (never a literal).
+    if (node.size) {
+      out.push(`\n  .frame(width: ${mapToken(node.size)}, height: ${mapToken(node.size)})`);
+      this.express('size', { mechanism: '.frame(width:height:) (dimension token)' });
+    }
     const v = this.variantData(node);
     if (v) {
       // .foregroundColor cascades to child Text in SwiftUI, so a container-level
@@ -92,10 +97,17 @@ class SwiftUIRenderer extends RendererBase {
       .join(', ');
     return `Image(systemName: ([${dict}][${safe(v.prop)}] ?? ""))\n  .accessibilityHidden(true)`;
   }
+  // F-4 orientation: the container's main layout axis. horizontal -> HStack,
+  // vertical (or unset) -> VStack. Express the trait when the IR declares it.
   visitContainer(node, children) {
     const lead = this.variantIcon(node);
     const inner = lead ? `${lead}\n${children}` : children;
-    return `VStack(alignment: .leading, spacing: 8) {\n${indent(inner, 2)}\n}${this.modifiers(node)}${this.a11y(node)}`;
+    const horizontal = node.orientation === 'horizontal';
+    if (node.orientation) this.express(`orientation=${node.orientation}`, { mechanism: `${horizontal ? 'HStack' : 'VStack'} layout axis` });
+    const stack = horizontal
+      ? `HStack(alignment: .center, spacing: 8)`
+      : `VStack(alignment: .leading, spacing: 8)`;
+    return `${stack} {\n${indent(inner, 2)}\n}${this.modifiers(node)}${this.a11y(node)}`;
   }
   visitMedia(node) {
     const url = node.src.kind === 'literal' ? JSON.stringify(String(node.src.value)) : safe(node.src.value);
@@ -108,12 +120,18 @@ class SwiftUIRenderer extends RendererBase {
   visitText(node) {
     return `${this.textExpr(node.text)}${this.modifiers(node)}${this.a11y(node)}`;
   }
+  // F-5 boolean-attribute binding: a caller boolean flag ref -> .disabled().
+  disabledMod(node) {
+    if (!node.disabled) return '';
+    this.express('disabled', { mechanism: '.disabled(flag)' });
+    return `\n  .disabled(${safe(node.disabled)})`;
+  }
   visitAction(node) {
     const action = node.onEvent ? safe(node.onEvent) : '{}';
     const label = node.icon
       ? `Label(${this.plain(node.label)}, systemImage: "${this.icon(node.icon)}")`
       : this.textExpr(node.label);
-    return `Button(action: ${action}) {\n  ${label}\n}${this.modifiers(node)}${this.a11y(node)}`;
+    return `Button(action: ${action}) {\n  ${label}\n}${this.disabledMod(node)}${this.modifiers(node)}${this.a11y(node)}`;
   }
   visitIcon(node) {
     const sym = this.icon(node.icon);
@@ -215,7 +233,10 @@ class SwiftUIRenderer extends RendererBase {
       // A generic role on a text field has no SwiftUI trait — account for it honestly.
       this.diverge(`role=${role}`, { reason: `no direct SwiftUI trait for role "${role}"`, fallback: 'label conveys intent', waiver: `a11y-role-${role}` });
     }
-    return `TextField(${title}, text: ${binding})${this.modifiers(node)}`;
+    // F-19 textarea: a multi-line TextField grows vertically (axis: .vertical).
+    let axis = '';
+    if (i.multiline) { axis = ', axis: .vertical'; this.express('input.multiline', { mechanism: 'TextField(axis: .vertical)' }); }
+    return `TextField(${title}, text: ${binding}${axis})${this.modifiers(node)}`;
   }
   visitSlot() { return 'content'; }
   wrapConditional(node, rendered) {
