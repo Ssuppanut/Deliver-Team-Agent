@@ -18,9 +18,33 @@ const RESERVED = new Set(['default', 'class', 'struct', 'enum', 'protocol', 'ret
 const safe = (id) => (RESERVED.has(id) ? `\`${id}\`` : id);
 
 class SwiftUIRenderer extends RendererBase {
+  // F-12 number formatting — NumberFormatter (locale / currency / grouping /
+  // rounding / precision compose into one formatter). Extends the F-11 precision
+  // path with the same NumberFormatter construction, now fully configurable.
+  formatNumber(fmt) {
+    const sv = (o) => (o.kind === 'literal' ? JSON.stringify(String(o.value)) : safe(o.value));
+    const boolv = (o) => (o.kind === 'literal' ? String(!!o.value) : safe(o.value));
+    const intv = (o) => (o.kind === 'literal' ? `${parseInt(o.value, 10)}` : `Int(${safe(o.value)})`);
+    const num = fmt.value.kind === 'literal' ? `${fmt.value.value}` : safe(fmt.value.value);
+    const ROUND = { round: '.halfUp', floor: '.floor', ceil: '.ceiling' };
+    const lines = ['let f = NumberFormatter()', `f.numberStyle = .${fmt.style === 'currency' ? 'currency' : 'decimal'}`];
+    if (fmt.locale) lines.push(`f.locale = Locale(identifier: ${sv(fmt.locale)})`);
+    if (fmt.style === 'currency' && fmt.currency) lines.push(`f.currencyCode = ${sv(fmt.currency)}`);
+    if (fmt.grouping) lines.push(`f.usesGroupingSeparator = ${boolv(fmt.grouping)}`);
+    if (fmt.rounding) {
+      const r = fmt.rounding;
+      lines.push(`f.roundingMode = ${r.kind === 'literal'
+        ? (ROUND[r.value] ?? '.halfUp')
+        : `${safe(r.value)} == "floor" ? .floor : ${safe(r.value)} == "ceil" ? .ceiling : .halfUp`}`);
+    }
+    if (fmt.precision) { const p = intv(fmt.precision); lines.push(`f.minimumFractionDigits = ${p}`, `f.maximumFractionDigits = ${p}`); }
+    lines.push(`return f.string(from: NSNumber(value: ${num})) ?? String(${num})`);
+    return `Text({ ${lines.join('; ')} }())`;
+  }
   textExpr(vr) {
     if (!vr) return 'Text("")';
     if (vr.kind === 'literal') return `Text(${JSON.stringify(String(vr.value))})`;
+    if (vr.kind === 'format') { this.express('number-format', { mechanism: 'NumberFormatter' }); return this.formatNumber(this.numberFormat(vr)); }
     if (vr.kind === 'ref') return `Text(String(describing: ${safe(vr.value)}))`;
     // F-11 (precision-only): `<num>.toFixed(<precision>)` -> a real native decimal
     // formatter with `precision` fraction digits. No locale / grouping / currency

@@ -248,7 +248,7 @@ schema design pass later.
 | F-9 | **Resolved — REFUSE (Phase B)** | Expression-driven variant discriminant is now refused by the orchestrator with an enum redirect (`expression-variant`). `native-code` gate stays as defense in depth. |
 | F-10 | **Fixed (Phase B)** | Added the first-class `el: icon` element; a standalone icon renders on all 6 via the icon-map, decorative by default / labeled when `a11y.label` set. |
 | F-11 | **Fixed (Phase B, precision-only)** | `X.toFixed(Y)` maps to SwiftUI `NumberFormatter` / Compose `NumberFormat` with `min=max fractionDigits = precision`, grouping off. Web/RN unchanged. |
-| F-12 | **Logged (Phase B) — deferred** | Locale (decimal separator / thousands grouping), currency symbol handling/positioning, and rounding-mode configuration for number formatting. A separate future number-format pass; explicitly out of scope for the precision-only F-11 fix. |
+| F-12 | **RESOLVED (locale + currency + grouping + rounding)** | Number formatting is complete: on top of F-11 precision, a `kind: format` value composes locale, currency, grouping, and rounding-mode into ONE native formatter per adapter (Intl.NumberFormat / NumberFormatter / java.text.NumberFormat). Each option is a static literal or a plain prop ref (runtime switching); an expression as any option is refused (F-9). All three round/floor/ceil modes exist on all platforms — **no divergence**. **Residual (logged, out of scope):** custom pattern strings (`#,##0.00`) — native formatter options only; and date/time formatting (**F-26**, new). See the F-12 section below. |
 | F-13 | **RESOLVED (nested / else-if / per-item, depth-capped)** | All three deferred conditional shapes now ship: nested conditional, else-if chain, and per-item conditional (boolean field-access on the loop item). Total conditional nesting is capped at 3 levels (nested + else-if + per-item counted together); deeper nesting is refused with an extract-subcomponent redirect. Per-item conditions are field-access only — a per-item comparison/logic is refused (F-9-consistent). **Residual (by design, not a gap):** nesting beyond depth 3 is refused, not generated. See the F-13 section below. |
 
 Scope for Batch 2 was strictly authoring 4 component specs and recording results.
@@ -1540,3 +1540,153 @@ the depth cap (refused); the three F-3 base shapes are unchanged (P36–P39 stil
 pass); no Layer 2, IR/ARIA migration, number formatting (F-12), or rich options
 (F-25); no gate or the ledger weakened or removed; no changes to agents / skills /
 workflow / AI-router.
+
+---
+
+# F-12 — Number formatting: locale / currency / grouping / rounding
+
+F-11 shipped precision-only formatting (`X.toFixed(Y)` → a native decimal formatter)
+and deferred the rest to **F-12**. This phase completes number formatting by
+**extending that precision path** — not rewriting it — into a first-class
+`kind: format` value that composes precision plus the four remaining dimensions
+into **one native formatter call per adapter**.
+
+## Authoring — `kind: format`
+
+```yaml
+text:
+  kind: format
+  value: amount              # number source: a numeric literal or a plain prop ref
+  format:
+    style: currency          # currency | decimal (static enum)
+    currency: THB            # literal, OR { kind: ref, value: currencyProp }
+    locale: th-TH            # literal, OR { kind: ref, value: userLocale }
+    grouping: true           # boolean literal, OR a plain ref
+    rounding: round          # round | floor | ceil literal, OR a plain ref
+    precision: 2             # integer literal (min=max fraction digits), OR a plain ref
+```
+
+**Static vs prop-ref.** Every option is a **static literal** (`currency: THB`) or a
+**plain prop ref** (`locale: { kind: ref, value: userLocale }`) for runtime
+switching. An **expression** as any option — or as the number source — is
+**refused** (`expression-number-format`, F-9-consistent), redirecting to a literal
+or a plain ref computed in the data layer. F-11's `.toFixed(precision)` expr path
+is untouched (a precision-only shortcut); `kind: format` is the full descriptor.
+
+## Native mapping — one formatter call per adapter
+
+| Dimension | Web + RN (`Intl.NumberFormat`) | SwiftUI (`NumberFormatter`) | Compose (`java.text.NumberFormat`) |
+|---|---|---|---|
+| style | `style: 'currency'\|'decimal'` | `numberStyle = .currency/.decimal` | `getCurrencyInstance()` / `getNumberInstance()` |
+| currency | `currency: 'THB'` | `currencyCode = "THB"` | `currency = Currency.getInstance("THB")` |
+| locale | 1st arg `'th-TH'` / `undefined` | `locale = Locale(identifier: "th-TH")` | `forLanguageTag("th-TH")` |
+| grouping | `useGrouping: true/false` | `usesGroupingSeparator` | `isGroupingUsed` |
+| rounding | `roundingMode: 'halfExpand'/'floor'/'ceil'` | `roundingMode = .halfUp/.floor/.ceiling` | `RoundingMode.HALF_UP/FLOOR/CEILING` |
+| precision (F-11) | `min/maxFractionDigits` | `min/maxFractionDigits` | `min/maxFractionDigits` |
+
+A rounding **prop-ref** carries the neutral `round`/`floor`/`ceil` token and each
+adapter maps it inline (web object-index, Swift ternary, Compose `when`), so
+rounding stays cross-platform without leaking a platform-specific mode string.
+
+### Sample output (PriceThb — THB, th-TH, grouping on, round, 2 digits)
+
+```
+web/RN   new Intl.NumberFormat("th-TH", { style: "currency", currency: "THB", useGrouping: true,
+                                          roundingMode: "halfExpand", minimumFractionDigits: 2,
+                                          maximumFractionDigits: 2 }).format(amount)
+SwiftUI  { let f = NumberFormatter(); f.numberStyle = .currency; f.locale = Locale(identifier: "th-TH");
+           f.currencyCode = "THB"; f.usesGroupingSeparator = true; f.roundingMode = .halfUp;
+           f.minimumFractionDigits = 2; f.maximumFractionDigits = 2;
+           return f.string(from: NSNumber(value: amount)) ?? String(amount) }()
+Compose  java.text.NumberFormat.getCurrencyInstance(java.util.Locale.forLanguageTag("th-TH"))
+           .apply { currency = java.util.Currency.getInstance("THB"); isGroupingUsed = true;
+                    roundingMode = java.math.RoundingMode.HALF_UP;
+                    minimumFractionDigits = 2; maximumFractionDigits = 2 }.format(amount)
+```
+
+## Breadth matrix — F-12 proofs
+
+| Component | React | Vue | Svelte | RN | SwiftUI | Compose | Gates | Outcome | Notes |
+|---|---|---|---|---|---|---|---|---|---|
+| **PriceThb** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 9/9 pass | **PASS** | currency (THB) + locale (th-TH) + grouping + round + 2-digit precision compose into one native formatter on all 6; `number-format` expressed, 0 unaccounted. |
+| **PriceLocale** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 9/9 pass | **PASS** | currency (USD) with a **runtime locale prop-ref** — the `userLocale` prop drives the formatter locale on all 6 (bound, not stringified). |
+| **DecimalFloor** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 9/9 pass | **PASS** | decimal style, **grouping OFF**, **floor** rounding, 0 fraction digits, de-DE locale — every dimension applied natively on all 6. |
+
+("Gates 9/9" = the seven prior gates + native-code + the ledger.)
+
+## Divergence
+
+**None.** Locale, currency, grouping, and all three rounding modes
+(round/floor/ceil) are expressible by every platform's native formatter, so every
+option is `express`ed on all 6 — no `diverge`, no waiver required.
+
+## Gate / defense interaction
+
+- **Ledger 0-unaccounted** — `number-format` is a declared trait (a `kind: format`
+  value on a text/label node); each adapter `express`es it via its native
+  formatter, so a silent drop is structurally impossible.
+- **native-code does NOT over-flag** — `NumberFormatter` / `java.text.NumberFormat`
+  are native constructs, not un-evaluated JS; the gate targets a non-plain
+  `variant.prop`, which a formatter never is. Verified: native output carries **no
+  `Intl`**, web output carries **no native formatter** (P63).
+- **token-guard does NOT misfire** — currency codes (`"THB"`) and locale tags
+  (`"th-TH"`) are formatter config, not design tokens; fraction-digit counts sit on
+  `minimumFractionDigits`, not a dimension style prop. token-guard stays green (P63).
+- **Mutation harness** corpus grew (three specs); baseline clean, **no new
+  survivor, no regression** — only the known `state-by-color-only` (F-22) advisory
+  blind spot survives.
+
+## Proofs (fired)
+
+```
+currency + precision + grouping + round  → composed on all 6 (PriceThb)
+locale swap (static th-TH vs de-DE)      → drives separators via the formatter locale
+locale as prop-ref (userLocale)          → binds the prop on all 6 (PriceLocale)
+grouping OFF + floor + decimal           → applied natively on all 6 (DecimalFloor)
+expression as locale (nav.language)      → REFUSED  expression-number-format
+non-plain ref currency (code.toUpper())  → REFUSED  expression-number-format
+expression number source (a + b)         → REFUSED  expression-number-format
+static currency THB / plain-ref locale   → generate
+F-11 .toFixed(precision)                 → still native formatters (unchanged)
+```
+
+## Findings
+
+- **F-12 — RESOLVED.** Locale, currency, grouping, and rounding ship on all 6 via
+  each platform's native formatter, composed with F-11 precision into one call;
+  ledger-accounted, native-code / token-guard clean, no divergence.
+- **F-26 — Logged (new, out of scope): date/time formatting.** This phase is
+  number-only. Date/time (calendars, relative time, skeletons) is a separate native
+  API surface (`Intl.DateTimeFormat` / `DateFormatter` / `SimpleDateFormat`) and a
+  distinct future pass.
+- **Residual (by design, not a gap):** custom format **pattern strings**
+  (`#,##0.00`) are out of scope — native formatter *options* only, per the scope
+  lock.
+
+## Regression pins
+
+- **P63** — currency composes style+currency+locale+grouping+rounding+precision into
+  one native formatter on all 6; ledger accounted; no cross-platform leak;
+  native-code + token-guard do not misfire.
+- **P64** — a static locale and a caller-supplied prop-ref locale both drive the
+  formatter locale on all 6 (bound, not stringified).
+- **P65** — grouping OFF + floor rounding + decimal style apply natively on all 6.
+- **P66** — an expression as locale / currency / number-source is refused
+  (`expression-number-format`); static literal + plain prop-ref pass; the F-11
+  `.toFixed` precision path is unchanged.
+
+`verify-patches` → **66/66** (was 62/62).
+
+## ci.mjs status under F-12
+
+`rm -rf out/ && node _shared/scripts/ci.mjs` → **exit 0**. All in-scope features
+PASS (including the three number-format specs), refused categories still refuse,
+`verify-patches` 66/66, mutation testing green (only F-22 survives), 0 unaccounted.
+
+## Scope — what this did not touch
+
+Per the F-12 scope lock: no custom format pattern strings (native options only); no
+date/time formatting (logged as F-26); no expressions as locale/currency/grouping/
+rounding (literal or plain ref only, F-9); the F-11 precision path was extended, not
+rewritten; no Layer 2 / IR-ARIA migration / F-25; no gate or the ledger weakened;
+no changes to agents / skills / workflow / AI-router.

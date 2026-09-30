@@ -62,7 +62,35 @@ export class RendererBase {
     if (node.disabled) t.push('disabled');                           // F-5
     if (node.size) t.push('size');                                   // F-7
     if (node.input?.multiline) t.push('input.multiline');            // F-19
+    // F-12 number formatting: a formatted value is a trait every adapter must
+    // express via its native formatter (or the ledger flags a silent drop).
+    for (const f of ['text', 'label']) if (node[f]?.kind === 'format') t.push('number-format');
     return t;
+  }
+
+  /**
+   * Normalize a number-format value (kind=format, F-11 precision + F-12 locale /
+   * currency / grouping / rounding). Each option is a valueRef { kind, value }
+   * (a static literal or a plain prop ref) or undefined. Adapters read this and
+   * emit ONE native formatter call (Intl / NumberFormatter / NumberFormat).
+   * @returns {null | { value, style, currency, locale, grouping, rounding, precision }}
+   */
+  numberFormat(vr) {
+    if (!vr || vr.kind !== 'format') return null;
+    const f = vr.format || {};
+    // A scalar is a literal; a { kind, value } object is a (plain) ref.
+    const opt = (x) => (x == null ? undefined
+      : (typeof x === 'object' && 'kind' in x ? { kind: x.kind, value: x.value } : { kind: 'literal', value: x }));
+    return {
+      // The number source: a numeric literal, else a prop ref.
+      value: typeof vr.value === 'number' ? { kind: 'literal', value: vr.value } : { kind: 'ref', value: vr.value },
+      style: f.style === 'currency' ? 'currency' : 'decimal',
+      currency: opt(f.currency),
+      locale: opt(f.locale),
+      grouping: opt(f.grouping),
+      rounding: opt(f.rounding),   // 'round' | 'floor' | 'ceil'
+      precision: opt(f.precision),
+    };
   }
 
   /**
@@ -76,6 +104,30 @@ export class RendererBase {
     if (!s) return null;
     const i = node.input;
     return { kind: s.kind, value: i.valueProp, change: i.changeProp, min: s.min, max: s.max, step: s.step, options: s.options };
+  }
+
+  /**
+   * Build the JS `Intl.NumberFormat(...).format(...)` expression for a normalized
+   * number-format descriptor. Shared by every web adapter and React Native (all
+   * have a native Intl). Precision + the four F-12 dimensions compose into ONE
+   * formatter call. Pure string builder — the caller records the ledger trait.
+   */
+  intlFormatExpr(fmt) {
+    // literal -> a JS literal (number/string/bool via JSON); ref -> the identifier.
+    const jsv = (o) => (o.kind === 'literal' ? JSON.stringify(o.value) : String(o.value));
+    const ROUND = { round: 'halfExpand', floor: 'floor', ceil: 'ceil' };
+    const opts = [`style: ${JSON.stringify(fmt.style)}`];
+    if (fmt.style === 'currency' && fmt.currency) opts.push(`currency: ${jsv(fmt.currency)}`);
+    if (fmt.grouping) opts.push(`useGrouping: ${jsv(fmt.grouping)}`);
+    if (fmt.rounding) {
+      const rm = fmt.rounding.kind === 'literal'
+        ? JSON.stringify(ROUND[fmt.rounding.value] ?? 'halfExpand')
+        : `({ round: 'halfExpand', floor: 'floor', ceil: 'ceil' }[${fmt.rounding.value}])`;
+      opts.push(`roundingMode: ${rm}`);
+    }
+    if (fmt.precision) opts.push(`minimumFractionDigits: ${jsv(fmt.precision)}, maximumFractionDigits: ${jsv(fmt.precision)}`);
+    const locale = fmt.locale ? jsv(fmt.locale) : 'undefined';
+    return `new Intl.NumberFormat(${locale}, { ${opts.join(', ')} }).format(${jsv(fmt.value)})`;
   }
 
   /** Account for a trait: this adapter emitted it via a real platform mechanism. */

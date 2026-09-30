@@ -57,8 +57,32 @@ definitions:
     additionalProperties: false
     required: [kind, value]
     properties:
-      kind: { type: string, enum: [literal, ref, expr] }
+      kind: { type: string, enum: [literal, ref, expr, format] }
       value: {}
+      format:
+        $ref: "#/definitions/numberFormat"
+        description: >
+          Number-formatting descriptor (kind=format only). `value` is the number
+          source (a numeric literal or a plain prop ref). Precision (F-11) plus
+          the four F-12 dimensions compose into one native formatter call per
+          adapter (Intl.NumberFormat / NumberFormatter / java.text.NumberFormat).
+
+  numberFormat:
+    type: object
+    additionalProperties: false
+    description: >
+      Native number-formatter options (F-11 precision + F-12 locale / currency /
+      grouping / rounding). Each option is a STATIC literal or a plain prop ref
+      ({ kind: ref, value: <prop> }) for runtime switching — never an expression
+      (an expression as any option is refused, F-9-consistent). Only native
+      formatter options are supported; custom pattern strings are out of scope.
+    properties:
+      style: { type: string, enum: [decimal, currency], description: "Formatter style; defaults to decimal." }
+      currency: { description: "ISO 4217 code (currency style): a literal (e.g. THB) or a plain prop ref." }
+      locale: { description: "BCP-47 locale tag: a literal (e.g. th-TH) or a plain prop ref; omitted = platform default." }
+      grouping: { description: "Thousands grouping on/off: a boolean literal or a plain prop ref." }
+      rounding: { description: "Rounding mode: literal round | floor | ceil, or a plain prop ref." }
+      precision: { description: "Fraction digits (min=max): an integer literal or a plain prop ref." }
 
   element:
     type: object

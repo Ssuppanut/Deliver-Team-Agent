@@ -1091,6 +1091,85 @@ check('P62', 'conditional condition (F-13): a per-item boolean field-access pass
   assert(checkRefusal(bare('isEmpty')) === null, 'a plain boolean flag condition must still pass');
 });
 
+// --- F-12 number formatting: locale / currency / grouping / rounding (P63-P66) -
+const PRICE_THB = EX('price-thb.spec.yaml');
+const PRICE_LOCALE = EX('price-locale.spec.yaml');
+const DECIMAL_FLOOR = EX('decimal-floor.spec.yaml');
+const fmtGenAll = (spec, feat) => ({
+  react: generateReact(spec, feat), vue: generateVue(spec, feat), svelte: generateSvelte(spec, feat),
+  'react-native': generateReactNative(spec, feat), swiftui: generateSwiftUI(spec, feat), compose: generateCompose(spec, feat),
+});
+const assertFmtExpressed = (out) => {
+  for (const [ad, r] of Object.entries(out)) {
+    const e = r.ledger.find((x) => x.traitId === 'number-format');
+    assert(e && e.status === 'expressed' && e.mechanism, `${ad}: number-format must be expressed with a mechanism`);
+    assert(!r.ledger.some((x) => x.status === 'unaccounted'), `${ad}: no trait may be unaccounted`);
+  }
+};
+
+// --- P63: currency format composes (symbol + locale + grouping + rounding + precision) on all 6
+check('P63', 'number-format (F-12): a currency amount composes style+currency+locale+grouping+rounding+precision into ONE native formatter on all 6; ledger accounted; no cross-platform leak', () => {
+  const out = fmtGenAll(PRICE_THB, 'verify-price-thb');
+  const web = /new Intl\.NumberFormat\("th-TH", \{ style: "currency", currency: "THB", useGrouping: true, roundingMode: "halfExpand", minimumFractionDigits: 2, maximumFractionDigits: 2 \}\)\.format\(amount\)/;
+  for (const ad of ['react', 'vue', 'svelte', 'react-native']) assert(web.test(out[ad].code), `${ad}: Intl currency formatter not composed`);
+  const sw = out.swiftui.code;
+  assert(/f\.numberStyle = \.currency/.test(sw) && /f\.currencyCode = "THB"/.test(sw) && /f\.locale = Locale\(identifier: "th-TH"\)/.test(sw)
+    && /f\.usesGroupingSeparator = true/.test(sw) && /f\.roundingMode = \.halfUp/.test(sw) && /f\.minimumFractionDigits = 2/.test(sw),
+    'swiftui: NumberFormatter must compose currency+locale+grouping+rounding+precision');
+  const cp = out.compose.code;
+  assert(/getCurrencyInstance\(java\.util\.Locale\.forLanguageTag\("th-TH"\)\)/.test(cp) && /currency = java\.util\.Currency\.getInstance\("THB"\)/.test(cp)
+    && /isGroupingUsed = true/.test(cp) && /roundingMode = java\.math\.RoundingMode\.HALF_UP/.test(cp) && /minimumFractionDigits = 2/.test(cp),
+    'compose: NumberFormat must compose currency+locale+grouping+rounding+precision');
+  assertFmtExpressed(out);
+  // Native uses native formatters (no Intl); web uses Intl (no native formatters) — no leak.
+  for (const ad of ['swiftui', 'compose']) assert(!/Intl\.NumberFormat/.test(out[ad].code), `${ad}: must not emit Intl`);
+  for (const ad of ['react', 'vue', 'svelte', 'react-native']) assert(!/NumberFormatter|java\.text\.NumberFormat/.test(out[ad].code), `${ad}: must not emit a native formatter`);
+  // native-code + token-guard must not misfire on formatter config (currency/locale are not tokens).
+  const ir = specToIrFromFile(PRICE_THB);
+  assert(checkNativeExprLeak(ir, out).ok, 'native-code must not flag native formatter constructs');
+  assert(checkTokens(ir, out).ok, 'token-guard must not misfire on currency/locale formatter config');
+});
+
+// --- P64: locale — a static locale AND a prop-ref locale both drive the formatter on all 6
+check('P64', 'number-format (F-12): a static locale and a caller-supplied prop-ref locale both drive the formatter locale on all 6', () => {
+  const stat = fmtGenAll(PRICE_THB, 'verify-loc-static');
+  const ref = fmtGenAll(PRICE_LOCALE, 'verify-loc-ref');
+  // static: locale literal appears; prop-ref: the prop name (unquoted) drives the locale.
+  assert(/Intl\.NumberFormat\("th-TH"/.test(stat.react.code), 'react: static locale literal must appear');
+  const refPat = {
+    react: /Intl\.NumberFormat\(userLocale,/, vue: /Intl\.NumberFormat\(userLocale,/, svelte: /Intl\.NumberFormat\(userLocale,/,
+    'react-native': /Intl\.NumberFormat\(userLocale,/,
+    swiftui: /f\.locale = Locale\(identifier: userLocale\)/,
+    compose: /forLanguageTag\(userLocale\)/,
+  };
+  for (const [ad, re] of Object.entries(refPat)) assert(re.test(ref[ad].code), `${ad}: prop-ref locale must drive the formatter`);
+  // prop-ref must bind the variable, never emit it as a string literal.
+  for (const ad of ['react', 'vue', 'svelte', 'react-native', 'swiftui', 'compose']) assert(!/"userLocale"/.test(ref[ad].code), `${ad}: locale ref must bind the prop, not a string literal`);
+  assertFmtExpressed(ref);
+});
+
+// --- P65: grouping toggle + rounding mode (decimal, grouping off, floor, 0 digits) on all 6
+check('P65', 'number-format (F-12): grouping OFF + floor rounding + decimal style apply natively on all 6', () => {
+  const out = fmtGenAll(DECIMAL_FLOOR, 'verify-decimal-floor');
+  const web = /style: "decimal", useGrouping: false, roundingMode: "floor", minimumFractionDigits: 0, maximumFractionDigits: 0/;
+  for (const ad of ['react', 'vue', 'svelte', 'react-native']) assert(web.test(out[ad].code), `${ad}: decimal/grouping-off/floor not composed`);
+  assert(/f\.numberStyle = \.decimal/.test(out.swiftui.code) && /f\.usesGroupingSeparator = false/.test(out.swiftui.code) && /f\.roundingMode = \.floor/.test(out.swiftui.code), 'swiftui: decimal/grouping-off/floor');
+  assert(/getNumberInstance/.test(out.compose.code) && /isGroupingUsed = false/.test(out.compose.code) && /roundingMode = java\.math\.RoundingMode\.FLOOR/.test(out.compose.code), 'compose: decimal/grouping-off/floor');
+  assertFmtExpressed(out);
+});
+
+// --- P66: F-9 boundary — expression as a format option refused; literal/plain-ref pass; F-11 intact
+check('P66', 'number-format (F-12): an expression as locale/currency/number-source is REFUSED; static literal + plain prop-ref pass; F-11 .toFixed precision path unchanged', () => {
+  const mk = (fmt, value = 'amount') => ({ root: { el: 'text', text: { kind: 'format', value, format: fmt } } });
+  assert(checkRefusal(mk({ style: 'currency', currency: 'THB', precision: 2 })) === null, 'static currency literal must pass');
+  assert(checkRefusal(mk({ style: 'currency', locale: { kind: 'ref', value: 'userLocale' } })) === null, 'a plain prop-ref option must pass');
+  assert(checkRefusal(mk({ style: 'currency', locale: { kind: 'expr', value: 'nav.language' } }))?.category === 'expression-number-format', 'an expression as locale must be refused');
+  assert(checkRefusal(mk({ style: 'currency', currency: { kind: 'ref', value: 'code.toUpperCase()' } }))?.category === 'expression-number-format', 'a non-plain ref currency must be refused');
+  assert(checkRefusal(mk({ style: 'decimal' }, 'a + b'))?.category === 'expression-number-format', 'an expression number source must be refused');
+  // F-11 regression: the `.toFixed(precision)` expr path still yields native formatters.
+  assert(/NumberFormatter\(\)/.test(generateSwiftUI(TOKEN_AMOUNT, '_verify').code), 'F-11 .toFixed precision path must still format via NumberFormatter');
+});
+
 console.log('\n=== verify-patches ===');
 console.log(results.join('\n'));
 console.log(`\n${pass} passed, ${fail} failed\n`);

@@ -23,10 +23,15 @@ const ELEMENT_KINDS = new Set([
   'container', 'media', 'heading', 'text', 'action', 'link', 'input', 'slot', 'icon', 'conditional',
 ]);
 
-/** Normalize a value reference into canonical { kind, value }. */
+/** Normalize a value reference into canonical { kind, value }. A number-format
+ *  descriptor (kind=format, F-11/F-12) also carries its `format` options through. */
 function normValue(v) {
   if (v == null) return null;
-  if (typeof v === 'object' && 'kind' in v) return { kind: v.kind, value: v.value };
+  if (typeof v === 'object' && 'kind' in v) {
+    const out = { kind: v.kind, value: v.value };
+    if (v.kind === 'format' && v.format) out.format = v.format;
+    return out;
+  }
   return { kind: 'literal', value: v };
 }
 
