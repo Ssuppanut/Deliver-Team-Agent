@@ -218,9 +218,18 @@ class RNRenderer extends RendererBase {
     return `{${node.when} && (\n${indent(rendered, 2)}\n)}`;
   }
 
-  condBlock(flag, thenStr, elseStr) {
-    if (elseStr == null) return `{${flag} && (\n${indent(thenStr, 2)}\n)}`;
-    return `{${flag} ? (\n${indent(thenStr, 2)}\n) : (\n${indent(elseStr, 2)}\n)}`;
+  // Same JSX idiom as React: bare expression here, single `{…}` at the top.
+  condChainRender(branches, elseBody) {
+    if (branches.length === 1 && elseBody == null) {
+      return `${branches[0].when} && (\n${indent(branches[0].body, 2)}\n)`;
+    }
+    return branches.reduceRight(
+      (acc, b) => `${b.when} ? (\n${indent(b.body, 2)}\n) : (\n${indent(acc, 2)}\n)`,
+      elseBody != null ? elseBody : 'null',
+    );
+  }
+  wrapTopConditional(str) {
+    return `{${str}}`;
   }
   wrapIteration(node, rendered) {
     const { items, as, key } = node.each;

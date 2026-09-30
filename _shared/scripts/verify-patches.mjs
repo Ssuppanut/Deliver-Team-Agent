@@ -986,6 +986,111 @@ check('P57', 'textarea (F-19): a multiline text input renders the textarea varia
   assertTraitExpressed(out, 'input.multiline');
 });
 
+// --- F-13 nested / else-if / per-item conditionals (P58-P62) -----------------
+const COND_NESTED = EX('cond-nested.spec.yaml');
+const COND_ELSEIF = EX('cond-elseif.spec.yaml');
+const COND_PERITEM = EX('cond-peritem.spec.yaml');
+const condGenAll = (spec, feat) => ({
+  react: generateReact(spec, feat), vue: generateVue(spec, feat), svelte: generateSvelte(spec, feat),
+  'react-native': generateReactNative(spec, feat), swiftui: generateSwiftUI(spec, feat), compose: generateCompose(spec, feat),
+});
+const noUnaccounted = (out) => {
+  for (const [ad, r] of Object.entries(out)) assert(!r.ledger.some((x) => x.status === 'unaccounted'), `${ad}: no trait may be unaccounted`);
+};
+
+// --- P58: nested conditional (if A → (if B → a else b) else c) on all 6 -------
+check('P58', 'conditional (F-13): a nested conditional lowers to native nested if/else on all 6; JSX wraps once (no {} inside {}), 0 unaccounted', () => {
+  const out = condGenAll(COND_NESTED, 'verify-cond-nested');
+  const pat = {
+    // React/RN: a single {} wrapper, inner ternary is bare (no nested {}).
+    react: /\{outer \? \(\s*inner \? \(/,
+    'react-native': /\{outer \? \(\s*inner \? \(/,
+    vue: /<template v-if="outer">[\s\S]*<template v-if="inner">[\s\S]*<template v-else>[\s\S]*<template v-else>/,
+    svelte: /\{#if outer\}[\s\S]*\{#if inner\}[\s\S]*\{:else\}[\s\S]*\{:else\}/,
+    swiftui: /if outer \{[\s\S]*if inner \{[\s\S]*\} else \{[\s\S]*\} else \{/,
+    compose: /if \(outer\) \{[\s\S]*if \(inner\) \{[\s\S]*\} else \{[\s\S]*\} else \{/,
+  };
+  for (const [ad, re] of Object.entries(pat)) assert(re.test(out[ad].code), `${ad}: nested conditional not rendered natively`);
+  // JSX: exactly one expression container opens the whole conditional (no `{` re-opened inside).
+  for (const ad of ['react', 'react-native']) {
+    assert(!/\(\s*\{[a-z]/.test(out[ad].code), `${ad}: nested conditional must not emit {} inside {}`);
+  }
+  noUnaccounted(out);
+});
+
+// --- P59: else-if chain (if A → x, else if B → y, else z) on all 6 ------------
+check('P59', 'conditional (F-13): a 3-way else-if chain lowers to the native else-if idiom on all 6, 0 unaccounted', () => {
+  const out = condGenAll(COND_ELSEIF, 'verify-cond-elseif');
+  const pat = {
+    react: /\{isPrimary \? \([\s\S]*\) : \(\s*isSecondary \? \(/,
+    'react-native': /\{isPrimary \? \([\s\S]*\) : \(\s*isSecondary \? \(/,
+    vue: /<template v-if="isPrimary">[\s\S]*<template v-else-if="isSecondary">[\s\S]*<template v-else>/,
+    svelte: /\{#if isPrimary\}[\s\S]*\{:else if isSecondary\}[\s\S]*\{:else\}/,
+    swiftui: /if isPrimary \{[\s\S]*\} else if isSecondary \{[\s\S]*\} else \{/,
+    compose: /if \(isPrimary\) \{[\s\S]*\} else if \(isSecondary\) \{[\s\S]*\} else \{/,
+  };
+  for (const [ad, re] of Object.entries(pat)) assert(re.test(out[ad].code), `${ad}: else-if chain not rendered natively`);
+  noUnaccounted(out);
+});
+
+// --- P60: per-item conditional (boolean field-access inside iteration) on all 6
+check('P60', 'conditional (F-13): a per-item conditional reads a boolean item field inside the iteration on all 6 — field-access only, NO comparison/expression emitted', () => {
+  const out = condGenAll(COND_PERITEM, 'verify-cond-peritem');
+  const pat = {
+    react: /items\.map\(\(item\)[\s\S]*\{item\.active && \(/,
+    'react-native': /items\.map\(\(item\)[\s\S]*\{item\.active && \(/,
+    vue: /v-for="item in items"[\s\S]*<template v-if="item\.active">/,
+    svelte: /\{#each items as item[\s\S]*\{#if item\.active\}/,
+    swiftui: /ForEach\(items, id: \\\.id\) \{ item in[\s\S]*if item\.active \{/,
+    compose: /items\.forEach \{ item ->[\s\S]*if \(item\.active\) \{/,
+  };
+  for (const [ad, re] of Object.entries(pat)) assert(re.test(out[ad].code), `${ad}: per-item field-access conditional not rendered`);
+  // Native adapters: the item field is a real Bool/Boolean, and NO comparison /
+  // ternary leaks (field-access is native; an expression would not be).
+  assert(/let active: Bool\b/.test(out.swiftui.code), 'swiftui: item.active must be typed Bool');
+  assert(/val active: Boolean\b/.test(out.compose.code), 'compose: item.active must be typed Boolean');
+  for (const ad of ['swiftui', 'compose']) {
+    const body = out[ad].code.replace(/https?:\/\//g, '');
+    assert(!/\?[^:\n]*:/.test(body), `${ad}: no ternary/JS expression may leak into native per-item output`);
+    assert(!/item\.\w+\s*(?:[<>]=?|===?|&&|\|\|)/.test(body), `${ad}: per-item condition must be field-access, not a comparison/logic`);
+  }
+  noUnaccounted(out);
+});
+
+// --- P61: depth cap — nesting beyond 3 is refused; at/under 3 generates -------
+check('P61', 'conditional depth-cap (F-13): >3 nesting is REFUSED (extract-subcomponent); depth 3 passes; a per-item conditional counts toward the budget', () => {
+  const T = (v) => ({ el: 'text', text: { kind: 'ref', value: v } });
+  const cond = (when, then, els) => ({ el: 'conditional', when, then, ...(els ? { else: els } : {}) });
+  const wrap = (child) => ({ root: { el: 'container', children: [child] } });
+  const d3 = wrap(cond('a', cond('b', cond('c', T('x'), T('y')), T('z')), T('w')));       // depth 3
+  const d4 = wrap(cond('a', cond('b', cond('c', cond('d', T('x'), T('y')), T('z')), T('w')), T('v'))); // depth 4
+  // per-item counts: outer + list(each → per-item + two more) = depth 4
+  const list = (children) => ({ el: 'container', each: { items: 'items', as: 'item', key: 'id' }, children });
+  const combined4 = wrap(cond('show', list([cond('item.active', cond('a', cond('b', T('x'))))])));
+  assert(checkRefusal(d3) === null, 'depth 3 (at cap) must generate, not refuse');
+  const r4 = checkRefusal(d4);
+  assert(r4 && r4.category === 'conditional-depth', 'depth 4 must be refused as conditional-depth');
+  assert(/extract/i.test(r4.redirect) && /sub-component/i.test(r4.redirect), 'depth refusal must redirect to extracting a sub-component');
+  const rc = checkRefusal(combined4);
+  assert(rc && rc.category === 'conditional-depth', 'a per-item conditional must count toward the depth budget (combined depth 4 refused)');
+});
+
+// --- P62: per-item condition grammar — field-access passes, expression refused -
+check('P62', 'conditional condition (F-13): a per-item boolean field-access passes; a per-item comparison/expression is REFUSED; field-access outside a loop is refused; a plain flag still passes', () => {
+  const T = (v) => ({ el: 'text', text: { kind: 'ref', value: v } });
+  const inLoop = (when) => ({ root: { el: 'container', children: [
+    { el: 'container', each: { items: 'items', as: 'item', key: 'id' }, children: [{ el: 'conditional', when, then: T('a') }] },
+  ] } });
+  const bare = (when) => ({ root: { el: 'container', children: [{ el: 'conditional', when, then: T('a') }] } });
+  assert(checkRefusal(inLoop('item.active')) === null, 'a per-item boolean field-access must pass');
+  const cmp = checkRefusal(inLoop('item.count > 5'));
+  assert(cmp && cmp.category === 'expression-condition', 'a per-item comparison must be refused');
+  assert(/item\.active/.test(cmp.redirect), 'the per-item refusal must redirect to a boolean item field');
+  assert(checkRefusal(inLoop('item.a && item.b'))?.category === 'expression-condition', 'per-item logic must be refused');
+  assert(checkRefusal(bare('user.active'))?.category === 'expression-condition', 'field-access outside a loop must be refused (only loop-var fields allowed)');
+  assert(checkRefusal(bare('isEmpty')) === null, 'a plain boolean flag condition must still pass');
+});
+
 console.log('\n=== verify-patches ===');
 console.log(results.join('\n'));
 console.log(`\n${pass} passed, ${fail} failed\n`);

@@ -1,0 +1,24 @@
+component: CondElseIf
+description: F-13 else-if chain — if isPrimary → x, else if isSecondary → y, else z (3-way, depth 2).
+category: display
+props:
+  - { name: isPrimary, type: boolean, required: true }
+  - { name: isSecondary, type: boolean, required: true }
+  - { name: x, type: string, required: true }
+  - { name: y, type: string, required: true }
+  - { name: z, type: string, required: true }
+tokens:
+  - color.fg.default
+root:
+  el: container
+  style:
+    color: color.fg.default
+  children:
+    - el: conditional
+      when: isPrimary
+      then: { el: text, text: { kind: ref, value: x } }
+      else:
+        el: conditional
+        when: isSecondary
+        then: { el: text, text: { kind: ref, value: y } }
+        else: { el: text, text: { kind: ref, value: z } }

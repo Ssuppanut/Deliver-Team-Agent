@@ -1,0 +1,28 @@
+component: CondPerItem
+description: F-13 per-item conditional — each row shows an Active badge when item.active (boolean field-access).
+category: display
+props:
+  - { name: items, type: array, required: true, itemShape: { id: string, label: string, active: boolean } }
+tokens:
+  - color.fg.default
+  - color.accent.default
+  - space.stack.sm
+root:
+  el: container
+  style:
+    gap: space.stack.sm
+  children:
+    - el: container
+      each: { items: items, as: item, key: id }
+      children:
+        - el: text
+          text: { kind: ref, value: item.label }
+          style:
+            color: color.fg.default
+        - el: conditional
+          when: item.active
+          then:
+            el: text
+            text: { kind: literal, value: "Active" }
+            style:
+              color: color.accent.default

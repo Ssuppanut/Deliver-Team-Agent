@@ -291,11 +291,20 @@ class ComposeRenderer extends RendererBase {
     return `if (${test}) {\n${indent(rendered, 2)}\n}`;
   }
 
-  condBlock(flag, thenStr, elseStr) {
-    const prop = this.ir.props.find((p) => p.name === flag);
-    const test = (prop && prop.required === false) ? `${flag} != null` : flag;
-    if (elseStr == null) return `if (${test}) {\n${indent(thenStr, 2)}\n}`;
-    return `if (${test}) {\n${indent(thenStr, 2)}\n} else {\n${indent(elseStr, 2)}\n}`;
+  // Native Compose if / else if / else. A plain boolean flag is tested directly;
+  // a nullable flag prop is null-checked (smart-cast); a per-item boolean field
+  // (`item.active`) is a direct native Boolean read (`if (item.active)`).
+  condTest(when) {
+    const prop = this.ir.props.find((p) => p.name === when);
+    return (prop && prop.required === false) ? `${when} != null` : when;
+  }
+  condChainRender(branches, elseBody) {
+    let s = `if (${this.condTest(branches[0].when)}) {\n${indent(branches[0].body, 2)}\n}`;
+    for (let i = 1; i < branches.length; i++) {
+      s += ` else if (${this.condTest(branches[i].when)}) {\n${indent(branches[i].body, 2)}\n}`;
+    }
+    if (elseBody != null) s += ` else {\n${indent(elseBody, 2)}\n}`;
+    return s;
   }
   wrapIteration(node, rendered) {
     const { items, as } = node.each;
@@ -321,7 +330,7 @@ class ComposeRenderer extends RendererBase {
     const arrayProp = this.ir.props.find((p) => p.type === 'array');
     const itemClass = arrayProp?.itemShape
       ? `data class ${name}Item(\n`
-        + Object.entries(arrayProp.itemShape).map(([k, t]) => `  val ${k}: ${t === 'number' ? 'Double' : 'String'}`).join(',\n')
+        + Object.entries(arrayProp.itemShape).map(([k, t]) => `  val ${k}: ${t === 'number' ? 'Double' : t === 'boolean' ? 'Boolean' : 'String'}`).join(',\n')
         + `\n)\n\n`
       : '';
     const iconImport = this.usedIcons.size

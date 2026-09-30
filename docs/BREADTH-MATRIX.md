@@ -249,7 +249,7 @@ schema design pass later.
 | F-10 | **Fixed (Phase B)** | Added the first-class `el: icon` element; a standalone icon renders on all 6 via the icon-map, decorative by default / labeled when `a11y.label` set. |
 | F-11 | **Fixed (Phase B, precision-only)** | `X.toFixed(Y)` maps to SwiftUI `NumberFormatter` / Compose `NumberFormat` with `min=max fractionDigits = precision`, grouping off. Web/RN unchanged. |
 | F-12 | **Logged (Phase B) — deferred** | Locale (decimal separator / thousands grouping), currency symbol handling/positioning, and rounding-mode configuration for number formatting. A separate future number-format pass; explicitly out of scope for the precision-only F-11 fix. |
-| F-13 | **Logged (new, F-3) — deferred** | Conditional shapes beyond the three built: nested conditional (if inside if), else-if chains, per-item conditional (a conditional INSIDE each iterated item), and conditionals nested more than one level in iteration. Each needs its own design pass. |
+| F-13 | **RESOLVED (nested / else-if / per-item, depth-capped)** | All three deferred conditional shapes now ship: nested conditional, else-if chain, and per-item conditional (boolean field-access on the loop item). Total conditional nesting is capped at 3 levels (nested + else-if + per-item counted together); deeper nesting is refused with an extract-subcomponent redirect. Per-item conditions are field-access only — a per-item comparison/logic is refused (F-9-consistent). **Residual (by design, not a gap):** nesting beyond depth 3 is refused, not generated. See the F-13 section below. |
 
 Scope for Batch 2 was strictly authoring 4 component specs and recording results.
 No renderer-base/schema capabilities built, no conditional/number-format
@@ -1383,3 +1383,160 @@ hardcode native sizes; build Layer 2 / the IR-ARIA migration / number formatting
 (F-12) / nested conditionals (F-13); weaken or remove any gate or the ledger; or
 touch agents / skills / workflow / AI-router. F-25 is logged for a future design
 pass.
+
+---
+
+# F-13 — Nested / else-if / per-item conditionals (depth-capped)
+
+F-3 shipped the three base conditional shapes (one-way `if`, `if/else`, and a
+conditional wrapping one-level iteration) and deferred three compositions to
+**F-13**. This phase builds all three by **extending the existing conditional
+node** — no new IR kind, no new renderer-base capability beyond the conditional
+lowering it already had.
+
+## Extended IR lowering
+
+A conditional's `then`/`else` branches are already ordinary nodes, so the three
+shapes fall out of two facts:
+
+1. **A branch that is itself a conditional recurses.** `branchBody(node)` renders
+   a non-conditional branch normally but renders a conditional branch *bare*
+   (via `renderCond`, without the JSX `{…}` wrapper). This is **nested
+   conditional** (`if A → (if B → X else Y) else Z`) — the then/else branch is a
+   conditional.
+2. **An `else` that is a conditional flattens into a chain.** `renderCond` walks
+   the else-chain into successive `{when, body}` clauses and hands them to the
+   adapter's `condChainRender`, which emits the platform's **native else-if**
+   (`v-else-if` / `{:else if}` / `else if`) rather than deep nesting. This is the
+   **else-if chain** (`if A → X, else if B → Y, else Z`).
+3. **Per-item conditional** is a conditional inside an iterated container whose
+   condition is a boolean **field-access on the loop item** (`item.active`). It
+   renders as a conditional inside the iteration body per platform.
+
+Only the **outermost** conditional gets the single JSX expression container
+(`wrapTopConditional`), so a JSX adapter never emits `{…}` inside `{…}`.
+
+### Per-adapter mapping
+
+| Shape | React / RN | Vue | Svelte | SwiftUI | Compose |
+|---|---|---|---|---|---|
+| nested | nested ternary `A ? (B ? X : Y) : Z` (one `{}`) | nested `<template v-if>` | nested `{#if}` | nested `if/else` | nested `if/else` |
+| else-if | ternary chain `A ? X : B ? Y : Z` | `v-else-if` | `{:else if}` | `else if` | `else if` |
+| per-item | `.map(item => item.active && …)` | `v-for` + `v-if="item.active"` | `{#each}` + `{#if item.active}` | `ForEach { item in if item.active { … } }` | `items.forEach { item -> if (item.active) { … } }` |
+
+Per-item item fields are typed natively (`let active: Bool` / `val active:
+Boolean`), so `if item.active` is a real Bool read, not a stringly-typed hack.
+
+## Depth cap — how depth is counted
+
+**Depth = the maximum number of `el: conditional` nodes on any single
+root-to-leaf path.** A conditional adds 1 to the running count for its entire
+subtree; containers and iteration pass the count through unchanged. Therefore:
+
+- a nested-in-then conditional is one level deeper than its parent;
+- **each else-if clause counts** as a level (an else-if is a nested conditional);
+- **a per-item conditional counts**, and does so *on top of* any outer
+  conditionals it sits under — crossing an iteration does **not** reset the
+  budget (e.g. `if loading → spinner, else list(each item → if active → …)` is
+  depth 2).
+
+The cap is **3**. A spec whose max conditional depth exceeds 3 is **refused**
+(category `conditional-depth`) with a redirect to extract the innermost branch
+into its own sub-component (a component boundary resets the budget). This bound
+is what keeps the per-item × nested combination finite and testable.
+
+## Condition source (F-9 boundary)
+
+| Condition site | Allowed | Refused |
+|---|---|---|
+| top-level / nested / else-if | a plain boolean flag prop (`isPrimary`) | any expression (`items.length > 0`) |
+| per-item | a boolean field-access on the loop item (`item.active`) | a comparison / logic / call (`item.count > 5`, `item.a && item.b`, `item.f()`), or a field-access whose base is not an in-scope loop variable |
+
+An expression as any condition is refused (`expression-condition`) with the
+flag/field redirect — the same F-9 boundary as the variant discriminant and the
+control-state bindings. Field-access is native on every platform; a comparison
+is not, so it stays refused.
+
+## Breadth matrix — F-13 proofs
+
+| Component | React | Vue | Svelte | RN | SwiftUI | Compose | Gates | Outcome | Notes |
+|---|---|---|---|---|---|---|---|---|---|
+| **CondNested** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 9/9 pass | **PASS** | `if outer → (if inner → a else b) else c` as native nested if/else; JSX wraps once (`{outer ? (inner ? … : …) : …}`), 0 unaccounted. |
+| **CondElseIf** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 9/9 pass | **PASS** | 3-way `if / else if / else` as the native else-if idiom on all 6 (`v-else-if`, `{:else if}`, `else if`, chained ternary). |
+| **CondPerItem** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 9/9 pass | **PASS** | each row shows a badge when `item.active` — field-access inside `.map`/`v-for`/`{#each}`/`ForEach`/`forEach`; item field typed Bool/Boolean; **no comparison/ternary in native output**. |
+
+("Gates 9/9" = the seven prior gates + native-code + the ledger.)
+
+## Gate / defense interaction
+
+- **Ledger 0-unaccounted** for all three structures — the conditional node itself
+  carries no traits; its branch elements are rendered through the normal visitor
+  path, so every declared trait is still accounted.
+- **native-code does NOT over-flag** native nested/else-if or per-item
+  field-access. The gate targets a non-plain `variant.prop` leaked verbatim; a
+  `when` field-access is a plain dotted path and never a variant discriminant, and
+  the native output emits `if item.active` / `if (item.active)` — no `?:` ternary,
+  no comparison. Verified by P60.
+- **Mutation harness** corpus grew (three new specs); baseline clean, **no new
+  survivor and no previously-killed mutant now surviving** — only the known
+  `state-by-color-only` (F-22) advisory blind spot survives.
+
+## Proofs (fired)
+
+```
+# nested (React) — one {} wrapper, bare inner ternary
+{outer ? ( inner ? (<span>{a}</span>) : (<span>{b}</span>) ) : (<span>{c}</span>)}
+# nested (SwiftUI)          if outer { if inner { … } else { … } } else { … }
+# else-if (Svelte)         {#if isPrimary} … {:else if isSecondary} … {:else} … {/if}
+# else-if (Compose)        if (isPrimary) { … } else if (isSecondary) { … } else { … }
+# per-item (SwiftUI)       ForEach(items…) { item in if item.active { … } }   // let active: Bool
+# per-item (Compose)       items.forEach { item -> if (item.active) { … } }   // val active: Boolean
+
+# refusals
+depth 3 (at cap)      → generates
+depth 4 (over cap)    → REFUSED  conditional-depth  (extract a sub-component)
+combined depth 4      → REFUSED  conditional-depth  (per-item counts toward the budget)
+per-item field-access → generates            (when: item.active)
+per-item comparison   → REFUSED  expression-condition  (when: item.count > 5)
+field outside a loop  → REFUSED  expression-condition  (only loop-var fields allowed)
+plain flag            → generates            (when: isEmpty)
+```
+
+## Findings
+
+- **F-13 — RESOLVED.** Nested, else-if, and per-item conditionals ship on all 6,
+  ledger-accounted, native-code clean.
+- **Residual (by design, not a gap):** conditional nesting beyond depth 3 is
+  **refused**, not generated — the depth cap is a deliberate readability/testability
+  bound with an extract-subcomponent redirect, not a missing capability. Long
+  else-if chains count toward the same budget (a 4-clause chain is depth 3, at the
+  cap; a 5-clause chain is refused) — extract or flatten in the data layer.
+
+## Regression pins
+
+- **P58** — nested conditional lowers to native nested if/else on all 6; JSX wraps
+  once (no `{}` inside `{}`); 0 unaccounted.
+- **P59** — 3-way else-if chain lowers to the native else-if idiom on all 6.
+- **P60** — per-item conditional reads a boolean item field inside the iteration on
+  all 6; field-access only, no comparison/ternary leaks into native.
+- **P61** — depth cap: >3 nesting refused (extract-subcomponent), depth 3 passes, a
+  per-item conditional counts toward the budget.
+- **P62** — per-item field-access passes; per-item comparison/logic refused;
+  field-access outside a loop refused; a plain flag still passes.
+
+`verify-patches` → **62/62** (was 57/57).
+
+## ci.mjs status under F-13
+
+`rm -rf out/ && node _shared/scripts/ci.mjs` → **exit 0**. All in-scope features
+PASS (including the three new conditional specs), refused categories still refuse,
+`verify-patches` 62/62, mutation testing green (only F-22 survives), 0 unaccounted.
+
+## Scope — what this did not touch
+
+Per the F-13 scope lock: no expressions accepted as conditions anywhere (flags +
+per-item boolean field-access only; comparisons/logic refused); no nesting beyond
+the depth cap (refused); the three F-3 base shapes are unchanged (P36–P39 still
+pass); no Layer 2, IR/ARIA migration, number formatting (F-12), or rich options
+(F-25); no gate or the ledger weakened or removed; no changes to agents / skills /
+workflow / AI-router.
