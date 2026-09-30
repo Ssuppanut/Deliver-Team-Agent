@@ -1,0 +1,21 @@
+component: PriceLocale
+description: F-12 currency with a runtime locale prop-ref — USD, caller-supplied locale, grouping on, 2 digits.
+category: display
+props:
+  - { name: amount, type: number, required: true }
+  - { name: userLocale, type: string, required: true }
+tokens:
+  - color.fg.default
+root:
+  el: text
+  text:
+    kind: format
+    value: amount
+    format:
+      style: currency
+      currency: USD
+      locale: { kind: ref, value: userLocale }
+      grouping: true
+      precision: 2
+  style:
+    color: color.fg.default

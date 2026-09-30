@@ -20,6 +20,7 @@ class ReactRenderer extends RendererBase {
   interp(vr) {
     if (!vr) return '';
     if (vr.kind === 'literal') return escapeJsx(vr.value);
+    if (vr.kind === 'format') { this.express('number-format', { mechanism: 'Intl.NumberFormat' }); return `{${this.intlFormatExpr(this.numberFormat(vr))}}`; }
     return `{${vr.value}}`;
   }
 

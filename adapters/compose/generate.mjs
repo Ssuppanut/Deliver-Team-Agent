@@ -14,9 +14,34 @@ const ROOT = resolve(__dirname, '../..');
 const firstIdent = (expr) => (String(expr).match(/[A-Za-z_][A-Za-z0-9_$]*/) || ['value'])[0];
 
 class ComposeRenderer extends RendererBase {
+  // F-12 number formatting — java.text.NumberFormat (locale / currency / grouping
+  // / rounding / precision compose into one formatter). Extends the F-11 precision
+  // path with the same NumberFormat construction, now fully configurable.
+  formatNumber(fmt) {
+    const sv = (o) => (o.kind === 'literal' ? JSON.stringify(String(o.value)) : o.value);
+    const boolv = (o) => (o.kind === 'literal' ? String(!!o.value) : o.value);
+    const intv = (o) => (o.kind === 'literal' ? `${parseInt(o.value, 10)}` : `${o.value}.toInt()`);
+    const num = fmt.value.kind === 'literal' ? `${fmt.value.value}` : fmt.value.value;
+    const ROUND = { round: 'HALF_UP', floor: 'FLOOR', ceil: 'CEILING' };
+    const inst = fmt.style === 'currency' ? 'getCurrencyInstance' : 'getNumberInstance';
+    const localeArg = fmt.locale ? `java.util.Locale.forLanguageTag(${sv(fmt.locale)})` : '';
+    const app = [];
+    if (fmt.style === 'currency' && fmt.currency) app.push(`currency = java.util.Currency.getInstance(${sv(fmt.currency)})`);
+    if (fmt.grouping) app.push(`isGroupingUsed = ${boolv(fmt.grouping)}`);
+    if (fmt.rounding) {
+      const r = fmt.rounding;
+      app.push(`roundingMode = ${r.kind === 'literal'
+        ? `java.math.RoundingMode.${ROUND[r.value] ?? 'HALF_UP'}`
+        : `when (${r.value}) { "floor" -> java.math.RoundingMode.FLOOR; "ceil" -> java.math.RoundingMode.CEILING; else -> java.math.RoundingMode.HALF_UP }`}`);
+    }
+    if (fmt.precision) { const p = intv(fmt.precision); app.push(`minimumFractionDigits = ${p}`, `maximumFractionDigits = ${p}`); }
+    const applyBlock = app.length ? `.apply { ${app.join('; ')} }` : '';
+    return `java.text.NumberFormat.${inst}(${localeArg})${applyBlock}.format(${num})`;
+  }
   strExpr(vr) {
     if (!vr) return '""';
     if (vr.kind === 'literal') return JSON.stringify(String(vr.value));
+    if (vr.kind === 'format') { this.express('number-format', { mechanism: 'java.text.NumberFormat' }); return this.formatNumber(this.numberFormat(vr)); }
     if (vr.kind === 'ref') return vr.value;
     // F-11 (precision-only): `<num>.toFixed(<precision>)` -> a real native decimal
     // formatter with `precision` fraction digits. No locale / grouping / currency

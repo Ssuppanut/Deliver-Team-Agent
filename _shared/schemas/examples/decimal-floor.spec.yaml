@@ -1,0 +1,20 @@
+component: DecimalFloor
+description: F-12 decimal — grouping OFF, 0 fraction digits, floor rounding, de-DE locale.
+category: display
+props:
+  - { name: amount, type: number, required: true }
+tokens:
+  - color.fg.default
+root:
+  el: text
+  text:
+    kind: format
+    value: amount
+    format:
+      style: decimal
+      locale: de-DE
+      grouping: false
+      rounding: floor
+      precision: 0
+  style:
+    color: color.fg.default

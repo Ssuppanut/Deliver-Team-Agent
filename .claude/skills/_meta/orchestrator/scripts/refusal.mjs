@@ -93,6 +93,33 @@ function findBadBinding(node) {
   return null;
 }
 
+/**
+ * F-12 number-format options (locale / currency / grouping / rounding / precision)
+ * and the number source must each be a STATIC literal or a plain prop ref, never
+ * an expression — the F-9 anti-pattern re-entering through a formatter option.
+ * A scalar literal is static config (always fine); a ref must be { kind: ref }
+ * with a plain identifier value (a `kind: expr`, or a non-plain ref value, is
+ * refused).
+ */
+function findBadFormat(node) {
+  for (const field of ['text', 'label']) {
+    const v = node[field];
+    if (!v || typeof v !== 'object' || v.kind !== 'format') continue;
+    // Number source: a string is a prop ref and must be plain.
+    if (typeof v.value === 'string' && !PLAIN_FLAG.test(v.value.trim())) return { slot: 'value', expr: v.value.trim() };
+    for (const [slot, opt] of Object.entries(v.format || {})) {
+      if (slot === 'style' || opt == null) continue;        // style is a static enum
+      if (typeof opt === 'object' && 'kind' in opt) {         // a ref option
+        if (opt.kind !== 'ref' || typeof opt.value !== 'string' || !PLAIN_FLAG.test(opt.value.trim())) {
+          return { slot, expr: String(opt.value).trim() };
+        }
+      }
+      // a bare scalar is a static literal — always allowed.
+    }
+  }
+  return null;
+}
+
 /** Walk the spec tree (children + conditional then/else) for a refusable
  *  condition. `loopVars` are the iteration variables in scope for this subtree,
  *  so a per-item condition may read `<loopvar>.field` but nothing else. */
@@ -101,6 +128,8 @@ function findBadCondition(node, loopVars = new Set()) {
   const vp = node.variant?.prop;
   if (typeof vp === 'string' && !PLAIN_DISCRIMINANT.test(vp.trim())) return { kind: 'variant', expr: vp.trim() };
   if (typeof node.when === 'string' && !conditionOK(node.when, loopVars)) return { kind: 'condition', expr: node.when.trim() };
+  const badFmt = findBadFormat(node);
+  if (badFmt) return { kind: 'format-option', slot: badFmt.slot, expr: badFmt.expr };
   // F-5 boolean-attribute binding (`disabled`): must be a plain boolean flag
   // ref, never a JS expression — the F-9 anti-pattern re-entering through the
   // attribute. Refuse it, consistent with the variant / condition / state-binding
@@ -138,6 +167,14 @@ export function checkRefusal(spec) {
       category: 'expression-condition',
       reason: `a condition must be a plain boolean flag prop, or a per-item boolean field-access on the current loop item (e.g. \`item.active\`), not an embedded expression (found: \`${bad.expr}\`) — a comparison / logic / call is presentation logic that belongs in the data layer`,
       redirect: "pass a boolean flag prop (e.g. when: isEmpty), or for a per-item condition a boolean field on the item (e.g. when: item.active), computed in the data layer — not a JS expression",
+      reference: 'knowledge/pattern-library/references/expression-variant.md',
+    };
+  }
+  if (bad?.kind === 'format-option') {
+    return {
+      category: 'expression-number-format',
+      reason: `a number-format ${bad.slot} must be a static literal or a plain prop ref, not an embedded expression (found: \`${bad.expr}\`) — a computed formatter option is presentation logic that belongs in the data layer`,
+      redirect: "pass a literal (e.g. currency: THB) or a plain prop ref (e.g. locale: { kind: ref, value: userLocale }) computed in the data layer, not a JS expression",
       reference: 'knowledge/pattern-library/references/expression-variant.md',
     };
   }

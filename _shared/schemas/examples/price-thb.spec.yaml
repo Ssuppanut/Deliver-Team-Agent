@@ -1,0 +1,21 @@
+component: PriceThb
+description: F-12 currency — static THB, th-TH locale, grouping on, 2 fraction digits, round.
+category: display
+props:
+  - { name: amount, type: number, required: true }
+tokens:
+  - color.fg.default
+root:
+  el: text
+  text:
+    kind: format
+    value: amount
+    format:
+      style: currency
+      currency: THB
+      locale: th-TH
+      grouping: true
+      rounding: round
+      precision: 2
+  style:
+    color: color.fg.default
