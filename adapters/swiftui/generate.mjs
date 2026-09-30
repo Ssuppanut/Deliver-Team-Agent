@@ -250,12 +250,22 @@ class SwiftUIRenderer extends RendererBase {
     return `if ${w} {\n${indent(rendered, 2)}\n}`;
   }
 
-  condBlock(flag, thenStr, elseStr) {
-    const prop = this.ir.props.find((p) => p.name === flag);
-    const w = safe(flag);
-    const head = (prop && prop.required === false) ? `if let ${w} = ${w}` : `if ${w}`;
-    if (elseStr == null) return `${head} {\n${indent(thenStr, 2)}\n}`;
-    return `${head} {\n${indent(thenStr, 2)}\n} else {\n${indent(elseStr, 2)}\n}`;
+  // Native SwiftUI if / else if / else. A plain boolean flag prop is tested
+  // directly; an optional flag prop is bind-unwrapped (`if let`); a per-item
+  // boolean field (`item.active`) is a direct native Bool read (`if item.active`).
+  condHead(when, kw) {
+    const prop = this.ir.props.find((p) => p.name === when);
+    const w = safe(when);
+    if (prop && prop.required === false) return `${kw} let ${w} = ${w}`;
+    return `${kw} ${w}`;
+  }
+  condChainRender(branches, elseBody) {
+    let s = `${this.condHead(branches[0].when, 'if')} {\n${indent(branches[0].body, 2)}\n}`;
+    for (let i = 1; i < branches.length; i++) {
+      s += ` ${this.condHead(branches[i].when, 'else if')} {\n${indent(branches[i].body, 2)}\n}`;
+    }
+    if (elseBody != null) s += ` else {\n${indent(elseBody, 2)}\n}`;
+    return s;
   }
   wrapIteration(node, rendered) {
     const { items, as, key } = node.each;
@@ -284,7 +294,7 @@ class SwiftUIRenderer extends RendererBase {
     const hasId = arrayProp?.itemShape && 'id' in arrayProp.itemShape;
     const itemStruct = arrayProp?.itemShape
       ? `struct ${name}Item: Identifiable {\n`
-        + Object.entries(arrayProp.itemShape).map(([k, t]) => `  let ${k}: ${t === 'number' ? 'Double' : 'String'}`).join('\n')
+        + Object.entries(arrayProp.itemShape).map(([k, t]) => `  let ${k}: ${t === 'number' ? 'Double' : t === 'boolean' ? 'Bool' : 'String'}`).join('\n')
         // Only synthesize `id` when the shape does not already carry one (avoids
         // a stored/computed `id` collision, which recurses).
         + (hasId ? '' : `\n  let id = UUID().uuidString`)

@@ -33,6 +33,41 @@ const PLAIN_DISCRIMINANT = /^[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$
 // `items.length > 0`) is the F-9 anti-pattern re-entering through the condition:
 // it must be refused too, redirecting to a computed boolean flag from the data layer.
 const PLAIN_FLAG = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+// F-13 per-item condition: a boolean FIELD-ACCESS on the current loop item —
+// exactly `<loopvar>.<field>` (one dot, both bare identifiers). This is a direct
+// native property read on every platform (SwiftUI `if item.active`, Compose
+// `if (item.active)`, web `item.active && …`). A comparison / logic / call
+// (`item.count > 5`, `item.a && item.b`, `item.f()`) is NOT a field read — it is
+// the F-9 expression anti-pattern and stays refused.
+const FIELD_ACCESS = /^[A-Za-z_$][A-Za-z0-9_$]*\.[A-Za-z_$][A-Za-z0-9_$]*$/;
+// F-13 depth cap: total conditional nesting (nested + else-if + per-item, counted
+// together) may not exceed this. Deeper branching is refused with a redirect to
+// extract a sub-component (a component boundary resets the budget).
+const MAX_COND_DEPTH = 3;
+
+/** A condition is valid iff it is a plain boolean flag, or a per-item boolean
+ *  field-access whose base is an in-scope loop variable. Everything else (any
+ *  expression) is refused. */
+function conditionOK(when, loopVars) {
+  const w = String(when).trim();
+  if (PLAIN_FLAG.test(w)) return true;
+  if (FIELD_ACCESS.test(w)) return loopVars.has(w.split('.')[0]);
+  return false;
+}
+
+/** Max conditional-nesting depth on any root-to-leaf path. A conditional adds 1
+ *  to the running count for its whole subtree; iteration/containers pass the
+ *  count through unchanged (so a per-item conditional inside outer conditionals
+ *  counts as a deeper level, and an else-if chain counts each clause). */
+function maxCondDepth(node, ancestors = 0) {
+  if (!node || typeof node !== 'object') return ancestors;
+  const here = node.el === 'conditional' ? ancestors + 1 : ancestors;
+  let max = here;
+  for (const c of node.children ?? []) max = Math.max(max, maxCondDepth(c, here));
+  for (const b of [node.then, node.else]) if (b) max = Math.max(max, maxCondDepth(b, here));
+  return max;
+}
+
 const EXPRESSION_VARIANT = {
   redirect: "pass a plain enum variant prop (e.g. direction: 'negative') and compute the value in the data layer",
   reference: 'knowledge/pattern-library/references/expression-variant.md',
@@ -58,12 +93,14 @@ function findBadBinding(node) {
   return null;
 }
 
-/** Walk the spec tree (children + conditional then/else) for a refusable condition. */
-function findBadCondition(node) {
+/** Walk the spec tree (children + conditional then/else) for a refusable
+ *  condition. `loopVars` are the iteration variables in scope for this subtree,
+ *  so a per-item condition may read `<loopvar>.field` but nothing else. */
+function findBadCondition(node, loopVars = new Set()) {
   if (!node || typeof node !== 'object') return null;
   const vp = node.variant?.prop;
   if (typeof vp === 'string' && !PLAIN_DISCRIMINANT.test(vp.trim())) return { kind: 'variant', expr: vp.trim() };
-  if (typeof node.when === 'string' && !PLAIN_FLAG.test(node.when.trim())) return { kind: 'condition', expr: node.when.trim() };
+  if (typeof node.when === 'string' && !conditionOK(node.when, loopVars)) return { kind: 'condition', expr: node.when.trim() };
   // F-5 boolean-attribute binding (`disabled`): must be a plain boolean flag
   // ref, never a JS expression — the F-9 anti-pattern re-entering through the
   // attribute. Refuse it, consistent with the variant / condition / state-binding
@@ -71,8 +108,10 @@ function findBadCondition(node) {
   if (typeof node.disabled === 'string' && !PLAIN_FLAG.test(node.disabled.trim())) return { kind: 'boolean-attr', expr: node.disabled.trim() };
   const badBinding = findBadBinding(node);
   if (badBinding) return { kind: 'binding', expr: badBinding.expr, slot: badBinding.slot };
-  for (const c of node.children ?? []) { const hit = findBadCondition(c); if (hit) return hit; }
-  for (const b of [node.then, node.else]) { if (b) { const hit = findBadCondition(b); if (hit) return hit; } }
+  // A node carrying `each` introduces its loop variable into scope for its subtree.
+  const scope = node.each?.as ? new Set([...loopVars, node.each.as]) : loopVars;
+  for (const c of node.children ?? []) { const hit = findBadCondition(c, scope); if (hit) return hit; }
+  for (const b of [node.then, node.else]) { if (b) { const hit = findBadCondition(b, scope); if (hit) return hit; } }
   return null;
 }
 
@@ -97,8 +136,8 @@ export function checkRefusal(spec) {
   if (bad?.kind === 'condition') {
     return {
       category: 'expression-condition',
-      reason: `a condition must be a plain boolean flag prop, not an embedded expression (found: \`${bad.expr}\`) — compute the boolean in the data layer`,
-      redirect: "pass a boolean flag prop (e.g. when: isEmpty) computed in the data layer, not a JS expression",
+      reason: `a condition must be a plain boolean flag prop, or a per-item boolean field-access on the current loop item (e.g. \`item.active\`), not an embedded expression (found: \`${bad.expr}\`) — a comparison / logic / call is presentation logic that belongs in the data layer`,
+      redirect: "pass a boolean flag prop (e.g. when: isEmpty), or for a per-item condition a boolean field on the item (e.g. when: item.active), computed in the data layer — not a JS expression",
       reference: 'knowledge/pattern-library/references/expression-variant.md',
     };
   }
@@ -115,6 +154,17 @@ export function checkRefusal(spec) {
       category: 'expression-binding',
       reason: `a control-state ${bad.slot} must be a plain caller-supplied ref, not an embedded expression (found: \`${bad.expr}\`) — a computed binding is presentation logic that belongs in the data layer`,
       redirect: "pass a plain ref (a value prop + a change-handler prop, e.g. valueProp: checked, changeProp: onToggle) computed in the data layer, not a JS expression",
+      reference: 'knowledge/pattern-library/references/expression-variant.md',
+    };
+  }
+  // F-13 depth cap: refuse conditional nesting deeper than the budget (checked
+  // after condition validity, so an expression is reported as such first).
+  const depth = spec?.root ? maxCondDepth(spec.root) : 0;
+  if (depth > MAX_COND_DEPTH) {
+    return {
+      category: 'conditional-depth',
+      reason: `conditional nesting depth ${depth} exceeds the cap of ${MAX_COND_DEPTH} — nested, else-if, and per-item conditionals all count toward one depth budget, and deeper branching is unreadable and hard to test`,
+      redirect: `extract the innermost branch into its own sub-component (a component boundary resets the depth budget), or flatten the logic into fewer boolean flags computed in the data layer`,
       reference: 'knowledge/pattern-library/references/expression-variant.md',
     };
   }

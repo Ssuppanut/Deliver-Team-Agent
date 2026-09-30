@@ -145,9 +145,16 @@ export class RendererBase {
   visitSlot(_node) { throw new Error('visitSlot not implemented'); }
   visitIcon(_node) { throw new Error('visitIcon not implemented'); }
 
-  // --- Conditional (F-3): platform if / if-else syntax -----------------------
-  // elseStr is null for a one-way (show/hide) conditional.
-  condBlock(_flag, _thenStr, _elseStr) { throw new Error('condBlock not implemented'); }
+  // --- Conditional (F-3 shapes 1-3; F-13 nested / else-if / per-item) --------
+  // Adapters implement `condChainRender(branches, elseBody)`:
+  //   branches  = [{ when, body, node }]  one entry per if / else-if clause
+  //   elseBody  = the final `else` body string, or null (one-way / chain w/o else)
+  // and return the platform conditional WITHOUT any top-level JSX wrapper.
+  // JSX adapters additionally override `wrapTopConditional` to add the single
+  // `{…}` expression container at the outermost position (never on a nested one).
+  condChainRender(_branches, _elseBody) { throw new Error('condChainRender not implemented'); }
+  /** JSX child wrapper for the OUTERMOST conditional; block adapters need none. */
+  wrapTopConditional(str, _node) { return str; }
 
   // --- Control-flow wrapping (adapters override) ---------------------------
   wrapConditional(_node, rendered) { return rendered; }
@@ -203,16 +210,46 @@ export class RendererBase {
   }
 
   /**
-   * Render an F-3 conditional node. children[0] is the "then" branch; an optional
-   * children[1] is the "else" branch. Each branch is a normal node (it may carry
-   * its own `each` for the list-vs-fallback shape). Traversal is shared here; the
-   * adapter only supplies the platform if / if-else syntax via `condBlock`.
+   * Render a conditional node (F-3 shapes 1-3 + F-13 nested / else-if / per-item).
+   * children[0] is the `then` branch; optional children[1] is the `else` branch.
+   *
+   * Two kinds of nesting compose here, both from the fact that a branch is just a
+   * normal node:
+   *   - nested-in-then : a `then` (or `else`) branch that is itself a conditional
+   *     recurses through `branchBody` → `renderCond`, producing native nested
+   *     if/else. The recursion returns the BARE inner conditional (no JSX
+   *     wrapper) so a JSX adapter never emits a `{…}` inside another `{…}`.
+   *   - else-if chain  : an `else` branch that is a conditional is flattened into
+   *     successive `{when, body}` clauses so the adapter can emit the platform's
+   *     native else-if (`v-else-if` / `{:else if}` / `else if`), not deep nesting.
+   * The outermost conditional gets the single JSX wrapper via `wrapTopConditional`.
    */
   visitConditional(node) {
-    const kids = node.children ?? [];
-    const thenStr = kids[0] ? this.renderNode(kids[0]) : '';
-    const elseStr = kids.length > 1 ? this.renderNode(kids[1]) : null;
-    return this.condBlock(node.when, thenStr, elseStr);
+    return this.wrapTopConditional(this.renderCond(node), node);
+  }
+
+  /** Bare (unwrapped) render of a conditional: flatten else-if, recurse nesting. */
+  renderCond(node) {
+    const branches = [];
+    let cur = node;
+    let elseBody = null;
+    // Flatten an else-if chain: keep collecting clauses while the else is a conditional.
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const kids = cur.children ?? [];
+      const thenNode = kids[0] ?? null;
+      const elseNode = kids.length > 1 ? kids[1] : null;
+      branches.push({ when: cur.when, node: cur, body: thenNode ? this.branchBody(thenNode) : '' });
+      if (elseNode && elseNode.kind === 'conditional') { cur = elseNode; continue; }
+      elseBody = elseNode ? this.branchBody(elseNode) : null;
+      break;
+    }
+    return this.condChainRender(branches, elseBody);
+  }
+
+  /** A branch body: a nested conditional recurses bare; any other node renders normally. */
+  branchBody(node) {
+    return node.kind === 'conditional' ? this.renderCond(node) : this.renderNode(node);
   }
 
   /** Produce the full component source for this adapter. */

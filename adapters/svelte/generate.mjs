@@ -172,9 +172,15 @@ class SvelteRenderer extends RendererBase {
     return `{#if ${node.when}}\n${indent(rendered, 2)}\n{/if}`;
   }
 
-  condBlock(flag, thenStr, elseStr) {
-    if (elseStr == null) return `{#if ${flag}}\n${indent(thenStr, 2)}\n{/if}`;
-    return `{#if ${flag}}\n${indent(thenStr, 2)}\n{:else}\n${indent(elseStr, 2)}\n{/if}`;
+  // Native Svelte if / {:else if} / {:else}; a nested-in-then body is itself a
+  // full {#if}…{/if} block, so nesting composes without any special-casing.
+  condChainRender(branches, elseBody) {
+    let s = `{#if ${branches[0].when}}\n${indent(branches[0].body, 2)}`;
+    for (let i = 1; i < branches.length; i++) {
+      s += `\n{:else if ${branches[i].when}}\n${indent(branches[i].body, 2)}`;
+    }
+    if (elseBody != null) s += `\n{:else}\n${indent(elseBody, 2)}`;
+    return `${s}\n{/if}`;
   }
   wrapIteration(node, rendered) {
     const { items, as, key } = node.each;

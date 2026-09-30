@@ -213,9 +213,22 @@ class ReactRenderer extends RendererBase {
     return `{${node.when} && (\n${indent(rendered, 2)}\n)}`;
   }
 
-  condBlock(flag, thenStr, elseStr) {
-    if (elseStr == null) return `{${flag} && (\n${indent(thenStr, 2)}\n)}`;
-    return `{${flag} ? (\n${indent(thenStr, 2)}\n) : (\n${indent(elseStr, 2)}\n)}`;
+  // A conditional lowers to a bare JS expression; wrapTopConditional adds the
+  // single `{…}` container at the JSX-child boundary (never on a nested one, so a
+  // nested/else-if conditional never emits `{…}` inside `{…}`).
+  condChainRender(branches, elseBody) {
+    // One-way (single clause, no else): `flag && (body)`.
+    if (branches.length === 1 && elseBody == null) {
+      return `${branches[0].when} && (\n${indent(branches[0].body, 2)}\n)`;
+    }
+    // if/else and else-if chains → a nested ternary (native JSX else-if idiom).
+    return branches.reduceRight(
+      (acc, b) => `${b.when} ? (\n${indent(b.body, 2)}\n) : (\n${indent(acc, 2)}\n)`,
+      elseBody != null ? elseBody : 'null',
+    );
+  }
+  wrapTopConditional(str) {
+    return `{${str}}`;
   }
 
   wrapIteration(node, rendered) {

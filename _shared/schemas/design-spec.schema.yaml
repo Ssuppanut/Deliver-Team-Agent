@@ -171,16 +171,27 @@ definitions:
       when:
         type: string
         description: >
-          Boolean flag/prop name. On an ordinary element it gates one-way
-          rendering (show/hide). On an `el: conditional` node it is the branch
-          condition. Must be a plain flag, never a JS expression (an expression
-          condition is refused, like the F-9 variant discriminant).
+          Branch/gate condition. On an ordinary element it gates one-way
+          rendering (show/hide); on an `el: conditional` node it is the branch
+          condition. Two forms only: (1) a plain boolean flag/prop name; or (2)
+          a per-item boolean FIELD-ACCESS `<loopvar>.<field>` (e.g. item.active)
+          when the node is inside that iteration — a direct native property read.
+          Never a JS expression (comparison / logic / call, e.g.
+          `items.length > 0`, `item.count > 5`): an expression condition is
+          refused, like the F-9 variant discriminant.
       then:
         $ref: "#/definitions/element"
-        description: "The branch rendered when `when` is true (el=conditional only)."
+        description: >
+          The branch rendered when `when` is true (el=conditional only). May
+          itself be an `el: conditional` (F-13 nested conditional).
       else:
         $ref: "#/definitions/element"
-        description: "Optional branch rendered when `when` is false (el=conditional only)."
+        description: >
+          Optional branch rendered when `when` is false (el=conditional only). An
+          `else` that is itself an `el: conditional` is an F-13 else-if chain.
+          Total conditional nesting (nested + else-if + per-item, counted
+          together) is capped at 3 levels; deeper nesting is refused with a
+          redirect to extract a sub-component.
       each:
         type: object
         description: Iteration binding (Strategy D single-level).

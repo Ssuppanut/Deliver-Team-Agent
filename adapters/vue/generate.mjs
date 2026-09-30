@@ -179,10 +179,15 @@ class VueRenderer extends RendererBase {
     return `<template v-if="${node.when}">\n${indent(rendered, 2)}\n</template>`;
   }
 
-  condBlock(flag, thenStr, elseStr) {
-    const t = `<template v-if="${flag}">\n${indent(thenStr, 2)}\n</template>`;
-    if (elseStr == null) return t;
-    return `${t}\n<template v-else>\n${indent(elseStr, 2)}\n</template>`;
+  // Native Vue v-if / v-else-if / v-else on sibling <template>s; a nested-in-then
+  // body is a full <template v-if> inside the outer one, so nesting composes.
+  condChainRender(branches, elseBody) {
+    let s = `<template v-if="${branches[0].when}">\n${indent(branches[0].body, 2)}\n</template>`;
+    for (let i = 1; i < branches.length; i++) {
+      s += `\n<template v-else-if="${branches[i].when}">\n${indent(branches[i].body, 2)}\n</template>`;
+    }
+    if (elseBody != null) s += `\n<template v-else>\n${indent(elseBody, 2)}\n</template>`;
+    return s;
   }
   wrapIteration(node, rendered) {
     const { items, as, key } = node.each;

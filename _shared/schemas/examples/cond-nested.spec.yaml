@@ -1,0 +1,24 @@
+component: CondNested
+description: F-13 nested conditional — if outer → (if inner → a else b) else c (depth 2).
+category: display
+props:
+  - { name: outer, type: boolean, required: true }
+  - { name: inner, type: boolean, required: true }
+  - { name: a, type: string, required: true }
+  - { name: b, type: string, required: true }
+  - { name: c, type: string, required: true }
+tokens:
+  - color.fg.default
+root:
+  el: container
+  style:
+    color: color.fg.default
+  children:
+    - el: conditional
+      when: outer
+      then:
+        el: conditional
+        when: inner
+        then: { el: text, text: { kind: ref, value: a } }
+        else: { el: text, text: { kind: ref, value: b } }
+      else: { el: text, text: { kind: ref, value: c } }
