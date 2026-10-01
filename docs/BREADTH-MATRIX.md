@@ -1690,3 +1690,94 @@ date/time formatting (logged as F-26); no expressions as locale/currency/groupin
 rounding (literal or plain ref only, F-9); the F-11 precision path was extended, not
 rewritten; no Layer 2 / IR-ARIA migration / F-25; no gate or the ledger weakened;
 no changes to agents / skills / workflow / AI-router.
+
+---
+
+# F-25 — Rich options: icon in RadioGroup (Select refused)
+
+Phase H logged F-25 (rich option children) as "not built" because a per-option
+icon is runtime data and HTML `<option>` / RN `Picker.Item` are text-only. This
+phase **builds it under decision option C**: RadioGroup carries icon options on
+all 6; a native Select with an icon option is **refused**.
+
+## Why it is now buildable (what changed)
+
+The blocker was "a runtime `opt.icon` can't go through the compile-time icon
+idiom." The icon-token set is **small and fixed** (9 tokens), so each adapter
+emits a **runtime registry** over the known tokens and looks `opt.icon` up at
+render time — real, uniform, and still inside the existing icon system (same
+tokens, same per-platform symbols). No arbitrary images, no nested components.
+
+## RadioGroup icon mapping (per adapter)
+
+| Adapter | Registry | Per-option render (decorative) |
+|---|---|---|
+| React / RN | `const OPTION_ICONS = { 'icon.check': Check, … }` + `<OptionIcon>` helper | `<OptionIcon token={opt.icon} />` (`aria-hidden` / `accessibilityElementsHidden`) |
+| Vue | `const OPTION_ICONS = { … }` | `<component v-if=… :is="OPTION_ICONS[opt.icon]" aria-hidden="true" />` |
+| Svelte | `const OPTION_ICONS = { … }` | `<svelte:component this={OPTION_ICONS[opt.icon]} aria-hidden="true" />` |
+| SwiftUI | `static let optionIconSymbols: [String:String]` (token → SF Symbol) | `Label(opt.label, systemImage: Self.optionIconSymbols[opt.icon] ?? "").tag(opt.value)` |
+| Compose | `val OPTION_ICONS = mapOf("icon.check" to Icons.Default.Check, …)` | `OPTION_ICONS[opt.icon]?.let { Icon(it, contentDescription = null) }` |
+
+The icon is **decorative** on every platform (the visible label is the accessible
+text), honoring the existing icon-a11y rule. `option-icon` is a declared ledger
+trait expressed on all 6 → a silent drop is impossible.
+
+## Native Select — refused (option C)
+
+A `selected-value` input WITHOUT `role=radiogroup` whose options itemShape carries
+`icon` is refused (`rich-option-select`): *"native select options are text-only;
+for icons use RadioGroup (few options) or a custom-overlay picker (Radix / native
+picker) for a dropdown."* This mirrors the Modal→Radix / custom-overlay-select
+boundary — icon-bearing dropdowns are overlay territory. No silent drop, no
+half-feature.
+
+## Breadth matrix — F-25 proofs
+
+| Component | React | Vue | Svelte | RN | SwiftUI | Compose | Gates | Outcome | Notes |
+|---|---|---|---|---|---|---|---|---|---|
+| **RadioGroupIcons** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 9/9 pass | **PASS** | decorative per-option icon + label via runtime registry; `option-icon` expressed, 0 unaccounted; no per-option expression (F-23 idiom intact). |
+
+## Proofs (fired)
+
+```
+RadioGroup icon options    → icon + label on all 6 (decorative), option-icon expressed
+native Select + icon       → REFUSED  rich-option-select  (→ RadioGroup / overlay picker)
+native Select text-only    → generates (unchanged, P50)
+custom-overlay Select      → REFUSED  overlay  (unchanged)
+native rich output         → 0 per-option ternary/expression (F-23 idiom intact)
+```
+
+## Findings
+
+- **F-25 — RESOLVED (icon in RadioGroup; Select refused).** Supersedes the Phase-H
+  "logged, not built" entry.
+- **Per-option `disabled` — Logged (not built), by design.** Trivial/uniform for
+  the radio *control* (web `disabled`, RN Pressable `disabled`, Compose
+  `enabled =`), but **not uniform** across the selection surface: RN `Picker.Item`
+  has no per-item disable and a SwiftUI `Picker` (which is how RadioGroup lowers on
+  SwiftUI) cannot cleanly disable individual rows. Shipping it would be an
+  inconsistent half-feature, so it is logged per the scope lock, not built.
+- **Scope (unchanged):** icon = leaf icon-token only (no arbitrary image / nested
+  component); the F-23 selection idiom (bound value + native match, no per-option
+  expression) is untouched.
+
+## Gate / defense interaction
+
+- **Ledger 0-unaccounted** — `option-icon` expressed on all 6.
+- **native-code** does not over-flag the registry/Label/Icon constructs (no
+  `variant.prop` leak; native rich output has no ternary).
+- **token-guard** does not misfire — icon tokens (`icon.star`) and SF-symbol
+  strings are not colors/dimensions; the registry carries no hex/px.
+- **Mutation harness** 497 → **521** mutants; baseline clean, `drop-trait` 264/264
+  killed (includes `option-icon`), **no new survivor, no regression** (only F-22
+  survives).
+
+## Regression pins
+
+- **P67** — RadioGroup renders a decorative per-option icon + label on all 6 via the
+  runtime registry; `option-icon` expressed, 0 unaccounted; no per-option expression.
+- **P68** — an icon on a native Select option is refused (`rich-option-select`) with
+  the RadioGroup/overlay redirect; text-only Select + icon RadioGroup pass;
+  custom-overlay stays refused.
+
+`verify-patches` → **68/68**. `rm -rf out/ && node _shared/scripts/ci.mjs` → exit 0.

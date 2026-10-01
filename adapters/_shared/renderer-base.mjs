@@ -65,7 +65,21 @@ export class RendererBase {
     // F-12 number formatting: a formatted value is a trait every adapter must
     // express via its native formatter (or the ledger flags a silent drop).
     for (const f of ['text', 'label']) if (node[f]?.kind === 'format') t.push('number-format');
+    // F-25 rich options: a selected-value control whose options carry an `icon`
+    // field is a trait every adapter must render (RadioGroup) — the ledger flags
+    // a silent drop. (A native Select with icon options is refused upstream.)
+    if (this.hasOptionIcons(node)) t.push('option-icon');
     return t;
+  }
+
+  /** True if the node's control-state options array declares a per-option `icon`
+   *  field (F-25 rich options). Looks the options prop up in the IR props. */
+  hasOptionIcons(node) {
+    if (node.input?.state?.kind !== 'selected-value') return false;
+    const optName = node.input.state.options;
+    if (!optName) return false;
+    const p = (this.ir.props || []).find((x) => x.name === optName && x.type === 'array');
+    return !!(p && p.itemShape && 'icon' in p.itemShape);
   }
 
   /**

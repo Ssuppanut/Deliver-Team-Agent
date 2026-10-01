@@ -235,8 +235,13 @@ class ComposeRenderer extends RendererBase {
       if (role === 'radiogroup') this.express('role=radiogroup', { mechanism: 'Modifier.selectableGroup() + RadioButton per option' });
       else if (role) this.diverge(`role=${role}`, { reason: `no Compose Role for role "${role}" here`, fallback: 'selectable RadioButton group', waiver: `a11y-role-${role}` });
       this.express('state=selected-value', { mechanism: 'RadioButton group over options (selected = bound == option.value; hoisted onClick) — native match' });
+      // F-25 rich options: a decorative Material Icon (resolved at runtime from the
+      // icon-token registry) sits between the radio control and the label.
+      const rich = this.hasOptionIcons(node);
+      if (rich) { this.usesOptionIcons = true; this.express('option-icon', { mechanism: 'Material Icon via runtime registry (decorative, contentDescription = null)' }); }
+      const iconRow = rich ? `\n      OPTION_ICONS[opt.icon]?.let { Icon(it, contentDescription = null) }` : '';
       const items = cs.options
-        ? `${cs.options}.forEach { opt ->\n    Row {\n      RadioButton(selected = ${cs.value} == opt.value, onClick = { ${cs.change}(opt.value) })\n      Text(text = opt.label)\n    }\n  }`
+        ? `${cs.options}.forEach { opt ->\n    Row {\n      RadioButton(selected = ${cs.value} == opt.value, onClick = { ${cs.change}(opt.value) })${iconRow}\n      Text(text = opt.label)\n    }\n  }`
         // No option list: hoist the selection state to the caller (the options
         // are supplied by a component built on this primitive).
         : `val selectedValue = ${cs.value}\n  val onSelectedChange = ${cs.change}`;
@@ -358,8 +363,12 @@ class ComposeRenderer extends RendererBase {
         + Object.entries(arrayProp.itemShape).map(([k, t]) => `  val ${k}: ${t === 'number' ? 'Double' : t === 'boolean' ? 'Boolean' : 'String'}`).join(',\n')
         + `\n)\n\n`
       : '';
-    const iconImport = this.usedIcons.size
+    const iconImport = (this.usedIcons.size || this.usesOptionIcons)
       ? `import androidx.compose.material.icons.Icons\nimport androidx.compose.material.icons.filled.*\n`
+      : '';
+    // F-25: runtime registry mapping the known icon tokens to Material ImageVectors.
+    const optionIcons = this.usesOptionIcons
+      ? `val OPTION_ICONS = mapOf(${Object.entries(this.iconMap).map(([t, sym]) => `${JSON.stringify(t)} to Icons.Default.${sym}`).join(', ')})\n\n`
       : '';
     // Semantics extras are imported only when the body actually emits them.
     const semExtra =
@@ -380,7 +389,7 @@ class ComposeRenderer extends RendererBase {
       + `import androidx.compose.foundation.clickable\n`
       + `import coil.compose.AsyncImage\n`
       + `${iconImport}import designtokens.DesignTokens\n\n`
-      + `${itemClass}@Composable\nfun ${name}(\n${params}\n) {\n${indent(root, 2)}\n}\n`;
+      + `${itemClass}${optionIcons}@Composable\nfun ${name}(\n${params}\n) {\n${indent(root, 2)}\n}\n`;
   }
 }
 

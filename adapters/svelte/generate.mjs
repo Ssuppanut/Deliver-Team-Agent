@@ -117,6 +117,15 @@ class SvelteRenderer extends RendererBase {
     return aria;
   }
 
+  // F-25 rich options: per-option decorative icon via the emitted runtime registry.
+  richOptionIcon(node) {
+    if (!this.hasOptionIcons(node)) return '';
+    this.usesOptionIcons = true;
+    for (const sym of Object.values(this.iconMap)) this.usedIcons.add(sym);
+    this.express('option-icon', { mechanism: 'per-option lucide icon via runtime registry (decorative, aria-hidden)' });
+    return '<svelte:component this={OPTION_ICONS[opt.icon]} aria-hidden="true" />\n      ';
+  }
+
   renderControlState(node, cs) {
     const id = node.id || `${this.ir.component.toLowerCase()}-${cs.value ?? 'input'}`;
     const labelEl = node.label ? `<label for="${id}">${this.interp(node.label)}</label>\n` : '';
@@ -129,8 +138,9 @@ class SvelteRenderer extends RendererBase {
     if (cs.kind === 'selected-value') {
       if (node.role === 'radiogroup') {
         this.express('state=selected-value', { mechanism: 'radiogroup: name-grouped radios, checked from bound value + on:change (controlled)' });
+        const ic = this.richOptionIcon(node);
         const items = cs.options
-          ? `\n  {#each ${cs.options} as opt (opt.value)}\n    <label>\n      <input type="radio" name="${id}" value={opt.value} checked={${cs.value} === opt.value} on:change={() => ${cs.change}(opt.value)} />\n      {opt.label}\n    </label>\n  {/each}\n`
+          ? `\n  {#each ${cs.options} as opt (opt.value)}\n    <label>\n      <input type="radio" name="${id}" value={opt.value} checked={${cs.value} === opt.value} on:change={() => ${cs.change}(opt.value)} />\n      ${ic}{opt.label}\n    </label>\n  {/each}\n`
           : '';
         return `${labelEl}<div id="${id}"${tail}>${items}</div>`;
       }
@@ -209,7 +219,11 @@ class SvelteRenderer extends RendererBase {
     const iconImport = this.usedIcons.size
       ? `  import { ${[...this.usedIcons].join(', ')} } from '${ICON_LIB}';\n`
       : '';
-    return `<script lang="ts">\n${iconImport}  import '../../_shared/tokens/tokens.css';\n\n${decls}\n</script>\n\n${root}\n`;
+    // F-25: runtime registry mapping known icon tokens to lucide components.
+    const optionIcons = this.usesOptionIcons
+      ? `\n  const OPTION_ICONS: Record<string, unknown> = { ${Object.entries(this.iconMap).map(([t, sym]) => `${JSON.stringify(t)}: ${sym}`).join(', ')} };`
+      : '';
+    return `<script lang="ts">\n${iconImport}  import '../../_shared/tokens/tokens.css';\n\n${decls}${optionIcons}\n</script>\n\n${root}\n`;
   }
 }
 

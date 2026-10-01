@@ -120,6 +120,33 @@ function findBadFormat(node) {
   return null;
 }
 
+/**
+ * F-25 rich options (option C): a RadioGroup may carry icon options, but a native
+ * Select (`selected-value` without role=radiogroup) is text-only by the platform's
+ * own design (HTML <option> / RN Picker.Item host text only). An `icon` on a native
+ * Select option is refused — never silently dropped, never a half-feature — and
+ * redirected to RadioGroup or a custom-overlay picker, mirroring the overlay /
+ * custom-select boundary. Icons are leaf icon-tokens; the itemShape carrying `icon`
+ * is the signal.
+ */
+function findRichSelectOption(spec) {
+  const props = spec?.props || [];
+  const hasIconOption = (optName) => {
+    const p = props.find((x) => x.name === optName && x.type === 'array');
+    return !!(p && p.itemShape && 'icon' in p.itemShape);
+  };
+  let hit = false;
+  const walk = (node) => {
+    if (!node || typeof node !== 'object' || hit) return;
+    const st = node.input?.state;
+    if (st?.kind === 'selected-value' && st.options && node.role !== 'radiogroup' && hasIconOption(st.options)) { hit = true; return; }
+    for (const c of node.children ?? []) walk(c);
+    for (const b of [node.then, node.else]) if (b) walk(b);
+  };
+  walk(spec?.root);
+  return hit;
+}
+
 /** Walk the spec tree (children + conditional then/else) for a refusable
  *  condition. `loopVars` are the iteration variables in scope for this subtree,
  *  so a per-item condition may read `<loopvar>.field` but nothing else. */
@@ -152,6 +179,16 @@ export function checkRefusal(spec) {
   const category = spec?.category;
   if (category && category in REFUSED) {
     return { category, ...REFUSED[category] };
+  }
+  // F-25: an icon on a native Select option is out of scope (text-only platform
+  // control) — refuse and redirect to RadioGroup / a custom-overlay picker.
+  if (findRichSelectOption(spec)) {
+    return {
+      category: 'rich-option-select',
+      reason: 'native select options are text-only (HTML <option> / RN Picker.Item host text only), so an icon on a Select option cannot render uniformly across platforms',
+      redirect: 'native select options are text-only; for icons use RadioGroup (few options) or a custom-overlay picker (Radix / native picker) for a dropdown',
+      reference: 'knowledge/pattern-library/references/overlays.md',
+    };
   }
   const bad = spec?.root ? findBadCondition(spec.root) : null;
   if (bad?.kind === 'variant') {

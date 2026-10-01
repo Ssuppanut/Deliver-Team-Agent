@@ -123,6 +123,15 @@ class VueRenderer extends RendererBase {
     return aria;
   }
 
+  // F-25 rich options: per-option decorative icon via the emitted runtime registry.
+  richOptionIcon(node) {
+    if (!this.hasOptionIcons(node)) return '';
+    this.usesOptionIcons = true;
+    for (const sym of Object.values(this.iconMap)) this.usedIcons.add(sym);
+    this.express('option-icon', { mechanism: 'per-option lucide icon via runtime registry (decorative, aria-hidden)' });
+    return '<component v-if="OPTION_ICONS[opt.icon]" :is="OPTION_ICONS[opt.icon]" aria-hidden="true" />\n    ';
+  }
+
   renderControlState(node, cs) {
     const id = node.id || `${this.ir.component.toLowerCase()}-${cs.value ?? 'input'}`;
     const labelEl = node.label ? `<label for="${id}">${this.interp(node.label)}</label>\n` : '';
@@ -135,8 +144,9 @@ class VueRenderer extends RendererBase {
     if (cs.kind === 'selected-value') {
       if (node.role === 'radiogroup') {
         this.express('state=selected-value', { mechanism: 'radiogroup: name-grouped radios, :checked from bound value + @change (controlled)' });
+        const ic = this.richOptionIcon(node);
         const items = cs.options
-          ? `\n  <label v-for="opt in ${cs.options}" :key="opt.value">\n    <input type="radio" name="${id}" :value="opt.value" :checked="${cs.value} === opt.value" @change="${cs.change}(opt.value)" />\n    {{ opt.label }}\n  </label>\n`
+          ? `\n  <label v-for="opt in ${cs.options}" :key="opt.value">\n    <input type="radio" name="${id}" :value="opt.value" :checked="${cs.value} === opt.value" @change="${cs.change}(opt.value)" />\n    ${ic}{{ opt.label }}\n  </label>\n`
           : '';
         return `${labelEl}<div id="${id}"${tail}>${items}</div>`;
       }
@@ -214,8 +224,12 @@ class VueRenderer extends RendererBase {
     const iconImport = this.usedIcons.size
       ? `import { ${[...this.usedIcons].join(', ')} } from '${ICON_LIB}';\n`
       : '';
+    // F-25: runtime registry mapping known icon tokens to lucide components.
+    const optionIcons = this.usesOptionIcons
+      ? `const OPTION_ICONS: Record<string, unknown> = { ${Object.entries(this.iconMap).map(([t, sym]) => `${JSON.stringify(t)}: ${sym}`).join(', ')} };\n`
+      : '';
     return `<script setup lang="ts">\n${iconImport}import '../../_shared/tokens/tokens.css';\n\n`
-      + `defineProps<{\n${props}\n}>();\n</script>\n\n`
+      + `defineProps<{\n${props}\n}>();\n${optionIcons}</script>\n\n`
       + `<template>\n${indent(root, 2)}\n</template>\n`;
   }
 }

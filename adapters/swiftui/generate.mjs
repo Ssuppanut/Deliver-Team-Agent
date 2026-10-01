@@ -197,8 +197,15 @@ class SwiftUIRenderer extends RendererBase {
       if (role === 'radiogroup') this.express('role=radiogroup', { mechanism: 'Picker (single-select group)' });
       else if (role) this.diverge(`role=${role}`, { reason: `no direct SwiftUI trait for role "${role}"`, fallback: 'Picker conveys single-select', waiver: `a11y-role-${role}` });
       this.express('state=selected-value', { mechanism: 'Picker(selection: @Binding) + ForEach options with .tag (native match, no expression)' });
+      // F-25 rich options: a Label(title, systemImage:) renders a decorative SF
+      // Symbol (resolved at runtime from the icon-token registry) beside the label.
+      const rich = this.hasOptionIcons(node);
+      if (rich) { this.usesOptionIcons = true; this.express('option-icon', { mechanism: 'Label(systemImage:) SF Symbol via runtime registry (decorative)' }); }
+      const row = rich
+        ? `Label(opt.label, systemImage: Self.optionIconSymbols[opt.icon] ?? "").tag(opt.value)`
+        : `Text(opt.label).tag(opt.value)`;
       const items = cs.options
-        ? `\n  ForEach(${safe(cs.options)}, id: \\.value) { opt in\n    Text(opt.label).tag(opt.value)\n  }\n`
+        ? `\n  ForEach(${safe(cs.options)}, id: \\.value) { opt in\n    ${row}\n  }\n`
         : `\n  // options supplied by the component\n`;
       return `Picker(${title}, selection: ${bind}) {${items}}${this.modifiers(node)}`;
     }
@@ -324,7 +331,12 @@ class SwiftUIRenderer extends RendererBase {
         + (hasId ? '' : `\n  let id = UUID().uuidString`)
         + `\n}\n\n`
       : '';
-    return `import SwiftUI\n\n${itemStruct}struct ${name}: View {\n${stored}\n\n  var body: some View {\n${indent(root, 4)}\n  }\n}\n`;
+    // F-25: static registry mapping the known icon tokens to SF Symbol names
+    // (private/static → excluded from the memberwise initializer).
+    const optionIcons = this.usesOptionIcons
+      ? `  static let optionIconSymbols: [String: String] = [${Object.entries(this.iconMap).map(([t, sym]) => `${JSON.stringify(t)}: ${JSON.stringify(sym)}`).join(', ')}]\n\n`
+      : '';
+    return `import SwiftUI\n\n${itemStruct}struct ${name}: View {\n${stored}\n\n${optionIcons}  var body: some View {\n${indent(root, 4)}\n  }\n}\n`;
   }
 }
 

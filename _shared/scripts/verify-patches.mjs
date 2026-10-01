@@ -1170,6 +1170,52 @@ check('P66', 'number-format (F-12): an expression as locale/currency/number-sour
   assert(/NumberFormatter\(\)/.test(generateSwiftUI(TOKEN_AMOUNT, '_verify').code), 'F-11 .toFixed precision path must still format via NumberFormatter');
 });
 
+// --- F-25 rich options: icon in RadioGroup; icon on native Select refused (P67-P68)
+const RADIO_ICONS = resolve(ROOT, '.claude/artifacts/radio-group-icons/design-spec.yaml');
+const richGenAll = (spec, feat) => ({
+  react: generateReact(spec, feat), vue: generateVue(spec, feat), svelte: generateSvelte(spec, feat),
+  'react-native': generateReactNative(spec, feat), swiftui: generateSwiftUI(spec, feat), compose: generateCompose(spec, feat),
+});
+
+// --- P67: RadioGroup with icon options renders a decorative per-option icon on all 6
+check('P67', 'rich options (F-25): RadioGroup renders a decorative per-option icon + label on all 6 via a runtime icon-token registry; option-icon expressed, 0 unaccounted', () => {
+  const out = richGenAll(RADIO_ICONS, 'verify-radio-icons');
+  const pat = {
+    react: /const OPTION_ICONS[\s\S]*<OptionIcon token=\{opt\.icon\} \/>[\s\S]*\{opt\.label\}/,
+    vue: /const OPTION_ICONS[\s\S]*<component v-if="OPTION_ICONS\[opt\.icon\]" :is="OPTION_ICONS\[opt\.icon\]" aria-hidden="true" \/>[\s\S]*\{\{ opt\.label \}\}/,
+    svelte: /const OPTION_ICONS[\s\S]*<svelte:component this=\{OPTION_ICONS\[opt\.icon\]\} aria-hidden="true" \/>[\s\S]*\{opt\.label\}/,
+    'react-native': /const OPTION_ICONS[\s\S]*<OptionIcon token=\{opt\.icon\} \/>[\s\S]*<Text>\{opt\.label\}<\/Text>/,
+    swiftui: /static let optionIconSymbols[\s\S]*Label\(opt\.label, systemImage: Self\.optionIconSymbols\[opt\.icon\] \?\? ""\)\.tag\(opt\.value\)/,
+    compose: /val OPTION_ICONS = mapOf\([\s\S]*OPTION_ICONS\[opt\.icon\]\?\.let \{ Icon\(it, contentDescription = null\) \}[\s\S]*Text\(text = opt\.label\)/,
+  };
+  for (const [ad, re] of Object.entries(pat)) assert(re.test(out[ad].code), `${ad}: rich-option icon not rendered as expected`);
+  // Icon is decorative on every platform (label carries the accessible text).
+  assert(/aria-hidden/.test(out.react.code) && /aria-hidden/.test(out.vue.code) && /aria-hidden/.test(out.svelte.code), 'web: option icon must be aria-hidden');
+  assert(/accessibilityElementsHidden|importantForAccessibility="no"/.test(out['react-native'].code), 'rn: option icon must be hidden from a11y');
+  assert(/contentDescription = null/.test(out.compose.code), 'compose: option icon must be decorative (contentDescription = null)');
+  for (const [ad, r] of Object.entries(out)) {
+    const e = r.ledger.find((x) => x.traitId === 'option-icon');
+    assert(e && e.status === 'expressed' && e.mechanism, `${ad}: option-icon must be expressed`);
+    assert(!r.ledger.some((x) => x.status === 'unaccounted'), `${ad}: no trait may be unaccounted`);
+  }
+  // F-23 idiom intact: native rich output carries no per-option expression/ternary.
+  for (const ad of ['swiftui', 'compose']) assert(!/\?[^:\n]*:/.test(out[ad].code.replace(/\?\? ""/g, '')), `${ad}: no per-option ternary/expression may leak`);
+});
+
+// --- P68: an icon on a native Select option is REFUSED; text-only Select passes
+check('P68', 'rich options (F-25): an icon on a native Select option is refused (rich-option-select) with the RadioGroup/overlay redirect; text-only Select + icon RadioGroup pass; custom-overlay still refused', () => {
+  const sel = (role, withIcon) => ({ category: 'input', props: [
+    { name: 'choice', type: 'string' }, { name: 'onChoiceChange', type: 'function' },
+    { name: 'options', type: 'array', itemShape: withIcon ? { value: 'string', label: 'string', icon: 'string' } : { value: 'string', label: 'string' } },
+  ], root: { el: 'input', ...(role ? { role } : {}), label: { kind: 'literal', value: 'x' }, input: { valueProp: 'choice', changeProp: 'onChoiceChange', state: { kind: 'selected-value', options: 'options' } } } });
+  const r = checkRefusal(sel(null, true));
+  assert(r && r.category === 'rich-option-select', 'an icon on a native Select option must be refused');
+  assert(/RadioGroup/.test(r.redirect) && /text-only/.test(r.redirect), 'the refusal must redirect to RadioGroup / custom-overlay picker');
+  assert(checkRefusal(sel(null, false)) === null, 'a text-only native Select must still pass');
+  assert(checkRefusal(sel('radiogroup', true)) === null, 'an icon RadioGroup must pass');
+  assert(checkRefusal({ category: 'overlay', root: { el: 'container' } })?.category === 'overlay', 'a custom-overlay select must stay refused');
+});
+
 console.log('\n=== verify-patches ===');
 console.log(results.join('\n'));
 console.log(`\n${pass} passed, ${fail} failed\n`);
