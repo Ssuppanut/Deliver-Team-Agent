@@ -41,10 +41,24 @@ class SwiftUIRenderer extends RendererBase {
     lines.push(`return f.string(from: NSNumber(value: ${num})) ?? String(${num})`);
     return `Text({ ${lines.join('; ')} }())`;
   }
+  // F-26 date/time formatting — DateFormatter (dateStyle / timeStyle presets +
+  // locale). Mirrors the NumberFormatter approach; presets only, no custom pattern.
+  formatDate(fmt) {
+    const sv = (o) => (o.kind === 'literal' ? JSON.stringify(String(o.value)) : safe(o.value));
+    const STYLE = { short: '.short', medium: '.medium', long: '.long' };
+    const src = safe(fmt.value.value);
+    const lines = ['let f = DateFormatter()'];
+    if (fmt.locale) lines.push(`f.locale = Locale(identifier: ${sv(fmt.locale)})`);
+    lines.push(`f.dateStyle = ${fmt.dateStyle ? STYLE[fmt.dateStyle] : '.none'}`);
+    lines.push(`f.timeStyle = ${fmt.timeStyle ? STYLE[fmt.timeStyle] : '.none'}`);
+    lines.push(`return f.string(from: ${src})`);
+    return `Text({ ${lines.join('; ')} }())`;
+  }
   textExpr(vr) {
     if (!vr) return 'Text("")';
     if (vr.kind === 'literal') return `Text(${JSON.stringify(String(vr.value))})`;
     if (vr.kind === 'format') { this.express('number-format', { mechanism: 'NumberFormatter' }); return this.formatNumber(this.numberFormat(vr)); }
+    if (vr.kind === 'datetime') { this.express('date-format', { mechanism: 'DateFormatter' }); return this.formatDate(this.dateFormat(vr)); }
     if (vr.kind === 'ref') return `Text(String(describing: ${safe(vr.value)}))`;
     // F-11 (precision-only): `<num>.toFixed(<precision>)` -> a real native decimal
     // formatter with `precision` fraction digits. No locale / grouping / currency
@@ -307,6 +321,7 @@ class SwiftUIRenderer extends RendererBase {
     switch (prop.type) {
       case 'number': return opt ? 'Double?' : 'Double';
       case 'boolean': return opt ? 'Bool?' : 'Bool';
+      case 'date': return opt ? 'Date?' : 'Date';
       case 'function': {
         const base = /change/i.test(prop.name) ? '(String) -> Void' : '() -> Void';
         return opt ? `(${base})?` : base;

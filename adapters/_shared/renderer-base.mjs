@@ -69,6 +69,9 @@ export class RendererBase {
     // field is a trait every adapter must render (RadioGroup) — the ledger flags
     // a silent drop. (A native Select with icon options is refused upstream.)
     if (this.hasOptionIcons(node)) t.push('option-icon');
+    // F-26 date/time formatting: a datetime value is a trait every adapter must
+    // express via its native date formatter (or the ledger flags a silent drop).
+    for (const f of ['text', 'label']) if (node[f]?.kind === 'datetime') t.push('date-format');
     return t;
   }
 
@@ -142,6 +145,38 @@ export class RendererBase {
     if (fmt.precision) opts.push(`minimumFractionDigits: ${jsv(fmt.precision)}, maximumFractionDigits: ${jsv(fmt.precision)}`);
     const locale = fmt.locale ? jsv(fmt.locale) : 'undefined';
     return `new Intl.NumberFormat(${locale}, { ${opts.join(', ')} }).format(${jsv(fmt.value)})`;
+  }
+
+  /**
+   * Normalize a date/time-format value (kind=datetime, F-26). dateStyle/timeStyle
+   * are native presets (literals); locale is a static literal or a plain prop ref.
+   * @returns {null | { value, dateStyle, timeStyle, locale }}
+   */
+  dateFormat(vr) {
+    if (!vr || vr.kind !== 'datetime') return null;
+    const f = vr.dateFormat || {};
+    const opt = (x) => (x == null ? undefined
+      : (typeof x === 'object' && 'kind' in x ? { kind: x.kind, value: x.value } : { kind: 'literal', value: x }));
+    return {
+      value: { kind: 'ref', value: vr.value },  // the date source (a date prop)
+      dateStyle: f.dateStyle,                     // 'short' | 'medium' | 'long' (preset)
+      timeStyle: f.timeStyle,                     // 'short' | 'medium' | 'long' (preset)
+      locale: opt(f.locale),
+    };
+  }
+
+  /**
+   * Build the JS `Intl.DateTimeFormat(...).format(...)` expression for a date
+   * descriptor. Shared by every web adapter and React Native. Presets only
+   * (dateStyle/timeStyle); no custom pattern string. Pure string builder.
+   */
+  intlDateExpr(fmt) {
+    const jsv = (o) => (o.kind === 'literal' ? JSON.stringify(o.value) : String(o.value));
+    const opts = [];
+    if (fmt.dateStyle) opts.push(`dateStyle: ${JSON.stringify(fmt.dateStyle)}`);
+    if (fmt.timeStyle) opts.push(`timeStyle: ${JSON.stringify(fmt.timeStyle)}`);
+    const locale = fmt.locale ? jsv(fmt.locale) : 'undefined';
+    return `new Intl.DateTimeFormat(${locale}, { ${opts.join(', ')} }).format(${jsv(fmt.value)})`;
   }
 
   /** Account for a trait: this adapter emitted it via a real platform mechanism. */

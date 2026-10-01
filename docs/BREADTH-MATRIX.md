@@ -1781,3 +1781,115 @@ native rich output         → 0 per-option ternary/expression (F-23 idiom intac
   custom-overlay stays refused.
 
 `verify-patches` → **68/68**. `rm -rf out/ && node _shared/scripts/ci.mjs` → exit 0.
+
+---
+
+# F-26 — Date/time formatting (presets + locale)
+
+F-12 logged F-26 (date/time formatting) as out of scope for the number pass. This
+phase builds it, mirroring the F-12 shape with a distinct `kind: datetime` value
+and each platform's **native date formatter** (a separate API from number
+formatting).
+
+## Authoring — `kind: datetime`
+
+```yaml
+text:
+  kind: datetime
+  value: when            # date source: a plain prop ref of a `date` prop
+  dateFormat:
+    dateStyle: medium    # short | medium | long  (native preset; omit for time-only)
+    timeStyle: short     # short | medium | long  (native preset; omit for date-only)
+    locale: en-GB        # literal, OR { kind: ref, value: userLocale }
+```
+
+A new `date` prop type carries the source natively (`Date` on web/RN/SwiftUI,
+`java.util.Date` on Compose). `dateStyle`/`timeStyle` are **native presets** (no
+custom pattern string); `locale` is a static literal or a plain prop ref. An
+expression as locale or date-source is **refused** (`expression-date-format`, F-9).
+
+## Native mapping — one date formatter per adapter
+
+| Dimension | Web + RN (`Intl.DateTimeFormat`) | SwiftUI (`DateFormatter`) | Compose (`java.text.DateFormat`) |
+|---|---|---|---|
+| dateStyle | `dateStyle: 'short'/'medium'/'long'` | `dateStyle = .short/.medium/.long` | `DateFormat.SHORT/MEDIUM/LONG` |
+| timeStyle | `timeStyle: '…'` | `timeStyle = .…` | `DateFormat.…` |
+| locale | 1st arg `'en-GB'` / `undefined` | `locale = Locale(identifier:)` | `forLanguageTag(...)` |
+| instance | `new Intl.DateTimeFormat(...).format(when)` | `f.string(from: when)` | `getDate/Time/DateTimeInstance(...).format(when)` |
+
+Compose picks `getDateInstance` / `getTimeInstance` / `getDateTimeInstance` by
+which of dateStyle/timeStyle are present.
+
+### Sample output (EventDateTime — en-GB, medium date + short time)
+
+```
+web/RN   new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(when)
+SwiftUI  { let f = DateFormatter(); f.locale = Locale(identifier: "en-GB"); f.dateStyle = .medium;
+           f.timeStyle = .short; return f.string(from: when) }()
+Compose  java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT,
+           java.util.Locale.forLanguageTag("en-GB")).format(when)
+```
+
+## Breadth matrix — F-26 proofs
+
+| Component | React | Vue | Svelte | RN | SwiftUI | Compose | Gates | Outcome | Notes |
+|---|---|---|---|---|---|---|---|---|---|
+| **EventDateTime** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 9/9 pass | **PASS** | medium date + short time + en-GB compose into one native date formatter on all 6; `date` prop typed natively; `date-format` expressed, 0 unaccounted. |
+| **EventDateLocale** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 9/9 pass | **PASS** | long date with a **runtime locale prop-ref** — `userLocale` drives the formatter locale on all 6 (bound, not stringified). |
+
+## Divergence
+
+**None.** short/medium/long date and time presets exist on every platform's native
+date formatter, so every option is `express`ed on all 6 — no `diverge`, no waiver.
+
+## Findings
+
+- **F-26 — RESOLVED.** Date/time formatting ships on all 6 via native date
+  formatters (Intl.DateTimeFormat / DateFormatter / java.text.DateFormat), presets
+  + locale, static or prop-ref locale, ledger-accounted, no divergence. The F-11/
+  F-12 number path is untouched (separate value kind, separate formatter).
+- **F-27 — Logged (new, out of scope): timezone handling.** Not built this phase
+  (per scope lock). A full timezone capability (zone data, DST, `timeZone` option
+  across Intl / `TimeZone` / `java.util.TimeZone`) is a distinct future pass; a
+  simple static `timeZone` option could be added later if a uniform need appears.
+- **Residual (by design):** custom date pattern strings (`yyyy-MM-dd`) are out of
+  scope — native presets only, the same boundary as F-12.
+
+## Gate / defense interaction
+
+- **Ledger 0-unaccounted** — `date-format` expressed on all 6.
+- **native-code** does not over-flag native date formatters (no `variant.prop`
+  leak); native has **no `Intl`**, web has **no native date formatter** (P69).
+- **token-guard** does not misfire — locale tags / style presets are formatter
+  config, not colors/dimensions.
+- **Mutation harness** 521 → **543** mutants; baseline clean, **no new survivor, no
+  regression** (only `state-by-color-only`/F-22 survives).
+
+## Proofs (fired)
+
+```
+date+time styles + locale   → one native date formatter on all 6 (EventDateTime)
+locale prop-ref (userLocale)→ binds the prop on all 6 (EventDateLocale)
+expression as locale        → REFUSED  expression-date-format
+expression date source      → REFUSED  expression-date-format
+preset-only                 → short/medium/long (no custom pattern string)
+number/precision path       → untouched (F-11/F-12 specs still PASS)
+```
+
+## Regression pins
+
+- **P69** — date+time styles + locale compose into one native date formatter on all
+  6; `date` prop typed natively; `date-format` expressed, 0 unaccounted; no
+  cross-platform leak; native-code + token-guard do not misfire.
+- **P70** — static locale and prop-ref locale both drive the date formatter on all
+  6; expression as locale / date-source refused; presets only.
+
+`verify-patches` → **70/70**. `rm -rf out/ && node _shared/scripts/ci.mjs` → exit 0.
+
+## Scope — what this did not touch
+
+Per the F-26 scope lock: native presets only (no custom pattern strings); no
+timezone capability (logged as F-27); no expressions as locale/date-source/style
+(F-9); the F-11/F-12 number path is a separate value kind and formatter, untouched;
+the F-25 rich-option work is independent; no gate or the ledger weakened; no changes
+to agents / skills / workflow / AI-router.

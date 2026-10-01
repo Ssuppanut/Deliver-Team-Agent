@@ -21,6 +21,7 @@ class ReactRenderer extends RendererBase {
     if (!vr) return '';
     if (vr.kind === 'literal') return escapeJsx(vr.value);
     if (vr.kind === 'format') { this.express('number-format', { mechanism: 'Intl.NumberFormat' }); return `{${this.intlFormatExpr(this.numberFormat(vr))}}`; }
+    if (vr.kind === 'datetime') { this.express('date-format', { mechanism: 'Intl.DateTimeFormat' }); return `{${this.intlDateExpr(this.dateFormat(vr))}}`; }
     return `{${vr.value}}`;
   }
 
@@ -256,6 +257,7 @@ class ReactRenderer extends RendererBase {
       case 'string': return 'string';
       case 'number': return 'number';
       case 'boolean': return 'boolean';
+      case 'date': return 'Date';
       case 'function': return /change/i.test(prop.name) ? '(value: string) => void' : '() => void';
       case 'enum': return (prop.values ?? []).map((v) => `'${v}'`).join(' | ') || 'string';
       case 'node': return 'React.ReactNode';

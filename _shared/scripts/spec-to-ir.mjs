@@ -29,7 +29,8 @@ function normValue(v) {
   if (v == null) return null;
   if (typeof v === 'object' && 'kind' in v) {
     const out = { kind: v.kind, value: v.value };
-    if (v.kind === 'format' && v.format) out.format = v.format;
+    if (v.kind === 'format' && v.format) out.format = v.format;        // F-11/F-12
+    if (v.kind === 'datetime' && v.dateFormat) out.dateFormat = v.dateFormat; // F-26
     return out;
   }
   return { kind: 'literal', value: v };

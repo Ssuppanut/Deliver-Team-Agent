@@ -1216,6 +1216,54 @@ check('P68', 'rich options (F-25): an icon on a native Select option is refused 
   assert(checkRefusal({ category: 'overlay', root: { el: 'container' } })?.category === 'overlay', 'a custom-overlay select must stay refused');
 });
 
+// --- F-26 date/time formatting: presets + locale (P69-P70) --------------------
+const EVENT_DT = resolve(ROOT, '.claude/artifacts/event-datetime/design-spec.yaml');
+const EVENT_DT_LOC = resolve(ROOT, '.claude/artifacts/event-datetime-locale/design-spec.yaml');
+const dateGenAll = (spec, feat) => ({
+  react: generateReact(spec, feat), vue: generateVue(spec, feat), svelte: generateSvelte(spec, feat),
+  'react-native': generateReactNative(spec, feat), swiftui: generateSwiftUI(spec, feat), compose: generateCompose(spec, feat),
+});
+
+// --- P69: a date/time value formats via the native date formatter on all 6 ----
+check('P69', 'date-format (F-26): date+time styles + locale compose into ONE native date formatter on all 6; date prop typed natively; date-format expressed, 0 unaccounted; no cross-platform leak', () => {
+  const out = dateGenAll(EVENT_DT, 'verify-event-dt');
+  const web = /new Intl\.DateTimeFormat\("en-GB", \{ dateStyle: "medium", timeStyle: "short" \}\)\.format\(when\)/;
+  for (const ad of ['react', 'vue', 'svelte', 'react-native']) assert(web.test(out[ad].code), `${ad}: Intl.DateTimeFormat not composed`);
+  assert(/DateFormatter\(\); f\.locale = Locale\(identifier: "en-GB"\); f\.dateStyle = \.medium; f\.timeStyle = \.short; return f\.string\(from: when\)/.test(out.swiftui.code), 'swiftui: DateFormatter must compose styles+locale');
+  assert(/java\.text\.DateFormat\.getDateTimeInstance\(java\.text\.DateFormat\.MEDIUM, java\.text\.DateFormat\.SHORT, java\.util\.Locale\.forLanguageTag\("en-GB"\)\)\.format\(when\)/.test(out.compose.code), 'compose: getDateTimeInstance must compose styles+locale');
+  // date prop typed natively.
+  assert(/when: Date/.test(out.react.code) && /let when: Date/.test(out.swiftui.code) && /when: java\.util\.Date/.test(out.compose.code), 'date prop must be typed natively (Date / java.util.Date)');
+  for (const [ad, r] of Object.entries(out)) {
+    const e = r.ledger.find((x) => x.traitId === 'date-format');
+    assert(e && e.status === 'expressed' && e.mechanism, `${ad}: date-format must be expressed`);
+    assert(!r.ledger.some((x) => x.status === 'unaccounted'), `${ad}: no trait may be unaccounted`);
+  }
+  for (const ad of ['swiftui', 'compose']) assert(!/Intl\.DateTimeFormat/.test(out[ad].code), `${ad}: must not emit Intl`);
+  for (const ad of ['react', 'vue', 'svelte', 'react-native']) assert(!/DateFormatter|java\.text\.DateFormat/.test(out[ad].code), `${ad}: must not emit a native date formatter`);
+  const ir = specToIrFromFile(EVENT_DT);
+  assert(checkNativeExprLeak(ir, out).ok, 'native-code must not flag native date-formatter constructs');
+  assert(checkTokens(ir, out).ok, 'token-guard must not misfire on locale/date config');
+});
+
+// --- P70: locale static + prop-ref both generate; expression refused; preset-only
+check('P70', 'date-format (F-26): a static locale and a prop-ref locale both drive the date formatter on all 6; an expression as locale/date-source is refused; presets only', () => {
+  const ref = dateGenAll(EVENT_DT_LOC, 'verify-event-dt-loc');
+  const refPat = {
+    react: /Intl\.DateTimeFormat\(userLocale,/, vue: /Intl\.DateTimeFormat\(userLocale,/, svelte: /Intl\.DateTimeFormat\(userLocale,/,
+    'react-native': /Intl\.DateTimeFormat\(userLocale,/,
+    swiftui: /f\.locale = Locale\(identifier: userLocale\)/,
+    compose: /forLanguageTag\(userLocale\)/,
+  };
+  for (const [ad, re] of Object.entries(refPat)) assert(re.test(ref[ad].code), `${ad}: prop-ref locale must drive the date formatter`);
+  for (const ad of Object.keys(refPat)) assert(!/"userLocale"/.test(ref[ad].code), `${ad}: locale ref must bind the prop, not a string literal`);
+  // Refusals (F-9): expression as locale / date-source.
+  const mk = (df, value = 'when') => ({ root: { el: 'text', text: { kind: 'datetime', value, dateFormat: df } } });
+  assert(checkRefusal(mk({ dateStyle: 'long', locale: 'en-GB' })) === null, 'a static locale must pass');
+  assert(checkRefusal(mk({ dateStyle: 'long', locale: { kind: 'ref', value: 'userLocale' } })) === null, 'a plain prop-ref locale must pass');
+  assert(checkRefusal(mk({ dateStyle: 'long', locale: { kind: 'expr', value: 'nav.language' } }))?.category === 'expression-date-format', 'an expression as locale must be refused');
+  assert(checkRefusal(mk({ dateStyle: 'long' }, 'new Date()'))?.category === 'expression-date-format', 'an expression date source must be refused');
+});
+
 console.log('\n=== verify-patches ===');
 console.log(results.join('\n'));
 console.log(`\n${pass} passed, ${fail} failed\n`);

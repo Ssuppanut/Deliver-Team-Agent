@@ -38,10 +38,26 @@ class ComposeRenderer extends RendererBase {
     const applyBlock = app.length ? `.apply { ${app.join('; ')} }` : '';
     return `java.text.NumberFormat.${inst}(${localeArg})${applyBlock}.format(${num})`;
   }
+  // F-26 date/time formatting — java.text.DateFormat (dateStyle / timeStyle presets
+  // + locale). Mirrors the NumberFormat approach; presets only, no custom pattern.
+  formatDate(fmt) {
+    const sv = (o) => (o.kind === 'literal' ? JSON.stringify(String(o.value)) : o.value);
+    const STYLE = { short: 'SHORT', medium: 'MEDIUM', long: 'LONG' };
+    const src = fmt.value.value;
+    const loc = fmt.locale ? `java.util.Locale.forLanguageTag(${sv(fmt.locale)})` : '';
+    const D = fmt.dateStyle ? `java.text.DateFormat.${STYLE[fmt.dateStyle]}` : null;
+    const T = fmt.timeStyle ? `java.text.DateFormat.${STYLE[fmt.timeStyle]}` : null;
+    let inst;
+    if (D && T) inst = `getDateTimeInstance(${D}, ${T}${loc ? `, ${loc}` : ''})`;
+    else if (D) inst = `getDateInstance(${D}${loc ? `, ${loc}` : ''})`;
+    else inst = `getTimeInstance(${T}${loc ? `, ${loc}` : ''})`;
+    return `java.text.DateFormat.${inst}.format(${src})`;
+  }
   strExpr(vr) {
     if (!vr) return '""';
     if (vr.kind === 'literal') return JSON.stringify(String(vr.value));
     if (vr.kind === 'format') { this.express('number-format', { mechanism: 'java.text.NumberFormat' }); return this.formatNumber(this.numberFormat(vr)); }
+    if (vr.kind === 'datetime') { this.express('date-format', { mechanism: 'java.text.DateFormat' }); return this.formatDate(this.dateFormat(vr)); }
     if (vr.kind === 'ref') return vr.value;
     // F-11 (precision-only): `<num>.toFixed(<precision>)` -> a real native decimal
     // formatter with `precision` fraction digits. No locale / grouping / currency
@@ -345,6 +361,7 @@ class ComposeRenderer extends RendererBase {
     switch (prop.type) {
       case 'number': return opt ? 'Double?' : 'Double';
       case 'boolean': return opt ? 'Boolean?' : 'Boolean';
+      case 'date': return opt ? 'java.util.Date?' : 'java.util.Date';
       case 'function': {
         const base = /change/i.test(prop.name) ? '(String) -> Unit' : '() -> Unit';
         return opt ? `(${base})?` : base;

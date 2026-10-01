@@ -41,7 +41,7 @@ definitions:
       name: { type: string, pattern: "^[a-z][A-Za-z0-9]*$" }
       type:
         type: string
-        enum: [string, number, boolean, enum, array, function, node]
+        enum: [string, number, boolean, enum, array, function, node, date]
       required: { type: boolean }
       values:
         type: array
@@ -57,7 +57,7 @@ definitions:
     additionalProperties: false
     required: [kind, value]
     properties:
-      kind: { type: string, enum: [literal, ref, expr, format] }
+      kind: { type: string, enum: [literal, ref, expr, format, datetime] }
       value: {}
       format:
         $ref: "#/definitions/numberFormat"
@@ -66,6 +66,28 @@ definitions:
           source (a numeric literal or a plain prop ref). Precision (F-11) plus
           the four F-12 dimensions compose into one native formatter call per
           adapter (Intl.NumberFormat / NumberFormatter / java.text.NumberFormat).
+      dateFormat:
+        $ref: "#/definitions/dateTimeFormat"
+        description: >
+          Date/time-formatting descriptor (kind=datetime only, F-26). `value` is
+          the date source (a plain prop ref of a date prop). dateStyle / timeStyle
+          are native presets; locale is a literal or plain prop ref. Maps to one
+          native date formatter per adapter (Intl.DateTimeFormat / DateFormatter /
+          java.text.DateFormat).
+
+  dateTimeFormat:
+    type: object
+    additionalProperties: false
+    description: >
+      Native date/time-formatter options (F-26). dateStyle / timeStyle use native
+      PRESETS (short | medium | long) — never a custom pattern string. locale is a
+      STATIC literal or a plain prop ref ({ kind: ref, value: <prop> }) for runtime
+      switching; an expression as locale / date-source is refused (F-9). At least
+      one of dateStyle / timeStyle must be given. Timezone handling is out of scope.
+    properties:
+      dateStyle: { type: string, enum: [short, medium, long], description: "Native date preset." }
+      timeStyle: { type: string, enum: [short, medium, long], description: "Native time preset." }
+      locale: { description: "BCP-47 locale tag: a literal (e.g. en-GB) or a plain prop ref; omitted = platform default." }
 
   numberFormat:
     type: object

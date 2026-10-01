@@ -147,6 +147,28 @@ function findRichSelectOption(spec) {
   return hit;
 }
 
+/**
+ * F-26 date/time-format options: the date source and `locale` must each be a
+ * static literal or a plain prop ref, never an expression (F-9). dateStyle /
+ * timeStyle are schema-enforced presets; a non-literal there is refused too.
+ */
+function findBadDateFormat(node) {
+  for (const field of ['text', 'label']) {
+    const v = node[field];
+    if (!v || typeof v !== 'object' || v.kind !== 'datetime') continue;
+    if (typeof v.value === 'string' && !PLAIN_FLAG.test(v.value.trim())) return { slot: 'date source', expr: v.value.trim() };
+    for (const [slot, opt] of Object.entries(v.dateFormat || {})) {
+      if (opt == null) continue;
+      if (typeof opt === 'object' && 'kind' in opt) {
+        if (opt.kind !== 'ref' || typeof opt.value !== 'string' || !PLAIN_FLAG.test(opt.value.trim())) {
+          return { slot, expr: String(opt.value).trim() };
+        }
+      }
+    }
+  }
+  return null;
+}
+
 /** Walk the spec tree (children + conditional then/else) for a refusable
  *  condition. `loopVars` are the iteration variables in scope for this subtree,
  *  so a per-item condition may read `<loopvar>.field` but nothing else. */
@@ -157,6 +179,8 @@ function findBadCondition(node, loopVars = new Set()) {
   if (typeof node.when === 'string' && !conditionOK(node.when, loopVars)) return { kind: 'condition', expr: node.when.trim() };
   const badFmt = findBadFormat(node);
   if (badFmt) return { kind: 'format-option', slot: badFmt.slot, expr: badFmt.expr };
+  const badDate = findBadDateFormat(node);
+  if (badDate) return { kind: 'date-format-option', slot: badDate.slot, expr: badDate.expr };
   // F-5 boolean-attribute binding (`disabled`): must be a plain boolean flag
   // ref, never a JS expression — the F-9 anti-pattern re-entering through the
   // attribute. Refuse it, consistent with the variant / condition / state-binding
@@ -212,6 +236,14 @@ export function checkRefusal(spec) {
       category: 'expression-number-format',
       reason: `a number-format ${bad.slot} must be a static literal or a plain prop ref, not an embedded expression (found: \`${bad.expr}\`) — a computed formatter option is presentation logic that belongs in the data layer`,
       redirect: "pass a literal (e.g. currency: THB) or a plain prop ref (e.g. locale: { kind: ref, value: userLocale }) computed in the data layer, not a JS expression",
+      reference: 'knowledge/pattern-library/references/expression-variant.md',
+    };
+  }
+  if (bad?.kind === 'date-format-option') {
+    return {
+      category: 'expression-date-format',
+      reason: `a date/time-format ${bad.slot} must be a static literal or a plain prop ref, not an embedded expression (found: \`${bad.expr}\`) — a computed formatter option is presentation logic that belongs in the data layer`,
+      redirect: "pass a plain prop ref (e.g. value: createdAt, locale: { kind: ref, value: userLocale }) and a native preset dateStyle/timeStyle (short | medium | long) — not a JS expression or a custom pattern string",
       reference: 'knowledge/pattern-library/references/expression-variant.md',
     };
   }
