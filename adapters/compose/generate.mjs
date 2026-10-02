@@ -38,10 +38,26 @@ class ComposeRenderer extends RendererBase {
     const applyBlock = app.length ? `.apply { ${app.join('; ')} }` : '';
     return `java.text.NumberFormat.${inst}(${localeArg})${applyBlock}.format(${num})`;
   }
+  // F-26 date/time formatting — java.text.DateFormat (dateStyle / timeStyle presets
+  // + locale). Mirrors the NumberFormat approach; presets only, no custom pattern.
+  formatDate(fmt) {
+    const sv = (o) => (o.kind === 'literal' ? JSON.stringify(String(o.value)) : o.value);
+    const STYLE = { short: 'SHORT', medium: 'MEDIUM', long: 'LONG' };
+    const src = fmt.value.value;
+    const loc = fmt.locale ? `java.util.Locale.forLanguageTag(${sv(fmt.locale)})` : '';
+    const D = fmt.dateStyle ? `java.text.DateFormat.${STYLE[fmt.dateStyle]}` : null;
+    const T = fmt.timeStyle ? `java.text.DateFormat.${STYLE[fmt.timeStyle]}` : null;
+    let inst;
+    if (D && T) inst = `getDateTimeInstance(${D}, ${T}${loc ? `, ${loc}` : ''})`;
+    else if (D) inst = `getDateInstance(${D}${loc ? `, ${loc}` : ''})`;
+    else inst = `getTimeInstance(${T}${loc ? `, ${loc}` : ''})`;
+    return `java.text.DateFormat.${inst}.format(${src})`;
+  }
   strExpr(vr) {
     if (!vr) return '""';
     if (vr.kind === 'literal') return JSON.stringify(String(vr.value));
     if (vr.kind === 'format') { this.express('number-format', { mechanism: 'java.text.NumberFormat' }); return this.formatNumber(this.numberFormat(vr)); }
+    if (vr.kind === 'datetime') { this.express('date-format', { mechanism: 'java.text.DateFormat' }); return this.formatDate(this.dateFormat(vr)); }
     if (vr.kind === 'ref') return vr.value;
     // F-11 (precision-only): `<num>.toFixed(<precision>)` -> a real native decimal
     // formatter with `precision` fraction digits. No locale / grouping / currency
@@ -235,8 +251,13 @@ class ComposeRenderer extends RendererBase {
       if (role === 'radiogroup') this.express('role=radiogroup', { mechanism: 'Modifier.selectableGroup() + RadioButton per option' });
       else if (role) this.diverge(`role=${role}`, { reason: `no Compose Role for role "${role}" here`, fallback: 'selectable RadioButton group', waiver: `a11y-role-${role}` });
       this.express('state=selected-value', { mechanism: 'RadioButton group over options (selected = bound == option.value; hoisted onClick) — native match' });
+      // F-25 rich options: a decorative Material Icon (resolved at runtime from the
+      // icon-token registry) sits between the radio control and the label.
+      const rich = this.hasOptionIcons(node);
+      if (rich) { this.usesOptionIcons = true; this.express('option-icon', { mechanism: 'Material Icon via runtime registry (decorative, contentDescription = null)' }); }
+      const iconRow = rich ? `\n      OPTION_ICONS[opt.icon]?.let { Icon(it, contentDescription = null) }` : '';
       const items = cs.options
-        ? `${cs.options}.forEach { opt ->\n    Row {\n      RadioButton(selected = ${cs.value} == opt.value, onClick = { ${cs.change}(opt.value) })\n      Text(text = opt.label)\n    }\n  }`
+        ? `${cs.options}.forEach { opt ->\n    Row {\n      RadioButton(selected = ${cs.value} == opt.value, onClick = { ${cs.change}(opt.value) })${iconRow}\n      Text(text = opt.label)\n    }\n  }`
         // No option list: hoist the selection state to the caller (the options
         // are supplied by a component built on this primitive).
         : `val selectedValue = ${cs.value}\n  val onSelectedChange = ${cs.change}`;
@@ -340,6 +361,7 @@ class ComposeRenderer extends RendererBase {
     switch (prop.type) {
       case 'number': return opt ? 'Double?' : 'Double';
       case 'boolean': return opt ? 'Boolean?' : 'Boolean';
+      case 'date': return opt ? 'java.util.Date?' : 'java.util.Date';
       case 'function': {
         const base = /change/i.test(prop.name) ? '(String) -> Unit' : '() -> Unit';
         return opt ? `(${base})?` : base;
@@ -358,8 +380,12 @@ class ComposeRenderer extends RendererBase {
         + Object.entries(arrayProp.itemShape).map(([k, t]) => `  val ${k}: ${t === 'number' ? 'Double' : t === 'boolean' ? 'Boolean' : 'String'}`).join(',\n')
         + `\n)\n\n`
       : '';
-    const iconImport = this.usedIcons.size
+    const iconImport = (this.usedIcons.size || this.usesOptionIcons)
       ? `import androidx.compose.material.icons.Icons\nimport androidx.compose.material.icons.filled.*\n`
+      : '';
+    // F-25: runtime registry mapping the known icon tokens to Material ImageVectors.
+    const optionIcons = this.usesOptionIcons
+      ? `val OPTION_ICONS = mapOf(${Object.entries(this.iconMap).map(([t, sym]) => `${JSON.stringify(t)} to Icons.Default.${sym}`).join(', ')})\n\n`
       : '';
     // Semantics extras are imported only when the body actually emits them.
     const semExtra =
@@ -380,7 +406,7 @@ class ComposeRenderer extends RendererBase {
       + `import androidx.compose.foundation.clickable\n`
       + `import coil.compose.AsyncImage\n`
       + `${iconImport}import designtokens.DesignTokens\n\n`
-      + `${itemClass}@Composable\nfun ${name}(\n${params}\n) {\n${indent(root, 2)}\n}\n`;
+      + `${itemClass}${optionIcons}@Composable\nfun ${name}(\n${params}\n) {\n${indent(root, 2)}\n}\n`;
   }
 }
 

@@ -41,10 +41,24 @@ class SwiftUIRenderer extends RendererBase {
     lines.push(`return f.string(from: NSNumber(value: ${num})) ?? String(${num})`);
     return `Text({ ${lines.join('; ')} }())`;
   }
+  // F-26 date/time formatting — DateFormatter (dateStyle / timeStyle presets +
+  // locale). Mirrors the NumberFormatter approach; presets only, no custom pattern.
+  formatDate(fmt) {
+    const sv = (o) => (o.kind === 'literal' ? JSON.stringify(String(o.value)) : safe(o.value));
+    const STYLE = { short: '.short', medium: '.medium', long: '.long' };
+    const src = safe(fmt.value.value);
+    const lines = ['let f = DateFormatter()'];
+    if (fmt.locale) lines.push(`f.locale = Locale(identifier: ${sv(fmt.locale)})`);
+    lines.push(`f.dateStyle = ${fmt.dateStyle ? STYLE[fmt.dateStyle] : '.none'}`);
+    lines.push(`f.timeStyle = ${fmt.timeStyle ? STYLE[fmt.timeStyle] : '.none'}`);
+    lines.push(`return f.string(from: ${src})`);
+    return `Text({ ${lines.join('; ')} }())`;
+  }
   textExpr(vr) {
     if (!vr) return 'Text("")';
     if (vr.kind === 'literal') return `Text(${JSON.stringify(String(vr.value))})`;
     if (vr.kind === 'format') { this.express('number-format', { mechanism: 'NumberFormatter' }); return this.formatNumber(this.numberFormat(vr)); }
+    if (vr.kind === 'datetime') { this.express('date-format', { mechanism: 'DateFormatter' }); return this.formatDate(this.dateFormat(vr)); }
     if (vr.kind === 'ref') return `Text(String(describing: ${safe(vr.value)}))`;
     // F-11 (precision-only): `<num>.toFixed(<precision>)` -> a real native decimal
     // formatter with `precision` fraction digits. No locale / grouping / currency
@@ -197,8 +211,15 @@ class SwiftUIRenderer extends RendererBase {
       if (role === 'radiogroup') this.express('role=radiogroup', { mechanism: 'Picker (single-select group)' });
       else if (role) this.diverge(`role=${role}`, { reason: `no direct SwiftUI trait for role "${role}"`, fallback: 'Picker conveys single-select', waiver: `a11y-role-${role}` });
       this.express('state=selected-value', { mechanism: 'Picker(selection: @Binding) + ForEach options with .tag (native match, no expression)' });
+      // F-25 rich options: a Label(title, systemImage:) renders a decorative SF
+      // Symbol (resolved at runtime from the icon-token registry) beside the label.
+      const rich = this.hasOptionIcons(node);
+      if (rich) { this.usesOptionIcons = true; this.express('option-icon', { mechanism: 'Label(systemImage:) SF Symbol via runtime registry (decorative)' }); }
+      const row = rich
+        ? `Label(opt.label, systemImage: Self.optionIconSymbols[opt.icon] ?? "").tag(opt.value)`
+        : `Text(opt.label).tag(opt.value)`;
       const items = cs.options
-        ? `\n  ForEach(${safe(cs.options)}, id: \\.value) { opt in\n    Text(opt.label).tag(opt.value)\n  }\n`
+        ? `\n  ForEach(${safe(cs.options)}, id: \\.value) { opt in\n    ${row}\n  }\n`
         : `\n  // options supplied by the component\n`;
       return `Picker(${title}, selection: ${bind}) {${items}}${this.modifiers(node)}`;
     }
@@ -300,6 +321,7 @@ class SwiftUIRenderer extends RendererBase {
     switch (prop.type) {
       case 'number': return opt ? 'Double?' : 'Double';
       case 'boolean': return opt ? 'Bool?' : 'Bool';
+      case 'date': return opt ? 'Date?' : 'Date';
       case 'function': {
         const base = /change/i.test(prop.name) ? '(String) -> Void' : '() -> Void';
         return opt ? `(${base})?` : base;
@@ -324,7 +346,12 @@ class SwiftUIRenderer extends RendererBase {
         + (hasId ? '' : `\n  let id = UUID().uuidString`)
         + `\n}\n\n`
       : '';
-    return `import SwiftUI\n\n${itemStruct}struct ${name}: View {\n${stored}\n\n  var body: some View {\n${indent(root, 4)}\n  }\n}\n`;
+    // F-25: static registry mapping the known icon tokens to SF Symbol names
+    // (private/static → excluded from the memberwise initializer).
+    const optionIcons = this.usesOptionIcons
+      ? `  static let optionIconSymbols: [String: String] = [${Object.entries(this.iconMap).map(([t, sym]) => `${JSON.stringify(t)}: ${JSON.stringify(sym)}`).join(', ')}]\n\n`
+      : '';
+    return `import SwiftUI\n\n${itemStruct}struct ${name}: View {\n${stored}\n\n${optionIcons}  var body: some View {\n${indent(root, 4)}\n  }\n}\n`;
   }
 }
 

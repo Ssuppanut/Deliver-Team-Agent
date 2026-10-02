@@ -21,6 +21,7 @@ class ReactRenderer extends RendererBase {
     if (!vr) return '';
     if (vr.kind === 'literal') return escapeJsx(vr.value);
     if (vr.kind === 'format') { this.express('number-format', { mechanism: 'Intl.NumberFormat' }); return `{${this.intlFormatExpr(this.numberFormat(vr))}}`; }
+    if (vr.kind === 'datetime') { this.express('date-format', { mechanism: 'Intl.DateTimeFormat' }); return `{${this.intlDateExpr(this.dateFormat(vr))}}`; }
     return `{${vr.value}}`;
   }
 
@@ -150,6 +151,17 @@ class ReactRenderer extends RendererBase {
     return aria;
   }
 
+  // F-25 rich options: a per-option icon (decorative) resolved at runtime from the
+  // known icon-token set via an emitted registry. Returns the per-option markup
+  // (empty when options carry no icon), and records the ledger trait + imports.
+  richOptionIcon(node) {
+    if (!this.hasOptionIcons(node)) return '';
+    this.usesOptionIcons = true;
+    for (const sym of Object.values(this.iconMap)) this.usedIcons.add(sym);
+    this.express('option-icon', { mechanism: 'per-option lucide icon via runtime registry (decorative, aria-hidden)' });
+    return '<OptionIcon token={opt.icon} />\n      ';
+  }
+
   renderControlState(node, cs) {
     const id = this.inputId(node);
     const labelEl = node.label ? `<label htmlFor="${id}">${this.interp(node.label)}</label>\n` : '';
@@ -164,8 +176,9 @@ class ReactRenderer extends RendererBase {
         // Native radio group: name-grouped <input type="radio">; the browser
         // enforces single-select, checked reflects the bound value.
         this.express('state=selected-value', { mechanism: 'radiogroup: name-grouped <input type="radio"> + checked/onChange (controlled)' });
+        const ic = this.richOptionIcon(node);
         const items = cs.options
-          ? `\n  {${cs.options}.map((opt) => (\n    <label key={opt.value}>\n      <input type="radio" name="${id}" value={opt.value} checked={${cs.value} === opt.value} onChange={() => ${cs.change}(opt.value)} />\n      {opt.label}\n    </label>\n  ))}\n`
+          ? `\n  {${cs.options}.map((opt) => (\n    <label key={opt.value}>\n      <input type="radio" name="${id}" value={opt.value} checked={${cs.value} === opt.value} onChange={() => ${cs.change}(opt.value)} />\n      ${ic}{opt.label}\n    </label>\n  ))}\n`
           : '';
         return `${labelEl}<div id="${id}"${tail}>${items}</div>`;
       }
@@ -244,6 +257,7 @@ class ReactRenderer extends RendererBase {
       case 'string': return 'string';
       case 'number': return 'number';
       case 'boolean': return 'boolean';
+      case 'date': return 'Date';
       case 'function': return /change/i.test(prop.name) ? '(value: string) => void' : '() => void';
       case 'enum': return (prop.values ?? []).map((v) => `'${v}'`).join(' | ') || 'string';
       case 'node': return 'React.ReactNode';
@@ -268,8 +282,15 @@ class ReactRenderer extends RendererBase {
     const iconImport = this.usedIcons.size
       ? `import { ${[...this.usedIcons].join(', ')} } from '${ICON_LIB}';\n`
       : '';
+    // F-25: a runtime registry mapping the known icon tokens to lucide components,
+    // plus a tiny decorative <OptionIcon> helper (per-option icons are runtime data).
+    const optionIcons = this.usesOptionIcons
+      ? `const OPTION_ICONS: Record<string, React.ComponentType<{ 'aria-hidden'?: boolean }>> = { ${Object.entries(this.iconMap).map(([t, sym]) => `${JSON.stringify(t)}: ${sym}`).join(', ')} };\n`
+        + `function OptionIcon({ token }: { token: string }) {\n  const Icon = OPTION_ICONS[token];\n  return Icon ? <Icon aria-hidden={true} /> : null;\n}\n\n`
+      : '';
     return `import React from 'react';\n${iconImport}import '../../_shared/tokens/tokens.css';\n\n`
       + propsIface
+      + optionIcons
       + `export function ${name}({ ${args} }: ${name}Props) {\n`
       + `  return (\n${indent(root, 4)}\n  );\n}\n`;
   }

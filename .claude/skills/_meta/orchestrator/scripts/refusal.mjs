@@ -120,6 +120,55 @@ function findBadFormat(node) {
   return null;
 }
 
+/**
+ * F-25 rich options (option C): a RadioGroup may carry icon options, but a native
+ * Select (`selected-value` without role=radiogroup) is text-only by the platform's
+ * own design (HTML <option> / RN Picker.Item host text only). An `icon` on a native
+ * Select option is refused — never silently dropped, never a half-feature — and
+ * redirected to RadioGroup or a custom-overlay picker, mirroring the overlay /
+ * custom-select boundary. Icons are leaf icon-tokens; the itemShape carrying `icon`
+ * is the signal.
+ */
+function findRichSelectOption(spec) {
+  const props = spec?.props || [];
+  const hasIconOption = (optName) => {
+    const p = props.find((x) => x.name === optName && x.type === 'array');
+    return !!(p && p.itemShape && 'icon' in p.itemShape);
+  };
+  let hit = false;
+  const walk = (node) => {
+    if (!node || typeof node !== 'object' || hit) return;
+    const st = node.input?.state;
+    if (st?.kind === 'selected-value' && st.options && node.role !== 'radiogroup' && hasIconOption(st.options)) { hit = true; return; }
+    for (const c of node.children ?? []) walk(c);
+    for (const b of [node.then, node.else]) if (b) walk(b);
+  };
+  walk(spec?.root);
+  return hit;
+}
+
+/**
+ * F-26 date/time-format options: the date source and `locale` must each be a
+ * static literal or a plain prop ref, never an expression (F-9). dateStyle /
+ * timeStyle are schema-enforced presets; a non-literal there is refused too.
+ */
+function findBadDateFormat(node) {
+  for (const field of ['text', 'label']) {
+    const v = node[field];
+    if (!v || typeof v !== 'object' || v.kind !== 'datetime') continue;
+    if (typeof v.value === 'string' && !PLAIN_FLAG.test(v.value.trim())) return { slot: 'date source', expr: v.value.trim() };
+    for (const [slot, opt] of Object.entries(v.dateFormat || {})) {
+      if (opt == null) continue;
+      if (typeof opt === 'object' && 'kind' in opt) {
+        if (opt.kind !== 'ref' || typeof opt.value !== 'string' || !PLAIN_FLAG.test(opt.value.trim())) {
+          return { slot, expr: String(opt.value).trim() };
+        }
+      }
+    }
+  }
+  return null;
+}
+
 /** Walk the spec tree (children + conditional then/else) for a refusable
  *  condition. `loopVars` are the iteration variables in scope for this subtree,
  *  so a per-item condition may read `<loopvar>.field` but nothing else. */
@@ -130,6 +179,8 @@ function findBadCondition(node, loopVars = new Set()) {
   if (typeof node.when === 'string' && !conditionOK(node.when, loopVars)) return { kind: 'condition', expr: node.when.trim() };
   const badFmt = findBadFormat(node);
   if (badFmt) return { kind: 'format-option', slot: badFmt.slot, expr: badFmt.expr };
+  const badDate = findBadDateFormat(node);
+  if (badDate) return { kind: 'date-format-option', slot: badDate.slot, expr: badDate.expr };
   // F-5 boolean-attribute binding (`disabled`): must be a plain boolean flag
   // ref, never a JS expression — the F-9 anti-pattern re-entering through the
   // attribute. Refuse it, consistent with the variant / condition / state-binding
@@ -153,6 +204,16 @@ export function checkRefusal(spec) {
   if (category && category in REFUSED) {
     return { category, ...REFUSED[category] };
   }
+  // F-25: an icon on a native Select option is out of scope (text-only platform
+  // control) — refuse and redirect to RadioGroup / a custom-overlay picker.
+  if (findRichSelectOption(spec)) {
+    return {
+      category: 'rich-option-select',
+      reason: 'native select options are text-only (HTML <option> / RN Picker.Item host text only), so an icon on a Select option cannot render uniformly across platforms',
+      redirect: 'native select options are text-only; for icons use RadioGroup (few options) or a custom-overlay picker (Radix / native picker) for a dropdown',
+      reference: 'knowledge/pattern-library/references/overlays.md',
+    };
+  }
   const bad = spec?.root ? findBadCondition(spec.root) : null;
   if (bad?.kind === 'variant') {
     return {
@@ -175,6 +236,14 @@ export function checkRefusal(spec) {
       category: 'expression-number-format',
       reason: `a number-format ${bad.slot} must be a static literal or a plain prop ref, not an embedded expression (found: \`${bad.expr}\`) — a computed formatter option is presentation logic that belongs in the data layer`,
       redirect: "pass a literal (e.g. currency: THB) or a plain prop ref (e.g. locale: { kind: ref, value: userLocale }) computed in the data layer, not a JS expression",
+      reference: 'knowledge/pattern-library/references/expression-variant.md',
+    };
+  }
+  if (bad?.kind === 'date-format-option') {
+    return {
+      category: 'expression-date-format',
+      reason: `a date/time-format ${bad.slot} must be a static literal or a plain prop ref, not an embedded expression (found: \`${bad.expr}\`) — a computed formatter option is presentation logic that belongs in the data layer`,
+      redirect: "pass a plain prop ref (e.g. value: createdAt, locale: { kind: ref, value: userLocale }) and a native preset dateStyle/timeStyle (short | medium | long) — not a JS expression or a custom pattern string",
       reference: 'knowledge/pattern-library/references/expression-variant.md',
     };
   }

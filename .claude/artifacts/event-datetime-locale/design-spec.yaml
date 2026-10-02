@@ -1,0 +1,18 @@
+component: EventDateLocale
+description: F-26 date/time — long date preset with a runtime locale prop-ref.
+category: display
+props:
+  - { name: when, type: date, required: true }
+  - { name: userLocale, type: string, required: true }
+tokens:
+  - color.fg.default
+root:
+  el: text
+  text:
+    kind: datetime
+    value: when
+    dateFormat:
+      dateStyle: long
+      locale: { kind: ref, value: userLocale }
+  style:
+    color: color.fg.default

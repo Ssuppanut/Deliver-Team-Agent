@@ -16,6 +16,7 @@ class RNRenderer extends RendererBase {
     if (!vr) return '';
     if (vr.kind === 'literal') return String(vr.value);
     if (vr.kind === 'format') { this.express('number-format', { mechanism: 'Intl.NumberFormat' }); return `{${this.intlFormatExpr(this.numberFormat(vr))}}`; }
+    if (vr.kind === 'datetime') { this.express('date-format', { mechanism: 'Intl.DateTimeFormat' }); return `{${this.intlDateExpr(this.dateFormat(vr))}}`; }
     return `{${vr.value}}`;
   }
   attr(vr) {
@@ -121,6 +122,15 @@ class RNRenderer extends RendererBase {
     const press = node.href ? ` onPress={() => Linking.openURL(${this.attr(node.href)})}` : '';
     return `<Pressable accessibilityRole="link"${press}${this.style(node)}>\n  <Text>${node.label ? this.interp(node.label) : children}</Text>\n</Pressable>`;
   }
+  // F-25 rich options: per-option decorative icon via the emitted runtime registry.
+  richOptionIcon(node) {
+    if (!this.hasOptionIcons(node)) return '';
+    this.usesOptionIcons = true;
+    for (const sym of Object.values(this.iconMap)) this.usedIcons.add(sym);
+    this.express('option-icon', { mechanism: 'per-option lucide icon via runtime registry (decorative, not accessible)' });
+    return '<OptionIcon token={opt.icon} />';
+  }
+
   // Control-state primitive — controlled (caller-held) two-way binding via the
   // native RN control's `value/selectedValue` + `onValueChange`.
   renderControlState(node, cs) {
@@ -146,8 +156,9 @@ class RNRenderer extends RendererBase {
         // RN has no radio primitive: Pressable per option with radio semantics.
         this.express('role=radiogroup', { mechanism: 'accessibilityRole="radiogroup"' });
         this.express('state=selected-value', { mechanism: 'radio group: Pressable per option + accessibilityRole="radio" + accessibilityState={{selected}}' });
+        const ic = this.richOptionIcon(node);
         const items = cs.options
-          ? `\n  {${cs.options}.map((opt) => (\n    <Pressable key={opt.value} accessibilityRole="radio" accessibilityState={{ selected: ${cs.value} === opt.value }} onPress={() => ${cs.change}(opt.value)}>\n      <Text>{opt.label}</Text>\n    </Pressable>\n  ))}\n`
+          ? `\n  {${cs.options}.map((opt) => (\n    <Pressable key={opt.value} accessibilityRole="radio" accessibilityState={{ selected: ${cs.value} === opt.value }} onPress={() => ${cs.change}(opt.value)}>\n      ${ic}<Text>{opt.label}</Text>\n    </Pressable>\n  ))}\n`
           : '';
         return `${labelEl}<View accessibilityRole="radiogroup"${invalidAttr}${a11yLabel}${style}>${items}</View>`;
       }
@@ -240,6 +251,7 @@ class RNRenderer extends RendererBase {
     switch (prop.type) {
       case 'number': return 'number';
       case 'boolean': return 'boolean';
+      case 'date': return 'Date';
       case 'function': return prop.name.toLowerCase().includes('change') ? '(value: string) => void' : '() => void';
       case 'enum': return (prop.values ?? []).map((v) => `'${v}'`).join(' | ') || 'string';
       case 'array': {
@@ -262,10 +274,17 @@ class RNRenderer extends RendererBase {
     const iconImport = this.usedIcons.size
       ? `import { ${[...this.usedIcons].join(', ')} } from '${ICON_LIB}';\n`
       : '';
+    // F-25: runtime registry of known icon tokens -> lucide components + a tiny
+    // decorative <OptionIcon> helper (per-option icons are runtime data).
+    const optionIcons = this.usesOptionIcons
+      ? `const OPTION_ICONS: Record<string, React.ComponentType<object>> = { ${Object.entries(this.iconMap).map(([t, sym]) => `${JSON.stringify(t)}: ${sym}`).join(', ')} };\n`
+        + `function OptionIcon({ token }: { token: string }) {\n  const Icon = OPTION_ICONS[token];\n  return Icon ? <Icon accessibilityElementsHidden importantForAccessibility="no" /> : null;\n}\n\n`
+      : '';
     return `import React from 'react';\n`
       + `import { ${[...rnImports].join(', ')} } from 'react-native';\n`
       + `${sliderImport}${pickerImport}${iconImport}import { tokens } from '../../_shared/tokens/tokens-rn';\n\n`
       + `export interface ${name}Props {\n${props}\n}\n\n`
+      + optionIcons
       + `export function ${name}({ ${args} }: ${name}Props) {\n  return (\n${indent(root, 4)}\n  );\n}\n`;
   }
 }
