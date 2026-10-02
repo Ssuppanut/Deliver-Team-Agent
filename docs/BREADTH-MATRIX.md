@@ -1929,20 +1929,46 @@ IANA id and is refused at validate-schema.
 
 `__dtfTimeZone` is a per-component web/RN helper: `try { new Intl.DateTimeFormat(undefined, { timeZone: tz }); return tz; } catch { return undefined; }` — a RangeError falls back to `undefined` (device), never throws. The device fallback is semantically identical on all 6 (the viewer's local zone).
 
-## Validity model (MUST-INVESTIGATE #1 — alias / canonical)
+## Validity model (MUST-INVESTIGATE #1 — alias / canonical / case / offset)
 
-- **Literal** ids are validated at `validate-schema` by **construction**
-  (`new Intl.DateTimeFormat(undefined, { timeZone: id })`), not by
-  `Intl.supportedValuesOf('timeZone')`. **Finding:** `supportedValuesOf` is
-  ICU-version-dependent and unreliable as a canonical oracle — on this repo's Node
-  22 / ICU it lists `Asia/Calcutta` (the alias) but **not** `Asia/Kolkata` (the
-  modern canonical). Validating against that list would wrongly refuse
-  `Asia/Kolkata`, which Swift/Java accept. Construction-validation accepts **both**
-  canonical and alias ids, matching the shared IANA tz database that web (ICU),
-  Swift (Foundation) and Java (java.time) all resolve against. So the rule is
-  **"any id the runtime's IANA database accepts"**, not a canonical-only allowlist.
-  Both `Asia/Kolkata` and `Asia/Calcutta` pass; `Mars/Phobos` and `GMT+7` are
-  refused.
+A literal that passes `validate-schema` must resolve to the **same zone on all 6
+platforms**. ICU (web/RN) is lenient — case-insensitive and accepts UTC-offset ids
+— but Swift `TimeZone(identifier:)` and Java `ZoneId.of()` are **case-sensitive**
+and reject offset forms ICU accepts; an id ICU normalized but a native platform
+rejected would silently degrade to the device zone (a parity break). So the literal
+rule is the **cross-platform-safe subset**, enforced in three steps (not
+`Intl.supportedValuesOf`, which is ICU-version-dependent — this build lists
+`Asia/Calcutta` but not `Asia/Kolkata`, so a `supportedValuesOf` allowlist would
+wrongly refuse `Asia/Kolkata`):
+
+1. **structural form** — exact `UTC`, or a Region/City path with at least one `/`
+   (regex `^[A-Za-z][A-Za-z0-9_+-]*(?:\/[A-Za-z0-9_+-]+)+$`). Rejects UTC offsets
+   (`+07:00`, `-0500`) and bare words (`Z`, `GMT`);
+2. **constructs** under ICU (a real IANA id); and
+3. **case-exact** — a pure case-variant (ICU-normalized: `resolved` equals the input
+   only when lowercased) is rejected, while a genuine alias (`Asia/Kolkata →
+   Asia/Calcutta`, differs beyond case) stays valid.
+
+Literal parity table (accept/refuse at validate-schema, and documented native
+behavior):
+
+| literal | validate-schema | Swift `TimeZone(identifier:)` | Java `ZoneId.of()` | why |
+|---|---|---|---|---|
+| `Asia/Bangkok` | ACCEPT | resolves | resolves | exact Region/City |
+| `Asia/Kolkata` | ACCEPT | resolves | resolves | alias (→Calcutta) — kept valid |
+| `Asia/Calcutta` | ACCEPT | resolves | resolves | alias — kept valid |
+| `Etc/GMT-7` | ACCEPT | resolves | resolves | exact Region/City |
+| `UTC` | ACCEPT | resolves | resolves | explicit allow |
+| `asia/bangkok` | refuse | **nil** (case-sensitive) | **throws** | case variant |
+| `ASIA/BANGKOK` | refuse | **nil** | **throws** | case variant |
+| `+07:00` | refuse | **nil** (needs `GMT+0700`) | resolves | offset form, platform-divergent |
+| `-0500` | refuse | **nil** | **throws** (needs `-05:00`) | offset form, platform-divergent |
+| `Z` | refuse | nil | resolves | bare word, platform-divergent |
+
+The old (first-commit) rule was construction-only, which accepted the case-variants
+and offsets in the lower half → tightened here so a passing literal resolves on all
+6. Both `Asia/Kolkata` and `Asia/Calcutta` remain valid as required.
+
 - **Prop-ref** ids are not knowable at build time, so they are **not**
   schema-checked; an invalid runtime value falls back to the device timezone
   identically on all 6 (never a crash, never a per-platform fallback).
@@ -2032,6 +2058,30 @@ No new survivor, no regression.
 - **Residual (by design):** timezone **display names/labels** (GMT+7, ICT) are not
   supported — refused at validate-schema as non-IANA ids, the same boundary as
   custom date patterns.
+- **Residual (by design, not a bug) — React Native engine requirement.** The RN
+  adapter formats dates through `Intl.DateTimeFormat` (true since F-26); the F-27
+  `timeZone` option rides that same call. RN honors the `timeZone` option only on
+  **Hermes built with full ICU (React Native 0.73+)** — or JSC. On an older /
+  no-ICU Hermes, an unsupported zone **degrades to the device timezone** (the
+  `__dtfTimeZone` guard falls back rather than throwing). This is a target-engine
+  configuration concern outside this spec→code generator; no RN divergence/waiver
+  is taken because the fallback is safe and uniform. **Handoff:** consumers
+  targeting RN must ship RN 0.73+ (Hermes+ICU) or a `@formatjs/intl-datetimeformat`
+  polyfill for zone-accurate output; otherwise date output is correct but in the
+  device zone.
+
+## Follow-up (literal parity + harness coverage)
+
+- **Literal rule tightened** to the cross-platform-safe subset (exact-case
+  Region/City or `UTC`; case variants, UTC offsets and display names refused) so a
+  literal that passes validate-schema resolves identically on web/Swift/Java. See
+  the Validity-model table above. `Asia/Kolkata` and `Asia/Calcutta` both remain
+  valid.
+- **Mutation coverage:** the validate-schema literal check is now a gate in the
+  mutation battery (`timezone-schema`), and operator **`invalid-literal-timezone`**
+  injects a case-variant literal into each datetime spec — **4 mutants, all killed**
+  by `timezone-schema`. Reverting the tightened rule reopens the hole AND turns the
+  harness RED (those 4 survive), proving the gate is load-bearing.
 
 ## Regression pins
 
@@ -2042,8 +2092,11 @@ No new survivor, no regression.
 - **P73** — invalid literal refused at validate-schema (canonical + alias pass,
   display name refused); expression / non-plain-ref refused (F-9); a no-timezone
   datetime declares no `date-timezone` trait and emits no timezone code.
+- **P74** — literal parity: exact-case Region/City or `UTC` accepted; case variants,
+  UTC offsets (`+07:00`, `-0500`) and display names refused; `Asia/Kolkata` AND
+  `Asia/Calcutta` both valid; a prop-ref still passes schema (runtime device fallback).
 
-`verify-patches` → **73/73**. `rm -rf out/ && node _shared/scripts/ci.mjs` → exit 0.
+`verify-patches` → **74/74**. `rm -rf out/ && node _shared/scripts/ci.mjs` → exit 0.
 
 ## Scope — what this did not touch
 

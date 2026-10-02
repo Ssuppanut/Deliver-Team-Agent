@@ -55,6 +55,7 @@ import { checkTbd } from '../../.claude/skills/_meta/critique/scripts/check-tbd.
 import { checkParity } from './e2e-multi.mjs';
 import { checkNativeExprLeak, checkDeclaredDropped } from './output-guards.mjs';
 import { checkLedger } from './ledger-gate.mjs';
+import { checkTimeZones } from './validate-schema.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '../..');
@@ -117,6 +118,9 @@ export function runGates(bundle) {
     'native-code': checkNativeExprLeak(ir, results),
     'declared-io': checkDeclaredDropped(ir, results),
     ledger: checkLedger(ledger),
+    // F-27 (follow-up): the validate-schema literal-timezone gate, run on the IR
+    // so a bad literal timeZone injected into a datetime value is caught here.
+    'timezone-schema': (() => { const e = checkTimeZones(ir.root); return { ok: e.length === 0, issues: e.map((x) => ({ severity: 'serious', msg: x.message })) }; })(),
   };
   // perf-guard runs but is advisory-only (returns ok:true); kept for parity of
   // execution, never counted as a killer.
@@ -329,6 +333,33 @@ const OPERATORS = [
         key: `${bundle.feature}:react:${ref}`,
         apply(c) { c.results.react.code = c.results.react.code.replace(`__dtfTimeZone(${ref})`, `"${ref}"`); },
       }];
+    },
+  },
+
+  // O9 — F-27 follow-up: inject a cross-platform-unsafe LITERAL timeZone (a
+  // case-variant ICU would normalize but Swift/Java reject) into a datetime value.
+  // The validate-schema literal-timezone gate (now in the battery) must kill it;
+  // if checkTimeZones were disabled/loosened, this mutant would survive.
+  {
+    id: 'invalid-literal-timezone',
+    klass: 'timezone-schema',
+    expect: 'timezone-schema (validate-schema rejects a case-variant / offset / invalid literal timeZone)',
+    sites(bundle) {
+      for (const n of irNodes(bundle.ir)) {
+        for (const f of ['text', 'label']) {
+          if (n[f]?.kind === 'datetime') {
+            return [{
+              key: `${bundle.feature}:${f}`,
+              apply(c) {
+                for (const m of irNodes(c.ir)) {
+                  if (m[f]?.kind === 'datetime') { m[f].dateFormat = { ...(m[f].dateFormat ?? {}), timeZone: 'asia/bangkok' }; return; }
+                }
+              },
+            }];
+          }
+        }
+      }
+      return [];
     },
   },
 

@@ -18,19 +18,37 @@ import addFormats from 'ajv-formats';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_SCHEMA = resolve(__dirname, '../schemas/design-spec.schema.yaml');
 
-/** True if `id` is an IANA timezone the runtime accepts. Construction-based
- *  (not Intl.supportedValuesOf, which is ICU-version-dependent — e.g. it lists
- *  Asia/Calcutta but not Asia/Kolkata on some builds). Accepts canonical ids and
- *  aliases alike, matching the shared IANA database used by web/Swift/Java. */
+/**
+ * True if `id` is an IANA timezone a LITERAL may use — the cross-platform-safe
+ * subset that resolves identically on web (ICU), Swift (Foundation) and Java
+ * (java.time). ICU is lenient (case-insensitive, accepts offset ids); Swift
+ * `TimeZone(identifier:)` and Java `ZoneId.of()` are case-SENSITIVE and reject
+ * offset forms ICU accepts. A literal that ICU normalized but a native platform
+ * rejected would silently degrade to the device zone — a parity break — so the
+ * literal rule is tightened to what all three accept:
+ *   1. exact `UTC`, or a Region/City path with at least one `/`
+ *      (rejects offset ids like `+07:00`/`-0500` and bare words like `Z`/`GMT`);
+ *   2. constructs under ICU (a real IANA id); and
+ *   3. is case-EXACT — a pure case-variant (ICU-normalized) is rejected, while a
+ *      genuine alias (Asia/Kolkata → Asia/Calcutta, differs beyond case) stays
+ *      valid. Not `Intl.supportedValuesOf`, which is ICU-version-dependent (it
+ *      lists Asia/Calcutta but not Asia/Kolkata on this build).
+ * A runtime prop-ref is NOT bound by this — it falls back to the device zone.
+ */
 function isValidTimeZone(id) {
   if (typeof id !== 'string' || !id) return false;
-  try { new Intl.DateTimeFormat(undefined, { timeZone: id }); return true; } catch { return false; }
+  if (id !== 'UTC' && !/^[A-Za-z][A-Za-z0-9_+-]*(?:\/[A-Za-z0-9_+-]+)+$/.test(id)) return false;
+  let resolved;
+  try { resolved = new Intl.DateTimeFormat(undefined, { timeZone: id }).resolvedOptions().timeZone; }
+  catch { return false; }
+  if (resolved !== id && resolved.toLowerCase() === id.toLowerCase()) return false; // pure case-variant
+  return true;
 }
 
 /** F-27: reject an invalid LITERAL IANA timezone before generation. A prop-ref
  *  timeZone (runtime) is not checked here — it falls back to the device timezone
  *  at runtime on every adapter. Returns ajv-shaped error objects. */
-function checkTimeZones(node, path = '/root') {
+export function checkTimeZones(node, path = '/root') {
   if (!node || typeof node !== 'object') return [];
   const errors = [];
   for (const field of ['text', 'label']) {
@@ -38,7 +56,7 @@ function checkTimeZones(node, path = '/root') {
     const tz = v && v.kind === 'datetime' ? v.dateFormat?.timeZone : undefined;
     // Only a bare-string literal is checked; a { kind: ref } object is runtime.
     if (typeof tz === 'string' && !isValidTimeZone(tz)) {
-      errors.push({ instancePath: `${path}/${field}/dateFormat/timeZone`, message: `invalid IANA timezone id "${tz}" (use a valid id such as Asia/Bangkok; a display name like GMT+7 is not supported)` });
+      errors.push({ instancePath: `${path}/${field}/dateFormat/timeZone`, message: `invalid IANA timezone id "${tz}" — use the exact-case Region/City form (e.g. Asia/Bangkok) or UTC. Case variants (asia/bangkok), UTC offsets (+07:00, -0500) and display names (GMT+7) are rejected because Swift/Java would not resolve them identically.` });
     }
   }
   for (const [i, c] of (node.children ?? []).entries()) errors.push(...checkTimeZones(c, `${path}/children/${i}`));

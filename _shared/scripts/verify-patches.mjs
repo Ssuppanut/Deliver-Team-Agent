@@ -1327,6 +1327,21 @@ check('P73', 'timezone (F-27): invalid literal refused at validate-schema (canon
   }
 });
 
+// --- P74: F-27 literal timezone parity — cross-platform-safe subset only ------
+check('P74', 'timezone (F-27 follow-up): a literal passing validate-schema resolves on all 6 — exact-case Region/City or UTC accepted; case variants, UTC offsets and display names refused; aliases (Kolkata AND Calcutta) stay valid', () => {
+  const spec = (tz) => ({ component: 'T', root: { el: 'text', text: { kind: 'datetime', value: 'when', dateFormat: { dateStyle: 'medium', timeZone: tz } } }, props: [{ name: 'when', type: 'date', required: true }] });
+  const accept = (tz) => assert(validate(spec(tz)).ok, `${tz} must be ACCEPTED (resolves on all platforms)`);
+  const refuse = (tz) => assert(!validate(spec(tz)).ok, `${tz} must be REFUSED (not cross-platform safe)`);
+  accept('Asia/Bangkok'); accept('UTC'); accept('Etc/GMT-7');
+  accept('Asia/Calcutta'); accept('Asia/Kolkata');     // alias + canonical both valid (required)
+  refuse('asia/bangkok'); refuse('ASIA/BANGKOK');       // case variants (Swift/Java case-sensitive)
+  refuse('Z');                                          // bare word
+  refuse('+07:00'); refuse('-0500');                    // UTC offsets (platform-divergent)
+  refuse('GMT+7');                                      // display name
+  // A prop-ref is still runtime (not schema-bound) and still passes schema.
+  assert(validate(spec({ kind: 'ref', value: 'userTz' })).ok, 'a prop-ref timeZone must still pass schema (runtime device fallback)');
+});
+
 console.log('\n=== verify-patches ===');
 console.log(results.join('\n'));
 console.log(`\n${pass} passed, ${fail} failed\n`);

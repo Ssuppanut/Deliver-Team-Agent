@@ -91,11 +91,14 @@ definitions:
       locale: { description: "BCP-47 locale tag: a literal (e.g. en-GB) or a plain prop ref; omitted = platform default." }
       timeZone:
         description: >
-          IANA timezone id (F-27): a literal (e.g. Asia/Bangkok) or a plain prop
-          ref. Omitted = device timezone (output byte-identical to no-timezone). An
-          invalid literal id is rejected at validate-schema; an invalid runtime
-          prop-ref value falls back to the device timezone identically on all 6
-          adapters. A timezone display name/label is not supported.
+          IANA timezone id (F-27): a literal or a plain prop ref. A LITERAL must be
+          the exact-case Region/City form (e.g. Asia/Bangkok, Asia/Kolkata,
+          Etc/GMT-7) or UTC — the cross-platform-safe subset. Case variants
+          (asia/bangkok), UTC offsets (+07:00, -0500) and display names (GMT+7) are
+          rejected at validate-schema because Swift/Java (case-sensitive) would not
+          resolve them identically to ICU. Omitted = device timezone (output
+          byte-identical to no-timezone). An invalid runtime prop-ref value falls
+          back to the device timezone identically on all 6 adapters.
 
   numberFormat:
     type: object
