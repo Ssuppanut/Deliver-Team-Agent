@@ -16,7 +16,12 @@ class VueRenderer extends RendererBase {
     if (!vr) return '';
     if (vr.kind === 'literal') return String(vr.value);
     if (vr.kind === 'format') { this.express('number-format', { mechanism: 'Intl.NumberFormat' }); return `{{ ${this.intlFormatExpr(this.numberFormat(vr))} }}`; }
-    if (vr.kind === 'datetime') { this.express('date-format', { mechanism: 'Intl.DateTimeFormat' }); return `{{ ${this.intlDateExpr(this.dateFormat(vr))} }}`; }
+    if (vr.kind === 'datetime') {
+      const df = this.dateFormat(vr);
+      this.express('date-format', { mechanism: 'Intl.DateTimeFormat' });
+      if (df.timeZone) this.express('date-timezone', { mechanism: df.timeZone.kind === 'literal' ? 'Intl timeZone option (literal)' : 'Intl timeZone option + __dtfTimeZone runtime fallback to device' });
+      return `{{ ${this.intlDateExpr(df)} }}`;
+    }
     return `{{ ${vr.value} }}`;
   }
   bind(attr, vr) {
@@ -230,8 +235,9 @@ class VueRenderer extends RendererBase {
     const optionIcons = this.usesOptionIcons
       ? `const OPTION_ICONS: Record<string, unknown> = { ${Object.entries(this.iconMap).map(([t, sym]) => `${JSON.stringify(t)}: ${sym}`).join(', ')} };\n`
       : '';
+    const tzGuard = this.usesTzGuard ? this.tzGuardHelper() : '';
     return `<script setup lang="ts">\n${iconImport}import '../../_shared/tokens/tokens.css';\n\n`
-      + `defineProps<{\n${props}\n}>();\n${optionIcons}</script>\n\n`
+      + `defineProps<{\n${props}\n}>();\n${optionIcons}${tzGuard}</script>\n\n`
       + `<template>\n${indent(root, 2)}\n</template>\n`;
   }
 }

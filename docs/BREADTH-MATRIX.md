@@ -1893,3 +1893,161 @@ timezone capability (logged as F-27); no expressions as locale/date-source/style
 (F-9); the F-11/F-12 number path is a separate value kind and formatter, untouched;
 the F-25 rich-option work is independent; no gate or the ledger weakened; no changes
 to agents / skills / workflow / AI-router.
+
+---
+
+# F-27 — Timezone support for date/time formatting (extends F-26)
+
+F-26 logged timezone as out of scope. This phase adds an IANA `timeZone` option to
+the `kind: datetime` descriptor, routed through each platform's native date
+formatter. It extends F-26 — the no-timezone path is byte-identical to before.
+
+## Authoring
+
+```yaml
+text:
+  kind: datetime
+  value: when
+  dateFormat:
+    dateStyle: medium
+    timeStyle: short
+    timeZone: Asia/Bangkok              # literal, OR { kind: ref, value: userTz }
+```
+
+`timeZone` is an IANA id — a static literal or a plain prop ref. Omitted = device
+timezone (output unchanged from F-26). An expression as the timezone (or any option)
+is refused (`expression-date-format`, F-9). A display name (GMT+7, ICT) is not an
+IANA id and is refused at validate-schema.
+
+## Native mapping
+
+| Case | Web + RN (`Intl.DateTimeFormat`) | SwiftUI (`DateFormatter`) | Compose (`java.text.DateFormat`) |
+|---|---|---|---|
+| literal | `timeZone: "Asia/Bangkok"` | `f.timeZone = TimeZone(identifier: "Asia/Bangkok") ?? .current` | `.apply { timeZone = TimeZone.getTimeZone(runCatching { ZoneId.of("Asia/Bangkok") }.getOrElse { ZoneId.systemDefault() }) }` |
+| prop-ref | `timeZone: __dtfTimeZone(userTz)` | `TimeZone(identifier: userTz) ?? .current` | `runCatching { ZoneId.of(userTz) }.getOrElse { ZoneId.systemDefault() }` |
+| invalid runtime | `__dtfTimeZone` try/catch → `undefined` (device) | `?? .current` (device) | `getOrElse { systemDefault() }` (device) |
+
+`__dtfTimeZone` is a per-component web/RN helper: `try { new Intl.DateTimeFormat(undefined, { timeZone: tz }); return tz; } catch { return undefined; }` — a RangeError falls back to `undefined` (device), never throws. The device fallback is semantically identical on all 6 (the viewer's local zone).
+
+## Validity model (MUST-INVESTIGATE #1 — alias / canonical)
+
+- **Literal** ids are validated at `validate-schema` by **construction**
+  (`new Intl.DateTimeFormat(undefined, { timeZone: id })`), not by
+  `Intl.supportedValuesOf('timeZone')`. **Finding:** `supportedValuesOf` is
+  ICU-version-dependent and unreliable as a canonical oracle — on this repo's Node
+  22 / ICU it lists `Asia/Calcutta` (the alias) but **not** `Asia/Kolkata` (the
+  modern canonical). Validating against that list would wrongly refuse
+  `Asia/Kolkata`, which Swift/Java accept. Construction-validation accepts **both**
+  canonical and alias ids, matching the shared IANA tz database that web (ICU),
+  Swift (Foundation) and Java (java.time) all resolve against. So the rule is
+  **"any id the runtime's IANA database accepts"**, not a canonical-only allowlist.
+  Both `Asia/Kolkata` and `Asia/Calcutta` pass; `Mars/Phobos` and `GMT+7` are
+  refused.
+- **Prop-ref** ids are not knowable at build time, so they are **not**
+  schema-checked; an invalid runtime value falls back to the device timezone
+  identically on all 6 (never a crash, never a per-platform fallback).
+
+## MUST-INVESTIGATE #2 — React Native (Hermes) Intl timeZone
+
+F-26 **already** emits `Intl.DateTimeFormat(...).format(...)` for the RN adapter —
+RN date formatting depends on the engine providing `Intl.DateTimeFormat`. F-27 adds
+the `timeZone` option to that **same, pre-existing** call; it introduces **no new
+engine dependency** beyond what F-26 established. On React Native this requires
+Hermes built with full ICU (`react-native` 0.73+ ships Hermes with
+`Intl.DateTimeFormat` incl. the `timeZone` option; older/no-ICU Hermes supports only
+a limited `Intl`, and JSC/`react-native-web` have full Intl). Because the generator
+emits platform-standard code (not executed here), the correct place to assert this
+is the app's engine config, which is outside this spec→code engine. **Reported, not
+papered over:** if a target pins pre-0.73 Hermes without ICU, the RN adapter's
+`Intl` usage (F-26 and F-27 alike) would need a polyfill (`@formatjs/intl-*`) or an
+RN-specific divergence; no such divergence is taken here because F-26 already
+standardized on RN Intl and this repo adds no runtime. The runtime `__dtfTimeZone`
+guard additionally means that on any engine that rejects a zone, the output falls
+back to device rather than throwing.
+
+## Breadth matrix — F-27 proofs
+
+| Component | React | Vue | Svelte | RN | SwiftUI | Compose | Gates | Outcome | Notes |
+|---|---|---|---|---|---|---|---|---|---|
+| **EventTzStatic** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 9/9 pass | **PASS** | static `Asia/Bangkok` through each native formatter; `date-timezone` expressed, 0 unaccounted. |
+| **EventTzRef** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 9/9 pass | **PASS** | runtime `userTz` bound (not stringified) + device fallback on all 6. |
+
+## Divergence
+
+**None.** Every adapter expresses `date-timezone` through its native formatter; no
+`diverge`, no waiver.
+
+## Test matrix (6 adapters × each case)
+
+```
+                 react  vue  svelte  rn   swiftui  compose
+static literal     ✓     ✓     ✓     ✓      ✓        ✓     (native timeZone emitted)
+prop-ref           ✓     ✓     ✓     ✓      ✓        ✓     (bound var + device fallback)
+omitted            ✓     ✓     ✓     ✓      ✓        ✓     (byte-identical to F-26; diff -rq = no diff)
+invalid literal    — refused at validate-schema (before generation), all adapters —
+invalid prop-ref   ✓     ✓     ✓     ✓      ✓        ✓     (device fallback baked into output)
+expression tz      — refused (expression-date-format, F-9), all adapters —
+```
+
+## Gate / defense interaction
+
+- **Ledger 0-unaccounted** — `date-timezone` is a declared trait; each adapter
+  `express()`es it when a timezone is set. Dropping it in any adapter → ledger RED
+  (fired-gate proof below).
+- **validate-schema** rejects an invalid literal before generation (fired-gate
+  proof below).
+- **parity** now tracks the timezone/locale prop-ref, so a stringified-ref defect
+  (`timeZone: "userTz"`) goes RED (new mutation operator, killed).
+- **native-code** stays green — formatters/guards are native, not `variant.prop`
+  leaks (no `Intl` in native, no native formatter in web). **token-guard** stays
+  green — IANA ids / locales are formatter config, not colors/dimensions.
+
+## Fired-gate proofs
+
+```
+# ledger (date-timezone trait) — drop React's express():
+REVERTED  ledger FAIL (1 unaccounted): react drops trait `date-timezone` (silent drop)
+RESTORED  ledger PASS (0 unaccounted)
+
+# validate-schema (literal IANA check) — disable checkTimeZones:
+REVERTED  invalid literal "Mars/Phobos" validates ok=true  (gate silent — the hole)
+RESTORED  invalid literal "Mars/Phobos" validates ok=false (gate fires)
+```
+
+## Mutation harness
+
+Corpus 543 → **578** mutants; baseline clean, **574 killed / 4 survived** (only the
+known `state-by-color-only`/F-22 advisory). New/covered mutants:
+- **drop-trait** generates **12** `date-timezone` drops (6 adapters × 2 specs) — all
+  killed by the ledger.
+- **tz-ref-as-literal** (new operator): a timezone prop-ref emitted as its own-name
+  string literal — killed by parity.
+No new survivor, no regression.
+
+## Findings
+
+- **F-27 — RESOLVED.** IANA timezone (literal + prop-ref) on all 6 via native date
+  formatters; invalid literal refused at schema; invalid runtime value falls back to
+  device uniformly; expressions refused; no-timezone output byte-identical to F-26.
+- **Residual (by design):** timezone **display names/labels** (GMT+7, ICT) are not
+  supported — refused at validate-schema as non-IANA ids, the same boundary as
+  custom date patterns.
+
+## Regression pins
+
+- **P71** — static IANA id renders through each native formatter on all 6;
+  `date-timezone` expressed, 0 unaccounted.
+- **P72** — prop-ref binds the variable (not stringified) + device fallback on all 6;
+  the web/RN `__dtfTimeZone` guard returns `undefined` (device) on an invalid id.
+- **P73** — invalid literal refused at validate-schema (canonical + alias pass,
+  display name refused); expression / non-plain-ref refused (F-9); a no-timezone
+  datetime declares no `date-timezone` trait and emits no timezone code.
+
+`verify-patches` → **73/73**. `rm -rf out/ && node _shared/scripts/ci.mjs` → exit 0.
+
+## Scope — what this did not touch
+
+IANA ids only (no display names, no custom patterns); no expression as any option;
+no new dependency; the F-26 number/date path and all other features are byte-identical
+when no timezone is set; no gate or the ledger weakened; no changes to agents / skills
+/ workflow / AI-router.

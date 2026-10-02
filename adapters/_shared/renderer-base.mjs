@@ -72,6 +72,10 @@ export class RendererBase {
     // F-26 date/time formatting: a datetime value is a trait every adapter must
     // express via its native date formatter (or the ledger flags a silent drop).
     for (const f of ['text', 'label']) if (node[f]?.kind === 'datetime') t.push('date-format');
+    // F-27 timezone: a datetime value that sets a timeZone is an extra trait every
+    // adapter must express via its native formatter's timezone (or the ledger flags
+    // it). Omitted timeZone -> no trait -> output byte-identical to F-26.
+    for (const f of ['text', 'label']) if (node[f]?.kind === 'datetime' && node[f]?.dateFormat?.timeZone != null) t.push('date-timezone');
     return t;
   }
 
@@ -162,6 +166,7 @@ export class RendererBase {
       dateStyle: f.dateStyle,                     // 'short' | 'medium' | 'long' (preset)
       timeStyle: f.timeStyle,                     // 'short' | 'medium' | 'long' (preset)
       locale: opt(f.locale),
+      timeZone: opt(f.timeZone),                  // F-27: IANA id literal or plain ref
     };
   }
 
@@ -175,8 +180,25 @@ export class RendererBase {
     const opts = [];
     if (fmt.dateStyle) opts.push(`dateStyle: ${JSON.stringify(fmt.dateStyle)}`);
     if (fmt.timeStyle) opts.push(`timeStyle: ${JSON.stringify(fmt.timeStyle)}`);
+    // F-27 timezone: a literal id is schema-validated, so emit it directly (the
+    // same engine that validated it runs it). A runtime prop-ref is guarded by
+    // __dtfTimeZone, which returns the id only if Intl accepts it, else undefined
+    // (= device timezone) — never a RangeError throw.
+    if (fmt.timeZone) {
+      if (fmt.timeZone.kind === 'literal') opts.push(`timeZone: ${JSON.stringify(fmt.timeZone.value)}`);
+      else { this.usesTzGuard = true; opts.push(`timeZone: __dtfTimeZone(${fmt.timeZone.value})`); }
+    }
     const locale = fmt.locale ? jsv(fmt.locale) : 'undefined';
     return `new Intl.DateTimeFormat(${locale}, { ${opts.join(', ')} }).format(${jsv(fmt.value)})`;
+  }
+
+  /** The web/RN runtime timezone guard helper source (F-27), emitted once per
+   *  component when a prop-ref timeZone is present. */
+  tzGuardHelper() {
+    return `function __dtfTimeZone(tz: string | undefined): string | undefined {\n`
+      + `  if (!tz) return undefined;\n`
+      + `  try { new Intl.DateTimeFormat(undefined, { timeZone: tz }); return tz; } catch { return undefined; }\n`
+      + `}\n`;
   }
 
   /** Account for a trait: this adapter emitted it via a real platform mechanism. */

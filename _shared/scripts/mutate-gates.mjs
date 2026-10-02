@@ -306,6 +306,32 @@ const OPERATORS = [
     },
   },
 
+  // O8 — F-27: emit a timezone PROP-REF as the string literal of its own name
+  // (the F-1 class, re-entering through the date formatter's timeZone). Since
+  // refUsedProps now tracks the timeZone ref, parity's ref-as-literal lint fires.
+  {
+    id: 'tz-ref-as-literal',
+    klass: 'parity',
+    expect: 'parity (timezone prop-ref emitted as the string literal of its own name)',
+    sites(bundle) {
+      let ref = null;
+      for (const n of irNodes(bundle.ir)) {
+        for (const f of ['text', 'label']) {
+          const tz = n[f]?.kind === 'datetime' ? n[f].dateFormat?.timeZone : undefined;
+          if (tz && typeof tz === 'object' && tz.kind === 'ref') { ref = tz.value; break; }
+        }
+        if (ref) break;
+      }
+      if (!ref) return [];
+      // react binds the tz ref as `__dtfTimeZone(<ref>)`; stringify it as its own name.
+      if (!bundle.results.react?.code.includes(`__dtfTimeZone(${ref})`)) return [];
+      return [{
+        key: `${bundle.feature}:react:${ref}`,
+        apply(c) { c.results.react.code = c.results.react.code.replace(`__dtfTimeZone(${ref})`, `"${ref}"`); },
+      }];
+    },
+  },
+
   // O7 — turn a good icon+color status variant into a color-ONLY one (state by
   // color alone). slop flags it, but only at `minor` severity.
   {

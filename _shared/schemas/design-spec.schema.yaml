@@ -79,15 +79,23 @@ definitions:
     type: object
     additionalProperties: false
     description: >
-      Native date/time-formatter options (F-26). dateStyle / timeStyle use native
-      PRESETS (short | medium | long) — never a custom pattern string. locale is a
-      STATIC literal or a plain prop ref ({ kind: ref, value: <prop> }) for runtime
-      switching; an expression as locale / date-source is refused (F-9). At least
-      one of dateStyle / timeStyle must be given. Timezone handling is out of scope.
+      Native date/time-formatter options (F-26 + F-27 timezone). dateStyle /
+      timeStyle use native PRESETS (short | medium | long) — never a custom pattern
+      string. locale and timeZone are each a STATIC literal or a plain prop ref
+      ({ kind: ref, value: <prop> }) for runtime switching; an expression as any of
+      them, or as the date source, is refused (F-9). At least one of dateStyle /
+      timeStyle must be given. Timezone display names (GMT+7, ICT) are not supported.
     properties:
       dateStyle: { type: string, enum: [short, medium, long], description: "Native date preset." }
       timeStyle: { type: string, enum: [short, medium, long], description: "Native time preset." }
       locale: { description: "BCP-47 locale tag: a literal (e.g. en-GB) or a plain prop ref; omitted = platform default." }
+      timeZone:
+        description: >
+          IANA timezone id (F-27): a literal (e.g. Asia/Bangkok) or a plain prop
+          ref. Omitted = device timezone (output byte-identical to no-timezone). An
+          invalid literal id is rejected at validate-schema; an invalid runtime
+          prop-ref value falls back to the device timezone identically on all 6
+          adapters. A timezone display name/label is not supported.
 
   numberFormat:
     type: object

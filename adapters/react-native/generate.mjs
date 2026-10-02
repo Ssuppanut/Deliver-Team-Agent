@@ -16,7 +16,12 @@ class RNRenderer extends RendererBase {
     if (!vr) return '';
     if (vr.kind === 'literal') return String(vr.value);
     if (vr.kind === 'format') { this.express('number-format', { mechanism: 'Intl.NumberFormat' }); return `{${this.intlFormatExpr(this.numberFormat(vr))}}`; }
-    if (vr.kind === 'datetime') { this.express('date-format', { mechanism: 'Intl.DateTimeFormat' }); return `{${this.intlDateExpr(this.dateFormat(vr))}}`; }
+    if (vr.kind === 'datetime') {
+      const df = this.dateFormat(vr);
+      this.express('date-format', { mechanism: 'Intl.DateTimeFormat' });
+      if (df.timeZone) this.express('date-timezone', { mechanism: df.timeZone.kind === 'literal' ? 'Intl timeZone option (literal)' : 'Intl timeZone option + __dtfTimeZone runtime fallback to device' });
+      return `{${this.intlDateExpr(df)}}`;
+    }
     return `{${vr.value}}`;
   }
   attr(vr) {
@@ -280,11 +285,13 @@ class RNRenderer extends RendererBase {
       ? `const OPTION_ICONS: Record<string, React.ComponentType<object>> = { ${Object.entries(this.iconMap).map(([t, sym]) => `${JSON.stringify(t)}: ${sym}`).join(', ')} };\n`
         + `function OptionIcon({ token }: { token: string }) {\n  const Icon = OPTION_ICONS[token];\n  return Icon ? <Icon accessibilityElementsHidden importantForAccessibility="no" /> : null;\n}\n\n`
       : '';
+    const tzGuard = this.usesTzGuard ? this.tzGuardHelper() + '\n' : '';
     return `import React from 'react';\n`
       + `import { ${[...rnImports].join(', ')} } from 'react-native';\n`
       + `${sliderImport}${pickerImport}${iconImport}import { tokens } from '../../_shared/tokens/tokens-rn';\n\n`
       + `export interface ${name}Props {\n${props}\n}\n\n`
       + optionIcons
+      + tzGuard
       + `export function ${name}({ ${args} }: ${name}Props) {\n  return (\n${indent(root, 4)}\n  );\n}\n`;
   }
 }

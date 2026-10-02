@@ -18,13 +18,48 @@ import addFormats from 'ajv-formats';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_SCHEMA = resolve(__dirname, '../schemas/design-spec.schema.yaml');
 
+/** True if `id` is an IANA timezone the runtime accepts. Construction-based
+ *  (not Intl.supportedValuesOf, which is ICU-version-dependent — e.g. it lists
+ *  Asia/Calcutta but not Asia/Kolkata on some builds). Accepts canonical ids and
+ *  aliases alike, matching the shared IANA database used by web/Swift/Java. */
+function isValidTimeZone(id) {
+  if (typeof id !== 'string' || !id) return false;
+  try { new Intl.DateTimeFormat(undefined, { timeZone: id }); return true; } catch { return false; }
+}
+
+/** F-27: reject an invalid LITERAL IANA timezone before generation. A prop-ref
+ *  timeZone (runtime) is not checked here — it falls back to the device timezone
+ *  at runtime on every adapter. Returns ajv-shaped error objects. */
+function checkTimeZones(node, path = '/root') {
+  if (!node || typeof node !== 'object') return [];
+  const errors = [];
+  for (const field of ['text', 'label']) {
+    const v = node[field];
+    const tz = v && v.kind === 'datetime' ? v.dateFormat?.timeZone : undefined;
+    // Only a bare-string literal is checked; a { kind: ref } object is runtime.
+    if (typeof tz === 'string' && !isValidTimeZone(tz)) {
+      errors.push({ instancePath: `${path}/${field}/dateFormat/timeZone`, message: `invalid IANA timezone id "${tz}" (use a valid id such as Asia/Bangkok; a display name like GMT+7 is not supported)` });
+    }
+  }
+  for (const [i, c] of (node.children ?? []).entries()) errors.push(...checkTimeZones(c, `${path}/children/${i}`));
+  for (const b of ['then', 'else']) if (node[b]) errors.push(...checkTimeZones(node[b], `${path}/${b}`));
+  return errors;
+}
+
 export function validate(doc, schemaPath = DEFAULT_SCHEMA) {
   const schema = parse(readFileSync(schemaPath, 'utf8'));
   const ajv = new Ajv({ allErrors: true, strict: false });
   addFormats(ajv);
   const fn = ajv.compile(schema);
   const ok = fn(doc);
-  return { ok, errors: fn.errors ?? [] };
+  const errors = fn.errors ?? [];
+  // Semantic pass (only when the document is structurally valid): F-27 literal
+  // timezone validity, which JSON Schema cannot express (version-dependent set).
+  if (ok && doc?.root) {
+    const tzErrors = checkTimeZones(doc.root);
+    if (tzErrors.length) return { ok: false, errors: tzErrors };
+  }
+  return { ok, errors };
 }
 
 export function loadSpec(path) {
