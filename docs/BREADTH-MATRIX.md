@@ -2069,6 +2069,13 @@ No new survivor, no regression.
   targeting RN must ship RN 0.73+ (Hermes+ICU) or a `@formatjs/intl-datetimeformat`
   polyfill for zone-accurate output; otherwise date output is correct but in the
   device zone.
+- **Residual (by design, not a bug) — tzdata skew.** A timezone id newer than a
+  given platform's bundled tzdata (an older OS or runtime that predates the zone,
+  e.g. a recently-created or renamed IANA zone) cannot be detected at
+  validate-schema — the build-time ICU check accepts it, but at runtime that stale
+  platform doesn't know it and **degrades to the device timezone** (the same safe,
+  uniform fallback as an invalid prop-ref). validate-schema cannot see the end
+  device's tzdata vintage, so this is not catchable there.
 
 ## Follow-up (literal parity + harness coverage)
 
