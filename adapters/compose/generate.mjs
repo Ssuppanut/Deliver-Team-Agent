@@ -51,13 +51,23 @@ class ComposeRenderer extends RendererBase {
     if (D && T) inst = `getDateTimeInstance(${D}, ${T}${loc ? `, ${loc}` : ''})`;
     else if (D) inst = `getDateInstance(${D}${loc ? `, ${loc}` : ''})`;
     else inst = `getTimeInstance(${T}${loc ? `, ${loc}` : ''})`;
-    return `java.text.DateFormat.${inst}.format(${src})`;
+    // F-27 timezone: ZoneId.of throws on an unknown id, so runCatching falls back
+    // to systemDefault (device) — identical device fallback as the other adapters.
+    const tzApply = fmt.timeZone
+      ? `.apply { timeZone = java.util.TimeZone.getTimeZone(runCatching { java.time.ZoneId.of(${sv(fmt.timeZone)}) }.getOrElse { java.time.ZoneId.systemDefault() }) }`
+      : '';
+    return `java.text.DateFormat.${inst}${tzApply}.format(${src})`;
   }
   strExpr(vr) {
     if (!vr) return '""';
     if (vr.kind === 'literal') return JSON.stringify(String(vr.value));
     if (vr.kind === 'format') { this.express('number-format', { mechanism: 'java.text.NumberFormat' }); return this.formatNumber(this.numberFormat(vr)); }
-    if (vr.kind === 'datetime') { this.express('date-format', { mechanism: 'java.text.DateFormat' }); return this.formatDate(this.dateFormat(vr)); }
+    if (vr.kind === 'datetime') {
+      const df = this.dateFormat(vr);
+      this.express('date-format', { mechanism: 'java.text.DateFormat' });
+      if (df.timeZone) this.express('date-timezone', { mechanism: 'DateFormat.timeZone = runCatching { ZoneId.of } getOrElse systemDefault' });
+      return this.formatDate(df);
+    }
     if (vr.kind === 'ref') return vr.value;
     // F-11 (precision-only): `<num>.toFixed(<precision>)` -> a real native decimal
     // formatter with `precision` fraction digits. No locale / grouping / currency

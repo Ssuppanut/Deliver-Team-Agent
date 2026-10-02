@@ -55,6 +55,7 @@ import { checkTbd } from '../../.claude/skills/_meta/critique/scripts/check-tbd.
 import { checkParity } from './e2e-multi.mjs';
 import { checkNativeExprLeak, checkDeclaredDropped } from './output-guards.mjs';
 import { checkLedger } from './ledger-gate.mjs';
+import { checkTimeZones } from './validate-schema.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '../..');
@@ -117,6 +118,9 @@ export function runGates(bundle) {
     'native-code': checkNativeExprLeak(ir, results),
     'declared-io': checkDeclaredDropped(ir, results),
     ledger: checkLedger(ledger),
+    // F-27 (follow-up): the validate-schema literal-timezone gate, run on the IR
+    // so a bad literal timeZone injected into a datetime value is caught here.
+    'timezone-schema': (() => { const e = checkTimeZones(ir.root); return { ok: e.length === 0, issues: e.map((x) => ({ severity: 'serious', msg: x.message })) }; })(),
   };
   // perf-guard runs but is advisory-only (returns ok:true); kept for parity of
   // execution, never counted as a killer.
@@ -303,6 +307,59 @@ const OPERATORS = [
           c.ir.root.a11y = { ...(c.ir.root.a11y ?? {}), label: { kind: 'literal', value: 'TBD — unknown label' } };
         },
       }];
+    },
+  },
+
+  // O8 — F-27: emit a timezone PROP-REF as the string literal of its own name
+  // (the F-1 class, re-entering through the date formatter's timeZone). Since
+  // refUsedProps now tracks the timeZone ref, parity's ref-as-literal lint fires.
+  {
+    id: 'tz-ref-as-literal',
+    klass: 'parity',
+    expect: 'parity (timezone prop-ref emitted as the string literal of its own name)',
+    sites(bundle) {
+      let ref = null;
+      for (const n of irNodes(bundle.ir)) {
+        for (const f of ['text', 'label']) {
+          const tz = n[f]?.kind === 'datetime' ? n[f].dateFormat?.timeZone : undefined;
+          if (tz && typeof tz === 'object' && tz.kind === 'ref') { ref = tz.value; break; }
+        }
+        if (ref) break;
+      }
+      if (!ref) return [];
+      // react binds the tz ref as `__dtfTimeZone(<ref>)`; stringify it as its own name.
+      if (!bundle.results.react?.code.includes(`__dtfTimeZone(${ref})`)) return [];
+      return [{
+        key: `${bundle.feature}:react:${ref}`,
+        apply(c) { c.results.react.code = c.results.react.code.replace(`__dtfTimeZone(${ref})`, `"${ref}"`); },
+      }];
+    },
+  },
+
+  // O9 — F-27 follow-up: inject a cross-platform-unsafe LITERAL timeZone (a
+  // case-variant ICU would normalize but Swift/Java reject) into a datetime value.
+  // The validate-schema literal-timezone gate (now in the battery) must kill it;
+  // if checkTimeZones were disabled/loosened, this mutant would survive.
+  {
+    id: 'invalid-literal-timezone',
+    klass: 'timezone-schema',
+    expect: 'timezone-schema (validate-schema rejects a case-variant / offset / invalid literal timeZone)',
+    sites(bundle) {
+      for (const n of irNodes(bundle.ir)) {
+        for (const f of ['text', 'label']) {
+          if (n[f]?.kind === 'datetime') {
+            return [{
+              key: `${bundle.feature}:${f}`,
+              apply(c) {
+                for (const m of irNodes(c.ir)) {
+                  if (m[f]?.kind === 'datetime') { m[f].dateFormat = { ...(m[f].dateFormat ?? {}), timeZone: 'asia/bangkok' }; return; }
+                }
+              },
+            }];
+          }
+        }
+      }
+      return [];
     },
   },
 

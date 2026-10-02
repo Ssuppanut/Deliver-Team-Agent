@@ -19,7 +19,7 @@ import { checkPerf } from '../../.claude/skills/_guards/perf-guard/scripts/check
 import { checkSlop } from '../../.claude/skills/_guards/slop-guard/scripts/check.mjs';
 import { checkTbd } from '../../.claude/skills/_meta/critique/scripts/check-tbd.mjs';
 import { checkRefusal } from '../../.claude/skills/_meta/orchestrator/scripts/refusal.mjs';
-import { loadSpec } from './validate-schema.mjs';
+import { loadSpec, validate } from './validate-schema.mjs';
 import { route, loadContext } from '../../.ai/router/route.mjs';
 import { loadWorkflow, evaluateWorkflow, runScenarios, lintWorkflow } from './workflow-eval.mjs';
 import { skillRegistryDrift } from './skill-registry.mjs';
@@ -1262,6 +1262,84 @@ check('P70', 'date-format (F-26): a static locale and a prop-ref locale both dri
   assert(checkRefusal(mk({ dateStyle: 'long', locale: { kind: 'ref', value: 'userLocale' } })) === null, 'a plain prop-ref locale must pass');
   assert(checkRefusal(mk({ dateStyle: 'long', locale: { kind: 'expr', value: 'nav.language' } }))?.category === 'expression-date-format', 'an expression as locale must be refused');
   assert(checkRefusal(mk({ dateStyle: 'long' }, 'new Date()'))?.category === 'expression-date-format', 'an expression date source must be refused');
+});
+
+// --- F-27 timezone: static / prop-ref / invalid / expression / regression (P71-P73)
+const EVENT_TZ_STATIC = resolve(ROOT, '.claude/artifacts/event-tz-static/design-spec.yaml');
+const EVENT_TZ_REF = resolve(ROOT, '.claude/artifacts/event-tz-ref/design-spec.yaml');
+const tzGenAll = (spec, feat) => ({
+  react: generateReact(spec, feat), vue: generateVue(spec, feat), svelte: generateSvelte(spec, feat),
+  'react-native': generateReactNative(spec, feat), swiftui: generateSwiftUI(spec, feat), compose: generateCompose(spec, feat),
+});
+
+// --- P71: a static IANA timezone renders via each native formatter on all 6 ---
+check('P71', 'timezone (F-27): a static IANA id renders through each adapter native date formatter on all 6; date-timezone expressed, 0 unaccounted', () => {
+  const out = tzGenAll(EVENT_TZ_STATIC, 'verify-tz-static');
+  const pat = {
+    react: /timeZone: "Asia\/Bangkok"/, vue: /timeZone: "Asia\/Bangkok"/, svelte: /timeZone: "Asia\/Bangkok"/, 'react-native': /timeZone: "Asia\/Bangkok"/,
+    swiftui: /f\.timeZone = TimeZone\(identifier: "Asia\/Bangkok"\) \?\? \.current/,
+    compose: /timeZone = java\.util\.TimeZone\.getTimeZone\(runCatching \{ java\.time\.ZoneId\.of\("Asia\/Bangkok"\) \}\.getOrElse \{ java\.time\.ZoneId\.systemDefault\(\) \}\)/,
+  };
+  for (const [ad, re] of Object.entries(pat)) assert(re.test(out[ad].code), `${ad}: static timezone not rendered natively`);
+  for (const [ad, r] of Object.entries(out)) {
+    const e = r.ledger.find((x) => x.traitId === 'date-timezone');
+    assert(e && e.status === 'expressed' && e.mechanism, `${ad}: date-timezone must be expressed`);
+    assert(!r.ledger.some((x) => x.status === 'unaccounted'), `${ad}: no trait may be unaccounted`);
+  }
+});
+
+// --- P72: a prop-ref timezone binds the variable + device fallback on all 6 ----
+check('P72', 'timezone (F-27): a runtime prop-ref binds the variable (not stringified) and falls back to the device timezone identically on all 6', () => {
+  const out = tzGenAll(EVENT_TZ_REF, 'verify-tz-ref');
+  // Bound (not a "userTz" string literal) + a device fallback is present per adapter.
+  const pat = {
+    react: /timeZone: __dtfTimeZone\(userTz\)/, vue: /timeZone: __dtfTimeZone\(userTz\)/, svelte: /timeZone: __dtfTimeZone\(userTz\)/, 'react-native': /timeZone: __dtfTimeZone\(userTz\)/,
+    swiftui: /TimeZone\(identifier: userTz\) \?\? \.current/,
+    compose: /runCatching \{ java\.time\.ZoneId\.of\(userTz\) \}\.getOrElse \{ java\.time\.ZoneId\.systemDefault\(\) \}/,
+  };
+  for (const [ad, re] of Object.entries(pat)) assert(re.test(out[ad].code), `${ad}: prop-ref timezone not bound with device fallback`);
+  // web/RN guard helper returns undefined (device) on an invalid id — never throws.
+  for (const ad of ['react', 'vue', 'svelte', 'react-native']) {
+    assert(/function __dtfTimeZone/.test(out[ad].code) && /return undefined/.test(out[ad].code) && /catch \{ return undefined; \}/.test(out[ad].code), `${ad}: __dtfTimeZone device-fallback guard missing`);
+    assert(!/"userTz"/.test(out[ad].code), `${ad}: timezone ref must bind the prop, not a string literal`);
+  }
+});
+
+// --- P73: literal validity at schema; expression refused; omitted = no change ---
+check('P73', 'timezone (F-27): invalid literal refused at validate-schema (canonical + alias pass; display name refused); expression/non-plain-ref refused (F-9); omitted = no date-timezone trait', () => {
+  const spec = (tz) => ({ component: 'T', root: { el: 'text', text: { kind: 'datetime', value: 'when', dateFormat: { dateStyle: 'medium', timeZone: tz } } }, props: [{ name: 'when', type: 'date', required: true }] });
+  // validate-schema: valid canonical + alias pass; invalid id + display name refused.
+  assert(validate(spec('Asia/Bangkok')).ok, 'valid IANA id must pass validate-schema');
+  assert(validate(spec('Asia/Kolkata')).ok && validate(spec('Asia/Calcutta')).ok, 'canonical AND alias ids must pass');
+  const bad = validate(spec('Mars/Phobos'));
+  assert(!bad.ok && /invalid IANA timezone/.test(bad.errors[0]?.message ?? ''), 'an invalid literal id must be refused at validate-schema');
+  assert(!validate(spec('GMT+7')).ok, 'a timezone display name must be refused (not a valid IANA id)');
+  assert(validate(spec({ kind: 'ref', value: 'userTz' })).ok, 'a prop-ref timeZone is not schema-checked (runtime fallback)');
+  // refusal (F-9): expression / non-plain ref as the timezone.
+  assert(checkRefusal(spec({ kind: 'expr', value: 'tz()' }))?.category === 'expression-date-format', 'an expression timezone must be refused');
+  assert(checkRefusal(spec({ kind: 'ref', value: 'tz.toUpperCase()' }))?.category === 'expression-date-format', 'a non-plain ref timezone must be refused');
+  assert(checkRefusal(spec('Asia/Bangkok')) === null && checkRefusal(spec({ kind: 'ref', value: 'userTz' })) === null, 'a literal or plain-ref timezone must pass refusal');
+  // Regression: a datetime WITHOUT a timezone declares no date-timezone trait and emits no timeZone.
+  const out = tzGenAll(EVENT_DT, 'verify-tz-regress');
+  for (const [ad, r] of Object.entries(out)) {
+    assert(!r.ledger.some((x) => x.traitId === 'date-timezone'), `${ad}: no-timezone datetime must not declare date-timezone`);
+    assert(!/timeZone|__dtfTimeZone|systemDefault/.test(out[ad].code), `${ad}: no-timezone datetime must not emit timezone code`);
+  }
+});
+
+// --- P74: F-27 literal timezone parity — cross-platform-safe subset only ------
+check('P74', 'timezone (F-27 follow-up): a literal passing validate-schema resolves on all 6 — exact-case Region/City or UTC accepted; case variants, UTC offsets and display names refused; aliases (Kolkata AND Calcutta) stay valid', () => {
+  const spec = (tz) => ({ component: 'T', root: { el: 'text', text: { kind: 'datetime', value: 'when', dateFormat: { dateStyle: 'medium', timeZone: tz } } }, props: [{ name: 'when', type: 'date', required: true }] });
+  const accept = (tz) => assert(validate(spec(tz)).ok, `${tz} must be ACCEPTED (resolves on all platforms)`);
+  const refuse = (tz) => assert(!validate(spec(tz)).ok, `${tz} must be REFUSED (not cross-platform safe)`);
+  accept('Asia/Bangkok'); accept('UTC'); accept('Etc/GMT-7');
+  accept('Asia/Calcutta'); accept('Asia/Kolkata');     // alias + canonical both valid (required)
+  refuse('asia/bangkok'); refuse('ASIA/BANGKOK');       // case variants (Swift/Java case-sensitive)
+  refuse('Z');                                          // bare word
+  refuse('+07:00'); refuse('-0500');                    // UTC offsets (platform-divergent)
+  refuse('GMT+7');                                      // display name
+  // A prop-ref is still runtime (not schema-bound) and still passes schema.
+  assert(validate(spec({ kind: 'ref', value: 'userTz' })).ok, 'a prop-ref timeZone must still pass schema (runtime device fallback)');
 });
 
 console.log('\n=== verify-patches ===');

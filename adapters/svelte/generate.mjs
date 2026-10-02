@@ -16,7 +16,12 @@ class SvelteRenderer extends RendererBase {
     if (!vr) return '';
     if (vr.kind === 'literal') return String(vr.value);
     if (vr.kind === 'format') { this.express('number-format', { mechanism: 'Intl.NumberFormat' }); return `{${this.intlFormatExpr(this.numberFormat(vr))}}`; }
-    if (vr.kind === 'datetime') { this.express('date-format', { mechanism: 'Intl.DateTimeFormat' }); return `{${this.intlDateExpr(this.dateFormat(vr))}}`; }
+    if (vr.kind === 'datetime') {
+      const df = this.dateFormat(vr);
+      this.express('date-format', { mechanism: 'Intl.DateTimeFormat' });
+      if (df.timeZone) this.express('date-timezone', { mechanism: df.timeZone.kind === 'literal' ? 'Intl timeZone option (literal)' : 'Intl timeZone option + __dtfTimeZone runtime fallback to device' });
+      return `{${this.intlDateExpr(df)}}`;
+    }
     return `{${vr.value}}`;
   }
   bind(attr, vr) {
@@ -225,7 +230,8 @@ class SvelteRenderer extends RendererBase {
     const optionIcons = this.usesOptionIcons
       ? `\n  const OPTION_ICONS: Record<string, unknown> = { ${Object.entries(this.iconMap).map(([t, sym]) => `${JSON.stringify(t)}: ${sym}`).join(', ')} };`
       : '';
-    return `<script lang="ts">\n${iconImport}  import '../../_shared/tokens/tokens.css';\n\n${decls}${optionIcons}\n</script>\n\n${root}\n`;
+    const tzGuard = this.usesTzGuard ? `\n  ${this.tzGuardHelper().trimEnd().split('\n').join('\n  ')}` : '';
+    return `<script lang="ts">\n${iconImport}  import '../../_shared/tokens/tokens.css';\n\n${decls}${optionIcons}${tzGuard}\n</script>\n\n${root}\n`;
   }
 }
 

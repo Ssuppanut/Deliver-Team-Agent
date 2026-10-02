@@ -1,0 +1,19 @@
+component: EventTzStatic
+description: F-27 timezone — static IANA id (Asia/Bangkok), medium date + short time, en-GB.
+category: display
+props:
+  - { name: when, type: date, required: true }
+tokens:
+  - color.fg.default
+root:
+  el: text
+  text:
+    kind: datetime
+    value: when
+    dateFormat:
+      dateStyle: medium
+      timeStyle: short
+      locale: en-GB
+      timeZone: Asia/Bangkok
+  style:
+    color: color.fg.default

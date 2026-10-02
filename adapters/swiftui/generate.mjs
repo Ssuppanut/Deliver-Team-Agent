@@ -51,6 +51,9 @@ class SwiftUIRenderer extends RendererBase {
     if (fmt.locale) lines.push(`f.locale = Locale(identifier: ${sv(fmt.locale)})`);
     lines.push(`f.dateStyle = ${fmt.dateStyle ? STYLE[fmt.dateStyle] : '.none'}`);
     lines.push(`f.timeStyle = ${fmt.timeStyle ? STYLE[fmt.timeStyle] : '.none'}`);
+    // F-27 timezone: TimeZone(identifier:) returns nil for an unknown id, so fall
+    // back to .current (device) — identical device fallback as the other adapters.
+    if (fmt.timeZone) lines.push(`f.timeZone = TimeZone(identifier: ${sv(fmt.timeZone)}) ?? .current`);
     lines.push(`return f.string(from: ${src})`);
     return `Text({ ${lines.join('; ')} }())`;
   }
@@ -58,7 +61,12 @@ class SwiftUIRenderer extends RendererBase {
     if (!vr) return 'Text("")';
     if (vr.kind === 'literal') return `Text(${JSON.stringify(String(vr.value))})`;
     if (vr.kind === 'format') { this.express('number-format', { mechanism: 'NumberFormatter' }); return this.formatNumber(this.numberFormat(vr)); }
-    if (vr.kind === 'datetime') { this.express('date-format', { mechanism: 'DateFormatter' }); return this.formatDate(this.dateFormat(vr)); }
+    if (vr.kind === 'datetime') {
+      const df = this.dateFormat(vr);
+      this.express('date-format', { mechanism: 'DateFormatter' });
+      if (df.timeZone) this.express('date-timezone', { mechanism: 'DateFormatter.timeZone = TimeZone(identifier:) ?? .current' });
+      return this.formatDate(df);
+    }
     if (vr.kind === 'ref') return `Text(String(describing: ${safe(vr.value)}))`;
     // F-11 (precision-only): `<num>.toFixed(<precision>)` -> a real native decimal
     // formatter with `precision` fraction digits. No locale / grouping / currency

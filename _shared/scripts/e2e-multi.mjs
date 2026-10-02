@@ -68,9 +68,16 @@ function refUsedProps(ir) {
   const propNames = new Set(ir.props.map((p) => p.name));
   const used = new Set();
   const consider = (vr) => { if (vr && vr.kind === 'ref' && propNames.has(vr.value)) used.add(vr.value); };
+  const considerName = (v) => { if (typeof v === 'object' && v?.kind === 'ref' && propNames.has(v.value)) used.add(v.value); };
   const walk = (n) => {
     for (const k of ['text', 'label', 'src', 'alt', 'href']) consider(n[k]);
     consider(n.a11y?.label);
+    // F-27: a date/time timeZone (and locale) prop-ref must bind the variable in
+    // every adapter, never be stringified as its own name — same contract as a
+    // text/label ref, so parity's ref-as-literal lint covers it too.
+    for (const vr of ['text', 'label']) {
+      if (n[vr]?.kind === 'datetime') { considerName(n[vr].dateFormat?.timeZone); considerName(n[vr].dateFormat?.locale); }
+    }
     (n.children ?? []).forEach(walk);
   };
   walk(ir.root);

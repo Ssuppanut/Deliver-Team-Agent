@@ -1,0 +1,18 @@
+component: EventTzRef
+description: F-27 timezone — runtime IANA id via a prop-ref, long date preset.
+category: display
+props:
+  - { name: when, type: date, required: true }
+  - { name: userTz, type: string, required: true }
+tokens:
+  - color.fg.default
+root:
+  el: text
+  text:
+    kind: datetime
+    value: when
+    dateFormat:
+      dateStyle: long
+      timeZone: { kind: ref, value: userTz }
+  style:
+    color: color.fg.default
