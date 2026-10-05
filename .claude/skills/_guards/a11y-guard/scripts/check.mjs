@@ -14,6 +14,17 @@
  *      dropped it (F-2), which the IR-only check could never catch.
  */
 
+// F-22 — colour-family slots carry no information under grayscale / CVD.
+const COLOR_SLOTS = new Set(['background', 'color', 'border']);
+// Enum values that read as a decodable status (so a variant over them is a
+// `status` variant that must survive grayscale). Used both to enforce the rule
+// and as the `emphasis` backstop. Exact, case-insensitive token match — NOT a
+// fuzzy match, so a genuine emphasis label like `destructive` is not swept in.
+export const STATUS_VOCAB = new Set([
+  'success', 'warning', 'warn', 'error', 'err', 'info',
+  'positive', 'negative', 'danger', 'critical', 'caution', 'failure',
+]);
+
 // Roles whose a11y weight makes an output-tier check worthwhile. A role outside
 // this set (e.g. group/region) is still emitted on web and may warn on native,
 // but is not a hard output-tier contract.
@@ -66,6 +77,53 @@ export function checkA11y(ir, results) {
     (node.children ?? []).forEach((c, i) => walk(c, `${at}[${i}]`));
   };
   walk(ir.root, '');
+
+  // --- F-22: status variants must not convey state by colour alone -----------
+  // A variant whose `intent` is `status` (the default when omitted — fail-closed)
+  // must distinguish every pair of states by at least one NON-colour slot
+  // (a per-state icon / text / shape / sign), compared on resolved values, not
+  // just key presence. Colour slots are {background,color,border}. Caller-supplied
+  // props (child text bound to a ref) are not variant-bound cues and do not count.
+  // `emphasis` variants are exempt — EXCEPT the backstop: an `emphasis` label on a
+  // status-vocabulary enum is a mislabeled status variant and FAILS. This is a
+  // spec-tier, output-agnostic contract: `intent` is metadata, nothing emitted.
+  const variantNodes = [];
+  const gather = (n) => { if (n?.variant) variantNodes.push(n); (n?.children ?? []).forEach(gather); };
+  gather(ir.root);
+  for (const n of variantNodes) {
+    const v = n.variant;
+    const intent = v.intent ?? 'status'; // fail-closed default
+    const cases = Object.entries(v.cases ?? {});
+    const values = cases.map(([k]) => String(k));
+    if (intent === 'emphasis') {
+      const statusish = values.filter((val) => STATUS_VOCAB.has(val.toLowerCase()));
+      if (statusish.length) {
+        issues.push({ severity: 'serious', rule: 'status-color-only', at: '/container',
+          msg: `variant "${v.prop}" is marked intent=emphasis but its values (${statusish.join(', ')}) read as status states; a status variant must convey state by more than colour — reclassify as status and add a per-state non-colour cue` });
+      }
+      continue;
+    }
+    // intent === 'status' (or default): the non-colour signature of each state
+    // must be unique. Two states sharing a signature (including the empty one =
+    // colour-only) are indistinguishable without colour.
+    const sig = (slots) => Object.entries(slots || {})
+      .filter(([slot]) => !COLOR_SLOTS.has(slot))
+      .map(([slot, token]) => `${slot}=${token}`)
+      .sort()
+      .join('|');
+    const sigs = cases.map(([k, slots]) => [k, sig(slots)]);
+    for (let i = 0; i < sigs.length; i++) {
+      for (let j = i + 1; j < sigs.length; j++) {
+        if (sigs[i][1] === sigs[j][1]) {
+          const detail = sigs[i][1] === ''
+            ? 'neither carries a non-colour cue (colour-only)'
+            : `both resolve to the same non-colour cue "${sigs[i][1]}"`;
+          issues.push({ severity: 'serious', rule: 'status-color-only', at: '/container',
+            msg: `variant "${v.prop}" states "${sigs[i][0]}" and "${sigs[j][0]}" are indistinguishable without colour — ${detail}. A status variant needs a per-state non-colour cue (icon / text / shape / sign).` });
+        }
+      }
+    }
+  }
 
   // --- output tier (additive) ------------------------------------------------
   if (results && Object.keys(results).length) {

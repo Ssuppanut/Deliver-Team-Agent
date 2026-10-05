@@ -821,7 +821,7 @@ Two defect classes survive every gate. Both are logged, **not fixed inline**
 | ID | Defect class | Finding |
 |---|---|---|
 | **F-21** | Hardcoded token on a **native** adapter | **RESOLVED — see "F-21 — native token enforcement" below.** *(As found by Layer 3:)* `token-guard` inspected **web** adapters only (`react`/`vue`/`svelte`) for raw hex / raw px, so a raw `#ef4444` or `12px` emitted by SwiftUI / Compose / React Native passed **every** gate. 19/19 native-hardcode mutants survived; independently confirmed 0 RED gates. Now closed: token-guard's source scan covers the native adapters, and the 19 mutants are killed. |
-| **F-22** | State conveyed by **color alone** | `slop-guard`'s `status-color-only` rule fires but at **`minor`** severity, which is advisory and does not block the gate. Turning a good icon+color status variant into a color-only one is reported but never RED (4/4 mutants survived; `slop.ok` stays true while the issue is listed). This is an **intentional severity choice** (color-only is a smell, not always a defect — some contexts add text instead of an icon), so it is a *known* advisory gap, not necessarily a bug. **Options for triage:** leave advisory (status quo), or escalate to `serious` when a variant is color-only AND carries no adjacent text/icon anywhere. No change applied. |
+| **F-22** | State conveyed by **color alone** | **RESOLVED — see "F-22 — state-by-color-only now blocking" below.** Was a `slop-guard` `status-color-only` advisory at `minor` (never RED; 4/4 mutants survived). Now a **blocking a11y-guard contract** keyed off a new `variant.intent` (`status` \| `emphasis`, default `status`): a `status` variant must distinguish every pair of states by a non-color cue, and an `emphasis` label on a status-vocabulary enum fails as a mislabel. The 4 survivors are killed; 0 survivors remain. |
 
 Everything else — every a11y trait, every token on web, every ref binding, every
 native expression, every TBD — is killed by at least one gate.
@@ -2111,3 +2111,115 @@ IANA ids only (no display names, no custom patterns); no expression as any optio
 no new dependency; the F-26 number/date path and all other features are byte-identical
 when no timezone is set; no gate or the ledger weakened; no changes to agents / skills
 / workflow / AI-router.
+
+---
+
+# F-22 — state-by-color-only now blocking (resolved)
+
+State conveyed by colour alone was a `slop-guard` `status-color-only` advisory at
+`minor` severity — reported but never RED, so the 4 `state-by-color-only` mutants
+survived as a logged blind spot. This phase makes it a **blocking a11y
+correctness contract** and drives the harness to **0 survivors**.
+
+## The `variant.intent` discriminant (schema metadata only)
+
+A colour-only variant is only a defect when the variant conveys *state the user
+must decode* — `alert` severity, `badge` status. A `button`'s
+primary/secondary/ghost/destructive is *presentational emphasis*, and colour-only
+there is intentional. A blanket colour-only rule would false-positive on `button`.
+
+So a `variant` now carries an **`intent`**: `status` | `emphasis`, **default
+`status` (fail-closed)**. It is **scoping metadata only** — `spec-to-ir.mjs`
+copies it onto `ir.variant`, but `variantData()` reads only `{ prop, cases }`, so
+**no adapter emits it and all generated output is byte-identical** (`diff -rq`
+across all 6 adapters vs main = no difference). `button` declares
+`intent: emphasis`; `alert`, `badge`, `banner`, `stat-card` declare
+`intent: status`.
+
+## The rule (a11y-guard static tier, `serious` = blocking)
+
+For a `status` variant (declared or defaulted), compute each state's **non-colour
+signature** — the resolved `slot=token` pairs for every slot NOT in
+`{background, color, border}` (a per-state `icon`, or any non-colour slot),
+sorted. **Every pair of states must have a distinct signature.** Two states that
+share a signature — including the empty one (pure colour-only) — are
+indistinguishable without colour and FAIL. Comparison is on *resolved values*,
+not key presence, so "same icon on every state" fails too.
+
+**Backstop:** an `intent: emphasis` variant whose enum values read as a status
+vocabulary (`success`, `warning`, `error`, `info`, `positive`, `negative`,
+`danger`, and close synonyms) is a mislabeled status variant and FAILS. The match
+is exact and case-insensitive, **not fuzzy** — `destructive` is NOT swept in, so a
+genuine `button` emphasis enum passes.
+
+Caller-supplied content (child text bound to a prop) is **not** a variant-bound
+cue and does not count.
+
+## Location — why a11y-guard, not slop-guard
+
+Decision gate: *does slop-guard support waivers with approver + expiry at
+`serious`?* **No** — slop-guard only severity-filters `{ok, issues}`; the
+approver/expiry waiver mechanism lives in `ledger-gate.mjs` / `loadWaivers`
+(`_shared/policy/a11y-waivers.json`), which slop-guard does not consult. Per the
+agreed decision, the check therefore moved to the **a11y-guard static layer**
+(this is an a11y/CVD correctness concern), and the **slop-guard duplicate was
+removed** (single source of truth). The mutation operator's `klass` moved
+`slop → a11y` accordingly. Not routed through the Lowering Ledger (there is no
+per-adapter lowering obligation here; it is a cross-case spec property).
+
+## Mutation coverage
+
+`KNOWN_SURVIVORS` is now empty. Four operators exercise the contract, all killed
+by the a11y gate:
+
+| operator | mutants | killed by | how |
+|---|---|---|---|
+| `state-by-color-only` | 4 | a11y | strip every per-state icon ⇒ all states collapse to the empty signature |
+| `strip-icon-all-but-one` | 3 | a11y | keep one icon in a ≥3-case variant ⇒ the ≥2 bare states collide |
+| `same-icon-every-case` | 4 | a11y | one icon on all states ⇒ identical signatures |
+| `flip-intent-to-emphasis` | 4 | a11y | flip a status variant to emphasis ⇒ backstop fires on its status enum |
+
+Totals: **593 mutants / 593 killed / 0 survived** (was 582 / 578 / 4). Fired-gate
+proof: disabling the rule returns all 15 as survivors → `MUTATION-TESTING FAIL`;
+restoring → 0 survivors → PASS. `verify-patches` **80/80** (P18 migrated to
+a11y; P44 updated; P75–P80 add the pass / colour-only / only-one-icon / identical-
+icon / emphasis-backstop / default-is-status cases).
+
+## Residual (by design, not a bug) — caller-supplied sign
+
+`stat-card`'s delta direction is reinforced in rendered output by the **sign the
+caller supplies** in the delta string (`+2.5%` / `-1.2%`). That sign is genuine
+non-colour information, but it is **caller content, not bound to the variant**, so
+the rule does not credit it and does not enforce it — `stat-card` passes on its
+per-direction *icon*, which is variant-bound. Enforcing a caller-provided sign is
+out of scope (the engine cannot guarantee caller text); recorded here as a
+by-design residual.
+
+## Residual (by design, not a bug) — non-waivable
+
+`status-color-only` is **non-waivable** by design, like every other `serious`
+rule in the a11y-guard static layer (`img-alt`, `button-name`, `label`): the
+guard does not consult `_shared/policy/a11y-waivers.json`, so there is no
+approver/expiry escape hatch. The only ways to clear a finding are to **add a
+per-state non-colour cue** (icon / text / shape / sign) or to **declare
+`intent: emphasis`** (itself subject to the `STATUS_VOCAB` backstop). Waivers for
+the a11y layer, if ever wanted, are a separate layer-wide decision — not wired
+here, and `ledger-gate.mjs` / the waiver registry are untouched.
+
+## Residual (by design, not a bug) — STATUS_VOCAB coverage
+
+The emphasis backstop matches enum values against a fixed status-vocabulary list
+(`STATUS_VOCAB`: `success`/`warning`/`error`/`info`/`positive`/`negative`/
+`danger` and close synonyms), by exact case-insensitive token — deliberately
+**not** fuzzy, so a genuine emphasis label like `destructive` is not swept in.
+The cost of that precision: a status-like enum value **outside** the list (e.g. a
+domain term such as `overdue` or `breached`) used on an `intent: emphasis`
+variant is **not** caught by the backstop. Mitigation: `intent: emphasis` must be
+declared **deliberately**, and the default is `status` (fail-closed), so the only
+way to reach this gap is an explicit, reviewable mislabel — not an accident.
+
+## Constraints honoured
+
+`variant.intent` is metadata only — **no adapter output changed** (byte-identical
+`diff -rq`); no dependency added; F-6 / F-8 and the F-27 timezone code untouched;
+no gate, mutant, or the ledger weakened or whitelisted to reach green.

@@ -47,7 +47,7 @@ import { generateSvelte } from '../../adapters/svelte/generate.mjs';
 import { generateReactNative } from '../../adapters/react-native/generate.mjs';
 import { generateSwiftUI } from '../../adapters/swiftui/generate.mjs';
 import { generateCompose } from '../../adapters/compose/generate.mjs';
-import { checkA11y } from '../../.claude/skills/_guards/a11y-guard/scripts/check.mjs';
+import { checkA11y, STATUS_VOCAB } from '../../.claude/skills/_guards/a11y-guard/scripts/check.mjs';
 import { checkTokens } from '../../.claude/skills/_guards/token-guard/scripts/check.mjs';
 import { checkPerf } from '../../.claude/skills/_guards/perf-guard/scripts/check.mjs';
 import { checkSlop } from '../../.claude/skills/_guards/slop-guard/scripts/check.mjs';
@@ -364,11 +364,13 @@ const OPERATORS = [
   },
 
   // O7 — turn a good icon+color status variant into a color-ONLY one (state by
-  // color alone). slop flags it, but only at `minor` severity.
+  // color alone). F-22: now a BLOCKING a11y contract (was a slop `minor`
+  // advisory). Stripping every per-state icon collapses all states to the empty
+  // non-color signature → a11y-guard RED.
   {
     id: 'state-by-color-only',
-    klass: 'slop',
-    expect: 'slop (status-color-only) — but advisory `minor`, so it does NOT block',
+    klass: 'a11y',
+    expect: 'a11y (status-color-only, serious) — all states collapse to color-only, so it BLOCKS',
     sites(bundle) {
       const out = [];
       for (const n of irNodes(bundle.ir)) {
@@ -384,6 +386,104 @@ const OPERATORS = [
                   delete m.icon;
                   break;
                 }
+              }
+            },
+          });
+          break; // one per feature
+        }
+      }
+      return out;
+    },
+  },
+
+  // O8 (F-22) — strip the per-state icon from all but one case of a status
+  // variant with >=3 cases. The >=2 newly-bare cases share the empty non-color
+  // signature → indistinguishable without color → a11y-guard RED (pairwise).
+  {
+    id: 'strip-icon-all-but-one',
+    klass: 'a11y',
+    expect: 'a11y (status-color-only) — >=2 states share the empty non-color signature',
+    sites(bundle) {
+      const out = [];
+      for (const n of irNodes(bundle.ir)) {
+        const v = n.variant;
+        if (!v) continue;
+        const intent = v.intent ?? 'status';
+        const cases = Object.entries(v.cases ?? {});
+        const iconKeys = cases.filter(([, s]) => 'icon' in s).map(([k]) => k);
+        // >=3 total cases so that keeping ONE icon leaves >=2 bare cases that
+        // collide on the empty signature (a 2-case variant would not collide).
+        if (intent === 'status' && iconKeys.length >= 1 && cases.length >= 3) {
+          const keep = iconKeys[0];
+          out.push({
+            key: `${bundle.feature}:${v.prop}`,
+            apply(c) {
+              for (const m of irNodes(c.ir)) {
+                if (m.variant?.prop === v.prop) {
+                  for (const [k, s] of Object.entries(m.variant.cases)) if (k !== keep) delete s.icon;
+                  break;
+                }
+              }
+            },
+          });
+          break; // one per feature
+        }
+      }
+      return out;
+    },
+  },
+
+  // O9 (F-22) — set the SAME icon token on every case of a status variant. All
+  // states then share one non-color signature → pairwise collision → a11y RED.
+  {
+    id: 'same-icon-every-case',
+    klass: 'a11y',
+    expect: 'a11y (status-color-only) — all states share one icon ⇒ identical non-color signatures',
+    sites(bundle) {
+      const out = [];
+      for (const n of irNodes(bundle.ir)) {
+        const v = n.variant;
+        if (!v) continue;
+        const intent = v.intent ?? 'status';
+        if (intent === 'status' && Object.keys(v.cases ?? {}).length >= 2) {
+          out.push({
+            key: `${bundle.feature}:${v.prop}`,
+            apply(c) {
+              for (const m of irNodes(c.ir)) {
+                if (m.variant?.prop === v.prop) {
+                  for (const s of Object.values(m.variant.cases)) s.icon = 'icon.same';
+                  break;
+                }
+              }
+            },
+          });
+          break; // one per feature
+        }
+      }
+      return out;
+    },
+  },
+
+  // O10 (F-22) — flip a status variant's `intent` to `emphasis`. Its enum values
+  // are status vocabulary, so a11y-guard's emphasis backstop fires → a11y RED.
+  // This proves the backstop can't be used to silence a real status variant.
+  {
+    id: 'flip-intent-to-emphasis',
+    klass: 'a11y',
+    expect: 'a11y (status-color-only backstop) — emphasis on a status-vocabulary enum is a mislabel',
+    sites(bundle) {
+      const out = [];
+      for (const n of irNodes(bundle.ir)) {
+        const v = n.variant;
+        if (!v) continue;
+        const intent = v.intent ?? 'status';
+        const values = Object.keys(v.cases ?? {});
+        if (intent === 'status' && values.some((val) => STATUS_VOCAB.has(val.toLowerCase()))) {
+          out.push({
+            key: `${bundle.feature}:${v.prop}`,
+            apply(c) {
+              for (const m of irNodes(c.ir)) {
+                if (m.variant?.prop === v.prop) { m.variant.intent = 'emphasis'; break; }
               }
             },
           });
@@ -439,10 +539,11 @@ function stripTrait(res, traitId) {
 // not a run failure. A survivor OUTSIDE this set is a fresh blind spot and fails
 // the run so it cannot ship unnoticed.
 // F-21 (hardcode-token-native) was removed once token-guard gained native
-// coverage — it must now be KILLED, so a future survival is a regression, not a
-// known blind spot. Only F-22 (state-by-color-only, an intentional advisory
-// severity) remains a known survivor.
-const KNOWN_SURVIVORS = new Set(['state-by-color-only']);
+// coverage. F-22 (state-by-color-only) was removed once the state-by-color-only
+// contract became a BLOCKING a11y-guard rule — it must now be KILLED, so a future
+// survival is a regression, not a known blind spot. The set is now empty: every
+// operator must kill every mutant it injects.
+const KNOWN_SURVIVORS = new Set([]);
 
 export function runMutationTesting() {
   const corpus = discoverCorpus();
