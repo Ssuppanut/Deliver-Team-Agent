@@ -18,6 +18,7 @@ root:
     live: polite
   variant:
     prop: severity
+    intent: status
     cases:
       info:    { background: color.info.bg,    color: color.info.fg,    icon: icon.info }
       success: { background: color.success.bg, color: color.success.fg, icon: icon.success }

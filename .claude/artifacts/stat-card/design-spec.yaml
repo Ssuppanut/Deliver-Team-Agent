@@ -34,6 +34,7 @@ root:
     - el: container
       variant:
         prop: direction
+        intent: status
         cases:
           positive: { color: color.success.fg, icon: icon.success }
           negative: { color: color.danger.fg,  icon: icon.error }

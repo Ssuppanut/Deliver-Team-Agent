@@ -22,6 +22,7 @@ root:
   disabled: disabled
   variant:
     prop: variant
+    intent: emphasis
     cases:
       primary:     { background: color.accent.default, color: color.fg.onAccent }
       secondary:   { background: color.bg.muted,       color: color.fg.default }

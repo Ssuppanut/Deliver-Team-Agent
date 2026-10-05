@@ -185,6 +185,20 @@ definitions:
         required: [prop, cases]
         properties:
           prop: { type: string }
+          intent:
+            type: string
+            enum: [status, emphasis]
+            description: >
+              Semantic intent of the variant (F-22). `status` (the default when
+              omitted — fail-closed) means each state carries meaning the user
+              must decode, so a11y-guard requires every pair of states to differ
+              in at least one NON-color cue (a per-state icon / text / shape /
+              sign), not color alone. `emphasis` means a purely presentational
+              style choice (e.g. button primary/secondary) where color-only is
+              acceptable; it is exempt EXCEPT the backstop — an `emphasis` label
+              on a status-vocabulary enum (success/warning/error/info/positive/
+              negative/danger/…) is treated as a mislabeled status variant and
+              FAILS. Scoping metadata only: never emitted by any adapter.
           cases:
             type: object
             additionalProperties:

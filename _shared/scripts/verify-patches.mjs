@@ -244,20 +244,24 @@ check('P17', 'slop-guard: emoji in output is a blocking finding', () => {
   assert(clean.ok, 'clean output should pass slop-guard');
 });
 
-// --- P18: slop-guard color-only detection (advisory) + icon resolves it ----
-check('P18', 'slop-guard: color-only variant is an advisory; a per-state icon clears it', () => {
-  // Alert now carries a per-severity icon, so it must NOT be flagged.
-  const alert = checkSlop(specToIrFromFile(ALERT), { react: generateReact(ALERT, '_verify') });
-  assert(alert.ok, 'alert with icons must pass slop-guard');
-  assert(!alert.issues.some((i) => i.rule === 'status-color-only'), 'icon should clear the color-only advisory');
-  // A synthetic color-only variant (no icon) is flagged, but only as advisory.
+// --- P18: F-22 — state-by-color-only is a BLOCKING a11y contract (moved from
+//         slop advisory). A per-state icon clears it; color-only BLOCKS. -----
+check('P18', 'a11y-guard: a status variant distinguished by colour alone BLOCKS; per-state icons clear it', () => {
+  // Alert carries a per-severity icon (intent=status), so it must pass clean.
+  const alert = checkA11y(specToIrFromFile(ALERT), { react: generateReact(ALERT, '_verify') });
+  assert(alert.ok, 'alert with distinct per-state icons must pass a11y-guard');
+  assert(!alert.issues.some((i) => i.rule === 'status-color-only'), 'distinct icons clear the status-color-only contract');
+  // slop-guard must no longer own this rule (single source of truth in a11y).
+  const slop = checkSlop(specToIrFromFile(ALERT), {});
+  assert(!slop.issues.some((i) => i.rule === 'status-color-only'), 'slop-guard must no longer emit status-color-only');
+  // A synthetic colour-only status variant (no icon) now BLOCKS at serious.
   const colorOnly = {
-    tokens: [],
+    props: [], tokens: [],
     root: { kind: 'container', variant: { prop: 'sev', cases: { a: { background: 'color.info.bg' }, b: { background: 'color.danger.bg' } } } },
   };
-  const syn = checkSlop(colorOnly, {});
-  assert(syn.ok, 'a minor status-color-only finding must not block');
-  assert(syn.issues.some((i) => i.rule === 'status-color-only'), 'expected the advisory for a color-only variant');
+  const syn = checkA11y(colorOnly, {});
+  assert(!syn.ok, 'a colour-only status variant must BLOCK (serious), not pass');
+  assert(syn.issues.some((i) => i.rule === 'status-color-only' && i.severity === 'serious'), 'expected a serious status-color-only finding');
 });
 
 // --- P19: readiness — TBD sentinel blocks, clean spec passes ---------------
@@ -656,7 +660,7 @@ check('P43', 'ledger: a divergence needs a matching, non-expired, approved waive
 
 // --- P44: Layer 3 — gate mutation testing runs, baseline clean, known-defect
 //         mutants killed per operator, only the one remaining blind spot survives.
-check('P44', 'mutation testing: baseline all-green; each killer operator kills its mutants; only F-22 survives', () => {
+check('P44', 'mutation testing: baseline all-green; each killer operator kills its mutants; zero survivors', () => {
   const { baselineFailures, mutants, survived } = runMutationTesting();
   assert(baselineFailures.length === 0, `mutation baseline must be all-green, got RED: ${baselineFailures.map((f) => f.feature).join(', ')}`);
   assert(mutants.length > 0, 'the harness must generate mutants');
@@ -664,7 +668,10 @@ check('P44', 'mutation testing: baseline all-green; each killer operator kills i
   // The killing operators must kill EVERY mutant they inject (each is a proven
   // gate). hardcode-token-native is now a killer (F-21 resolved: token-guard
   // covers native). If a gate regresses, one of these would survive.
-  const KILLERS = ['drop-trait', 'remove-a11y', 'native-expr-leak', 'ref-as-literal', 'hardcode-token-web', 'hardcode-token-native', 'unresolved-tbd'];
+  const KILLERS = ['drop-trait', 'remove-a11y', 'native-expr-leak', 'ref-as-literal', 'hardcode-token-web', 'hardcode-token-native', 'unresolved-tbd',
+    // F-22: state-by-color-only became a blocking a11y contract; all four of its
+    // operators must now kill every mutant they inject (0 survivors).
+    'state-by-color-only', 'strip-icon-all-but-one', 'same-icon-every-case', 'flip-intent-to-emphasis'];
   for (const op of KILLERS) {
     const ms = mutants.filter((m) => m.operator === op);
     assert(ms.length > 0, `operator ${op} produced no mutants`);
@@ -684,16 +691,22 @@ check('P44', 'mutation testing: baseline all-green; each killer operator kills i
   killerGate('hardcode-token-web', 'token');
   killerGate('hardcode-token-native', 'token'); // F-21: native hardcode now RED via token-guard
   killerGate('unresolved-tbd', 'readiness');
+  // F-22: each state-by-color-only operator is killed by the a11y gate.
+  killerGate('state-by-color-only', 'a11y');
+  killerGate('strip-icon-all-but-one', 'a11y');
+  killerGate('same-icon-every-case', 'a11y');
+  killerGate('flip-intent-to-emphasis', 'a11y');
 
   // Every survivor must be a KNOWN blind spot (logged finding). A new survivor
   // class is a fresh blind spot and must fail here so it cannot ship silently.
-  const KNOWN = new Set(['state-by-color-only']);
+  // There are no known blind spots any more: every mutant must be killed.
+  const KNOWN = new Set([]);
   const unexpected = survived.filter((m) => !KNOWN.has(m.operator));
   assert(unexpected.length === 0, `unexpected surviving mutant (new blind spot): ${unexpected.map((m) => m.key).join(', ')}`);
   // F-21 must no longer survive (token-guard now covers native).
   assert(!survived.some((m) => m.operator === 'hardcode-token-native'), 'F-21 must be resolved: native token hardcode must NOT survive');
-  // F-22 remains a known advisory-only survivor (intentional severity choice).
-  assert(survived.some((m) => m.operator === 'state-by-color-only'), 'F-22 blind spot (state-by-color-only advisory) expected to survive');
+  // F-22 must no longer survive (state-by-color-only is now a blocking a11y contract).
+  assert(!survived.some((m) => m.operator === 'state-by-color-only'), 'F-22 must be resolved: state-by-color-only must NOT survive');
 });
 
 // --- P45: F-21 — token-guard now covers NATIVE adapters. A hardcoded color/size
@@ -1340,6 +1353,83 @@ check('P74', 'timezone (F-27 follow-up): a literal passing validate-schema resol
   refuse('GMT+7');                                      // display name
   // A prop-ref is still runtime (not schema-bound) and still passes schema.
   assert(validate(spec({ kind: 'ref', value: 'userTz' })).ok, 'a prop-ref timeZone must still pass schema (runtime device fallback)');
+});
+
+// --- P75–P80: F-22 state-by-color-only as a blocking a11y contract ----------
+// Synthetic IR with a single variant container; `intent` omitted = status.
+const variantIr = (cases, intent) => ({
+  props: [], tokens: [],
+  root: { kind: 'container', variant: { prop: 'sev', ...(intent ? { intent } : {}), cases } },
+});
+
+check('P75', 'F-22: distinct per-state icons PASS (status variant survives grayscale/CVD)', () => {
+  const ir = variantIr({
+    ok:  { background: 'color.success.bg', icon: 'icon.success' },
+    err: { background: 'color.danger.bg',  icon: 'icon.error' },
+  }, 'status');
+  const r = checkA11y(ir, {});
+  assert(r.ok, 'distinct per-state icons must PASS');
+  assert(!r.issues.some((i) => i.rule === 'status-color-only'), 'no status-color-only finding expected');
+});
+
+check('P76', 'F-22: a colour-only status variant FAILS at serious', () => {
+  const ir = variantIr({
+    ok:  { background: 'color.success.bg', color: 'color.success.fg' },
+    err: { background: 'color.danger.bg',  color: 'color.danger.fg' },
+  }, 'status');
+  const r = checkA11y(ir, {});
+  assert(!r.ok, 'colour-only must FAIL (block)');
+  assert(r.issues.some((i) => i.rule === 'status-color-only' && i.severity === 'serious'), 'serious status-color-only expected');
+});
+
+check('P77', 'F-22: only one of three states carries an icon — the two bare states collide and FAIL (pairwise)', () => {
+  const ir = variantIr({
+    ok:   { background: 'color.success.bg', icon: 'icon.success' },
+    warn: { background: 'color.warning.bg' },
+    err:  { background: 'color.danger.bg' },
+  }, 'status');
+  const r = checkA11y(ir, {});
+  assert(!r.ok, 'the two icon-less states must collide on the empty signature and FAIL');
+  assert(r.issues.some((i) => i.rule === 'status-color-only' && i.msg.includes('warn') && i.msg.includes('err')), 'the two bare states must be named in the finding');
+});
+
+check('P78', 'F-22: an identical icon on every state FAILS (shared non-colour signature)', () => {
+  const ir = variantIr({
+    ok:  { background: 'color.success.bg', icon: 'icon.dot' },
+    err: { background: 'color.danger.bg',  icon: 'icon.dot' },
+  }, 'status');
+  const r = checkA11y(ir, {});
+  assert(!r.ok, 'the same icon on every state must FAIL');
+  assert(r.issues.some((i) => i.rule === 'status-color-only' && /same non-colour cue/.test(i.msg)), 'expected a shared-signature finding');
+});
+
+check('P79', 'F-22 backstop: intent=emphasis on a status-vocabulary enum FAILS; a genuine emphasis enum PASSES', () => {
+  const statusEnum = variantIr({
+    success: { background: 'color.success.bg' },
+    error:   { background: 'color.danger.bg' },
+  }, 'emphasis');
+  const r1 = checkA11y(statusEnum, {});
+  assert(!r1.ok, 'emphasis on success/error (status vocab) must FAIL the backstop');
+  assert(r1.issues.some((i) => i.rule === 'status-color-only' && /emphasis/.test(i.msg)), 'backstop finding expected');
+  // A genuine presentational emphasis enum (no status vocabulary) is exempt —
+  // destructive must NOT be fuzzy-matched to danger.
+  const emphEnum = variantIr({
+    primary:     { background: 'color.accent.default' },
+    secondary:   { background: 'color.bg.muted' },
+    ghost:       { background: 'color.bg.default' },
+    destructive: { background: 'color.danger.fg' },
+  }, 'emphasis');
+  assert(checkA11y(emphEnum, {}).ok, 'a genuine emphasis enum (primary/secondary/ghost/destructive) must PASS — destructive is not status vocab');
+});
+
+check('P80', 'F-22: a variant with NO intent key defaults to status (fail-closed) and a colour-only one FAILS', () => {
+  const ir = variantIr({
+    ok:  { background: 'color.success.bg' },
+    err: { background: 'color.danger.bg' },
+  }); // intent omitted
+  const r = checkA11y(ir, {});
+  assert(!r.ok, 'omitted intent must be treated as status, so a colour-only variant FAILS');
+  assert(r.issues.some((i) => i.rule === 'status-color-only'), 'status-color-only expected under the default (status) intent');
 });
 
 console.log('\n=== verify-patches ===');

@@ -15,6 +15,7 @@ root:
   role: status
   variant:
     prop: status
+    intent: status
     cases:
       default: { background: color.bg.muted,    color: color.fg.default }
       success: { background: color.success.bg,  color: color.success.fg, icon: icon.success }
