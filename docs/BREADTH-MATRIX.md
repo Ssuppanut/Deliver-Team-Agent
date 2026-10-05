@@ -2195,6 +2195,29 @@ per-direction *icon*, which is variant-bound. Enforcing a caller-provided sign i
 out of scope (the engine cannot guarantee caller text); recorded here as a
 by-design residual.
 
+## Residual (by design, not a bug) — non-waivable
+
+`status-color-only` is **non-waivable** by design, like every other `serious`
+rule in the a11y-guard static layer (`img-alt`, `button-name`, `label`): the
+guard does not consult `_shared/policy/a11y-waivers.json`, so there is no
+approver/expiry escape hatch. The only ways to clear a finding are to **add a
+per-state non-colour cue** (icon / text / shape / sign) or to **declare
+`intent: emphasis`** (itself subject to the `STATUS_VOCAB` backstop). Waivers for
+the a11y layer, if ever wanted, are a separate layer-wide decision — not wired
+here, and `ledger-gate.mjs` / the waiver registry are untouched.
+
+## Residual (by design, not a bug) — STATUS_VOCAB coverage
+
+The emphasis backstop matches enum values against a fixed status-vocabulary list
+(`STATUS_VOCAB`: `success`/`warning`/`error`/`info`/`positive`/`negative`/
+`danger` and close synonyms), by exact case-insensitive token — deliberately
+**not** fuzzy, so a genuine emphasis label like `destructive` is not swept in.
+The cost of that precision: a status-like enum value **outside** the list (e.g. a
+domain term such as `overdue` or `breached`) used on an `intent: emphasis`
+variant is **not** caught by the backstop. Mitigation: `intent: emphasis` must be
+declared **deliberately**, and the default is `status` (fail-closed), so the only
+way to reach this gap is an explicit, reviewable mislabel — not an accident.
+
 ## Constraints honoured
 
 `variant.intent` is metadata only — **no adapter output changed** (byte-identical
