@@ -1,0 +1,265 @@
+// Compile the F-28 enum-value lowering audit. EXPECTED values are hand-authored from platform docs (see REFS);
+// EMITTED fragments + gate results come from results.json (real generators + real gates, scratch tree).
+import { readFileSync, writeFileSync } from 'node:fs';
+const results = JSON.parse(readFileSync(new URL('./results.json', import.meta.url), 'utf8'));
+const byGroup = (g) => results.filter((p) => p.group === g);
+const find = (g, v, c) => results.find((p) => p.group === g && String(p.value) === String(v) && (!c || p.construct === c));
+const ADAPTERS = ['react', 'vue', 'svelte', 'react-native', 'swiftui', 'compose'];
+const WEB = ['react', 'vue', 'svelte'];
+
+export const REFS = {
+  R1: 'MDN aria-live - developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-live',
+  R2: 'MDN status role / live regions - .../Roles/status_role ; .../ARIA/Guides/Live_regions (alert = implicit assertive, status = implicit polite)',
+  R3: 'React Native Accessibility - reactnative.dev/docs/accessibility (accessibilityRole, role, accessibilityLiveRegion [Android API>=19 only], aria-live)',
+  R4: 'Compose LiveRegionMode - developer.android.com/reference/kotlin/androidx/compose/ui/semantics/LiveRegionMode ; Compose Semantics - developer.android.com/develop/ui/compose/accessibility/semantics (heading(), Role)',
+  R5: 'SwiftUI AccessibilityTraits - developer.apple.com/documentation/swiftui/accessibilitytraits ; .../accessibilitytraits/updatesfrequently ("frequently updates its label or value")',
+  R5b: 'AccessibilityNotification.Announcement (iOS 17+) - developer.apple.com/documentation/accessibility/accessibilitynotification/announcement',
+  R6: 'MDN aria-orientation - .../Reference/Attributes/aria-orientation (scrollbar, select, separator, slider, tablist, toolbar)',
+  R7: 'MDN heading role / aria-level - .../Reference/Roles/heading_role ; .../Attributes/aria-level (aria-level required for role=heading)',
+  R8: 'SwiftUI accessibilityHeading(_:) / AccessibilityHeadingLevel (h1..h6, iOS 15+) - developer.apple.com/documentation/swiftui/view/accessibilityheading(_:)',
+  R9: 'MDN input type=checkbox - .../Elements/input/checkbox (current state is the checked property, value is the submitted value)',
+  R10: 'MDN input type=password - .../Elements/input/password',
+  R11: 'React Native TextInput - reactnative.dev/docs/textinput (secureTextEntry, keyboardType, inputMode)',
+  R12: 'SwiftUI SecureField - developer.apple.com/documentation/swiftui/securefield ; View.keyboardType(_:)',
+  R13: 'Compose KeyboardOptions / KeyboardType / PasswordVisualTransformation - developer.android.com/reference/kotlin/androidx/compose/foundation/text/KeyboardOptions',
+  R14: 'MDN Intl.NumberFormat constructor (roundingMode; default halfExpand) - .../Intl/NumberFormat/NumberFormat',
+  R15: 'Apple NumberFormatter.RoundingMode (halfUp = "away from zero if equidistant"; no default stated) - developer.apple.com/documentation/foundation/numberformatter/roundingmode-swift.enum',
+  R16: 'Oracle java.math.RoundingMode ; java.text.NumberFormat / DecimalFormat (factory default = HALF_EVEN) - docs.oracle.com/en/java/javase/17/docs/api/',
+  R17: 'MDN Intl.DateTimeFormat constructor (dateStyle/timeStyle: full|long|medium|short) - .../Intl/DateTimeFormat/DateTimeFormat',
+  R18: 'Apple DateFormatter.Style (format depends on locale) - developer.apple.com/documentation/foundation/dateformatter/style',
+  R19: 'Oracle java.text.DateFormat (SHORT/MEDIUM/LONG/FULL) - docs.oracle.com/javase/8/docs/api/java/text/DateFormat.html',
+  R20: 'MDN border-color / border-style (style defaults to none) ; gap (applies to multi-column, flex, grid only) - developer.mozilla.org/en-US/docs/Web/CSS/Reference/Properties/gap',
+  R21: 'React Native View Style Props / Text Style Props - reactnative.dev/docs/view-style-props ; /text-style-props (borderWidth+borderColor, fontFamily, fontSize)',
+  R22: 'Compose Material icons core vs extended - developer.android.com/reference/kotlin/androidx/compose/material/icons/Icons.Filled',
+  R23: 'Compose Slider steps - developer.android.com/develop/ui/compose/components/slider (steps = discrete values BETWEEN the endpoints)',
+  R24: 'React Native Text - reactnative.dev/docs/text (style inheritance limited to Text subtrees; View style does not cascade)',
+  R25: 'MDN landmark roles - .../Reference/Roles/landmark_role ("header" is not an ARIA role; role="banner" is)',
+  R26: 'MDN img role - .../Reference/Roles/img_role (accessible name required)',
+  R27: 'Coil AsyncImage - coil-kt.github.io/coil/compose/ (separate coil-compose dependency)',
+};
+
+const rows = [];
+const emit = (p, a) => {
+  const l = (p.fragments?.[a] ?? []).filter((x) => !/Probe[A-Za-z0-9]+/.test(x) && !/^import /.test(x));
+  const s = l.join(' ⏎ ');
+  return s ? (s.length > 150 ? s.slice(0, 147) + '…' : s) : '(nothing emitted)';
+};
+const caught = (p, a) => {
+  const out = [];
+  for (const [g, v] of Object.entries(p.gates ?? {})) {
+    if (v.ok) continue;
+    const mine = (v.issues ?? []).filter((i) => i.includes(`${a}:`) || !/^\[[a-z]*\] [a-z-]*: (react|vue|svelte|react-native|swiftui|compose):/.test(i));
+    if (g === 'declared-io') continue; // probe artifact: unused declared props in my minimal specs
+    if (mine.length) out.push(g);
+  }
+  return out.join(',') || '';
+};
+function row(p, a, o) {
+  rows.push({ id: p.id, construct: p.construct, value: p.value, adapter: a, emitted: emit(p, a), expected: o.exp, verdict: o.v, severity: o.v === 'CORRECT' ? '-' : o.sev, conf: o.conf ?? 'E', refs: o.refs ?? '', note: o.note ?? '', caught: caught(p, a) });
+}
+const web = (p, o) => WEB.forEach((a) => row(p, a, o));
+const C = (exp, refs, conf = 'E', note) => ({ v: 'CORRECT', exp, refs, conf, note });
+const X = (v, sev, exp, refs, conf = 'E', note) => ({ v, sev, exp, refs, conf, note });
+
+// ── LIVE ──────────────────────────────────────────────────────────────────────
+{
+  const L = {
+    off: { web: C('aria-live="off"', 'R1'), rn: X('DEFECT', 'A11Y', 'accessibilityLiveRegion="none" (Android) / no live announcement', 'R3', 'E', 'F-28: off emitted as polite'), sw: X('DEFECT', 'A11Y', 'no live-region trait (SwiftUI has no declarative live region; updatesFrequently means "frequently updates", i.e. a different thing)', 'R5', 'P', 'F-28: off emits the same trait as every other value'), cp: X('DEFECT', 'A11Y', 'liveRegion omitted (LiveRegionMode has only Polite and Assertive; default = none)', 'R4', 'E', 'F-28: off emitted as Polite') },
+    polite: { web: C('aria-live="polite"', 'R1'), rn: C('accessibilityLiveRegion="polite" (Android only; iOS behaviour UNVERIFIED)', 'R3', 'E', 'iOS: docs say accessibilityLiveRegion is Android-only'), sw: X('UNDECLARED-DEGRADATION', 'A11Y', 'no declarative polite live region exists; imperative AccessibilityNotification.Announcement(...).post() (iOS 17+)', 'R5,R5b', 'P', 'ledger records a11y.live=polite as EXPRESSED; also COLLAPSED with off/assertive'), cp: C('LiveRegionMode.Polite', 'R4') },
+    assertive: { web: C('aria-live="assertive"', 'R1'), rn: C('accessibilityLiveRegion="assertive" (Android only; iOS UNVERIFIED)', 'R3', 'E', 'iOS: docs say accessibilityLiveRegion is Android-only'), sw: X('UNDECLARED-DEGRADATION', 'A11Y', 'imperative AccessibilityNotification.Announcement with accessibilitySpeechAnnouncementPriority = .high (iOS 17+); no declarative equivalent', 'R5,R5b', 'P', 'known case; ledger records it as EXPRESSED; COLLAPSED with polite/off'), cp: C('LiveRegionMode.Assertive', 'R4') },
+  };
+  for (const v of ['off', 'polite', 'assertive']) { const p = find('live', v); web(p, L[v].web); row(p, 'react-native', L[v].rn); row(p, 'swiftui', L[v].sw); row(p, 'compose', L[v].cp); }
+}
+
+// ── ROLE ──────────────────────────────────────────────────────────────────────
+{
+  const W_OK = (r) => C(`role="${r}" (valid ARIA role)`, 'MDN ARIA roles index', 'N');
+  const WEBROLE = (v) => v === 'heading' ? X('DEFECT', 'A11Y', 'role="heading" REQUIRES aria-level (browser fallback 2); native <h1>-<h6> preferred', 'R7', 'E', 'no aria-level emitted') : v === 'header' ? X('DEFECT', 'A11Y', '"header" is not an ARIA role (use banner); the role is ignored', 'R25', 'E', 'invalid role value emitted verbatim') : v === 'img' ? C('role="img" (needs an accessible name via aria-label/labelledby)', 'R26', 'E', 'spec-level: probe has no a11y.label') : v === 'alert' || v === 'status' ? C(`role="${v}" (implicit aria-live ${v === 'alert' ? 'assertive' : 'polite'})`, 'R2') : W_OK(v);
+  const WAIVED = new Set(['alert', 'status', 'group', 'list', 'listitem', 'separator']);
+  const RNROLE = (v, p) => {
+    const m = { alert: C('accessibilityRole="alert"', 'R3'), presentation: C('accessibilityRole="none"', 'R3'), none: C('accessibilityRole="none"', 'R3'), img: C('accessibilityRole="image"', 'R3', 'N'), button: C('accessibilityRole="button"', 'R3', 'N'), link: C('accessibilityRole="link"', 'R3', 'N'), header: C('accessibilityRole="header" (non-ARIA alias accepted)', 'R3'), checkbox: C('accessibilityRole="checkbox" (+state)', 'R3'), switch: C('accessibilityRole="switch" (+state)', 'R3'), slider: C('accessibilityRole="adjustable" (+value)', 'R3', 'N'), radiogroup: C('accessibilityRole="radiogroup"', 'R3', 'N') };
+    if (m[v]) return m[v];
+    const avoid = { list: 'avoidable: the `role` prop supports list', listitem: 'avoidable: the `role` prop supports listitem', tab: 'avoidable: the `role` prop supports tab', heading: 'avoidable: accessibilityRole="header" exists' }[v];
+    if (WAIVED.has(v)) return X('DECLARED-DEGRADATION', 'A11Y', `a role for "${v}"${avoid ? ' (' + avoid + ')' : ''}`, 'R3', avoid ? 'E' : 'N', `waiver a11y-role-${v}${avoid ? '; ' + avoid + ' so the waiver reason may be stale' : ''}`);
+    return X('SILENT-DROP', 'A11Y', `a role for "${v}"${avoid ? ' (' + avoid + ')' : ''}`, 'R3', avoid ? 'E' : 'N', `no waiver exists: ledger-diverged FAILS (gate catches it)${avoid ? '; ' + avoid : ''}`);
+  };
+  const SWROLE = (v) => {
+    const m = { img: C('.accessibilityAddTraits(.isImage)', 'R5', 'P'), button: C('.accessibilityAddTraits(.isButton)', 'R5', 'P'), link: C('.accessibilityAddTraits(.isLink)', 'R5', 'P'), header: C('.accessibilityAddTraits(.isHeader)', 'R5', 'P', 'accepts the non-ARIA alias'), presentation: C('no trait (decorative default)', 'R5', 'N'), none: C('no trait (decorative default)', 'R5', 'N'), checkbox: C('Toggle (conveys on/off)', 'R5', 'N'), switch: C('Toggle (conveys on/off)', 'R5', 'N'), slider: C('Slider (conveys adjustable)', 'R5', 'N'), radiogroup: C('Picker (single select)', 'R5', 'N') };
+    if (m[v]) return m[v];
+    if (v === 'heading') return X('SILENT-DROP', 'A11Y', '.accessibilityAddTraits(.isHeader) (+ .accessibilityHeading level)', 'R5,R8', 'P', 'avoidable: ARIA role "heading" is not in the adapter table (it keys the non-ARIA "header"); ledger-diverged FAILS (no waiver)');
+    if (WAIVED.has(v)) return X('DECLARED-DEGRADATION', 'A11Y', `no SwiftUI trait exists for "${v}" (AccessibilityTraits list has none)`, 'R5', 'P', `waiver a11y-role-${v}`);
+    return X('SILENT-DROP', 'A11Y', `no SwiftUI trait exists for "${v}"`, 'R5', 'P', 'no waiver exists: ledger-diverged FAILS (gate catches it)');
+  };
+  const CPROLE = (v) => {
+    const m = { img: C('Modifier.semantics { role = Role.Image }', 'R4'), button: C('role = Role.Button', 'R4'), tab: C('role = Role.Tab', 'R4', 'N'), checkbox: C('Checkbox + Role.Checkbox', 'R4'), switch: C('Switch + Role.Switch', 'R4'), presentation: C('no semantics role (decorative default)', 'R4', 'N'), none: C('no semantics role (decorative default)', 'R4', 'N'), slider: C('Slider (progressBarRangeInfo)', 'R4', 'N'), radiogroup: C('RadioButton group (selectableGroup)', 'R4', 'N') };
+    if (m[v]) return m[v];
+    if (v === 'heading' || v === 'header') return X('SILENT-DROP', 'A11Y', 'Modifier.semantics { heading() }', 'R4', 'E', 'avoidable: heading() exists; ' + (v === 'header' ? 'ledger-diverged FAILS (no waiver)' : 'ledger-diverged FAILS (no waiver)'));
+    if (WAIVED.has(v)) return X('DECLARED-DEGRADATION', 'A11Y', `no Compose Role for "${v}"`, 'R4', 'N', `waiver a11y-role-${v}`);
+    return X('SILENT-DROP', 'A11Y', `no Compose Role for "${v}"`, 'R4', 'N', 'no waiver exists: ledger-diverged FAILS (gate catches it)');
+  };
+  for (const p of byGroup('role')) { web(p, WEBROLE(p.value)); row(p, 'react-native', RNROLE(p.value, p)); row(p, 'swiftui', SWROLE(p.value)); row(p, 'compose', CPROLE(p.value)); }
+}
+
+// ── HEADING LEVEL ─────────────────────────────────────────────────────────────
+for (const p of byGroup('heading')) {
+  const l = p.value;
+  web(p, C(`<h${l}> (heading level ${l})`, 'R7', 'E'));
+  row(p, 'react-native', X('COLLAPSED', 'A11Y', `a heading with level ${l} (RN accessibilityRole="header" carries no level; level support UNVERIFIED)`, 'R3', 'N', 'all 6 levels emit the same role'));
+  row(p, 'swiftui', X('SILENT-DROP', 'A11Y', `.accessibilityAddTraits(.isHeader) + .accessibilityHeading(.h${l})`, 'R5,R8', 'P', 'only a font size is emitted: no heading trait, no level'));
+  row(p, 'compose', X('COLLAPSED', 'A11Y', 'Modifier.semantics { heading() } (no level concept)', 'R4', 'E', 'every level -> titleMedium (visual collapse) and NO heading() (semantic drop)'));
+}
+
+// ── ORIENTATION ───────────────────────────────────────────────────────────────
+for (const p of byGroup('orientation')) {
+  const o = p.value, withRole = /separator/.test(p.construct), dir = o === 'horizontal' ? 'row' : 'column';
+  web(p, withRole ? C(`aria-orientation="${o}" on role=separator (valid)`, 'R6') : X('DEFECT', 'A11Y', `no aria-orientation on a role-less element; the layout axis alone (flex-direction:${dir}) carries it`, 'R6', 'E', 'aria-orientation is only supported on scrollbar/select/separator/slider/tablist/toolbar; emitted on a generic div'));
+  row(p, 'react-native', withRole ? X('DECLARED-DEGRADATION', 'A11Y', 'separator role', 'R3', 'N', 'role separator waived on RN; the axis is still flexDirection') : C(`flexDirection:"${dir}"`, 'R21', 'N'));
+  row(p, 'swiftui', C(o === 'horizontal' ? 'HStack' : 'VStack (default)', 'Apple HStack/VStack', 'N'));
+  row(p, 'compose', C(o === 'horizontal' ? 'Row' : 'Column (default)', 'Compose Row/Column', 'N'));
+}
+
+// ── EL KINDS ──────────────────────────────────────────────────────────────────
+{
+  const EXP = {
+    container: { web: '<div>', rn: '<View>', sw: 'VStack', cp: 'Column' },
+    media: { web: '<img src alt>', rn: '<Image source accessibilityLabel>', sw: 'AsyncImage + accessibilityLabel', cp: 'AsyncImage(model, contentDescription) [needs coil-compose]' },
+    heading: { web: '<h2>', rn: 'Text accessibilityRole=header', sw: 'Text + .isHeader', cp: 'Text + heading()' },
+    text: { web: '<span>', rn: '<Text>', sw: 'Text', cp: 'Text' }, action: { web: '<button>', rn: 'Pressable role=button', sw: 'Button', cp: 'Button' },
+    link: { web: '<a href>', rn: 'Pressable role=link + Linking.openURL', sw: 'Link(destination:)', cp: 'clickable + uriHandler.openUri' },
+    input: { web: '<input type=text>', rn: '<TextInput>', sw: 'TextField', cp: 'TextField' }, slot: { web: 'children slot', rn: '{children}', sw: 'content', cp: 'content()' },
+    icon: { web: 'decorative icon (aria-hidden)', rn: 'icon, accessible=false', sw: 'Image(systemName:) hidden', cp: 'Icon(contentDescription = null)' }, conditional: { web: 'if/else', rn: 'ternary', sw: 'if/else', cp: 'if/else' },
+  };
+  for (const p of byGroup('el-kind')) {
+    const k = p.value, e = EXP[k];
+    web(p, C(e.web, 'MDN HTML elements', 'N'));
+    row(p, 'react-native', C(e.rn, R3ref(k), 'N'));
+    if (k === 'media') row(p, 'swiftui', X('SILENT-DROP', 'A11Y', e.sw, 'R5', 'N', 'spec `alt` is dropped: no .accessibilityLabel emitted; a11y-guard img-alt only checks the IR has alt'));
+    else if (k === 'heading') row(p, 'swiftui', X('SILENT-DROP', 'A11Y', e.sw, 'R5,R8', 'P', 'see heading-level rows'));
+    else row(p, 'swiftui', C(e.sw, 'Apple SwiftUI views', 'N', k === 'slot' ? 'named slot collapses to the unnamed content (known, PR C)' : undefined));
+    if (k === 'heading') row(p, 'compose', X('SILENT-DROP', 'A11Y', e.cp, 'R4', 'E', 'see heading-level rows'));
+    else if (k === 'media') row(p, 'compose', C(e.cp, 'R27', 'E', 'requires coil-compose; not documented in the repo'));
+    else row(p, 'compose', C(e.cp, 'Compose components', 'N', k === 'slot' ? 'named slot collapses to the unnamed content (known, PR C)' : undefined));
+  }
+  function R3ref() { return 'RN components'; }
+}
+
+// ── VALUEREF KINDS ────────────────────────────────────────────────────────────
+for (const p of byGroup('valueRef')) {
+  const k = p.value;
+  if (k === 'expr' && /NOT toFixed/.test(p.construct)) {
+    web(p, C('displays the expression result', 'JS', 'N'));
+    row(p, 'react-native', C('displays the expression result', 'JS', 'N'));
+    row(p, 'swiftui', X('DECLARED-DEGRADATION', 'FUNCTIONAL', 'the value of `count + 1`', 'n/a', 'N', 'native cannot eval: simplified to the first identifier with a WARNING only (no ledger trait, no waiver); displays the wrong number'));
+    row(p, 'compose', X('DECLARED-DEGRADATION', 'FUNCTIONAL', 'the value of `count + 1`', 'n/a', 'N', 'native cannot eval: simplified to the first identifier with a WARNING only (no ledger trait, no waiver)'));
+  } else if (k === 'expr') {
+    web(p, C('amount.toFixed(precision): ties round half away from zero (measured)', 'MDN toFixed', 'E', 'tie rule MEASURED with node, not read from docs'));
+    row(p, 'react-native', C('same JS', 'JS', 'N'));
+    row(p, 'swiftui', X('UNVERIFIED', 'FUNCTIONAL', 'ties round like toFixed (half away from zero)', 'R15', 'N', 'NumberFormatter built with NO rounding mode; Apple docs do not state the default (check device: format 2.5 at precision 0)'));
+    row(p, 'compose', X('DEFECT', 'FUNCTIONAL', 'ties round like toFixed (half away from zero)', 'R16', 'E', 'NumberFormat default is HALF_EVEN (docs): 0.5, 2.5, 1234.5 (p0) and 0.125 (p2) differ from web'));
+  } else {
+    web(p, C(`${k} lowered to its native construct`, 'n/a', 'N')); for (const a of ['react-native', 'swiftui', 'compose']) row(p, a, C(`${k} lowered to its native construct`, 'n/a', 'N'));
+  }
+}
+
+// ── NUMBER FORMAT ─────────────────────────────────────────────────────────────
+for (const p of byGroup('numberFormat')) {
+  const f = p.construct, v = p.value;
+  if (/style/.test(f)) { web(p, C(`style: "${v}"`, 'R14')); row(p, 'react-native', C(`style: "${v}"`, 'R14')); row(p, 'swiftui', C(v === 'currency' ? '.currency + currencyCode' : '.decimal', 'R15', 'N')); row(p, 'compose', C(v === 'currency' ? 'getCurrencyInstance + currency' : 'getNumberInstance', 'R16', 'N')); }
+  else if (/rounding/.test(f)) {
+    const m = { round: ['halfExpand (away from zero on ties)', '.halfUp ("away from zero if equidistant")', 'HALF_UP ("round up" on ties; away from zero)'], floor: ['floor (toward -inf)', '.floor (toward -inf)', 'FLOOR (toward -inf)'], ceil: ['ceil (toward +inf)', '.ceiling (toward +inf)', 'CEILING (toward +inf)'] }[v];
+    web(p, C(`roundingMode: ${m[0]}`, 'R14')); row(p, 'react-native', v === 'round' ? C(`roundingMode: ${m[0]}`, 'R14') : X('UNVERIFIED', 'FUNCTIONAL', `roundingMode: ${v} honoured by RN's Intl (Hermes)`, 'R14', 'N', 'ES2023 option; verify the RN runtime honours roundingMode (device check). Older engines ignore it silently'));
+    row(p, 'swiftui', C(m[1], 'R15', 'P')); row(p, 'compose', C(m[2], 'R16'));
+  } else if (/grouping/.test(f)) { web(p, C(`useGrouping: ${v}`, 'R14')); row(p, 'react-native', C(`useGrouping: ${v}`, 'R14')); row(p, 'swiftui', C(`usesGroupingSeparator = ${v}`, 'R15', 'N')); row(p, 'compose', C(`isGroupingUsed = ${v}`, 'R16', 'N')); }
+  else if (/precision/.test(f)) { web(p, C(`min/maxFractionDigits: ${v}`, 'R14')); row(p, 'react-native', C(`min/maxFractionDigits: ${v}`, 'R14')); row(p, 'swiftui', C(`min/maximumFractionDigits = ${v}`, 'R15', 'N')); row(p, 'compose', C(`min/maximumFractionDigits = ${v}`, 'R16', 'N')); }
+  else if (/currency/.test(f)) { web(p, C('currency: "THB"', 'R14')); row(p, 'react-native', C('currency: "THB"', 'R14')); row(p, 'swiftui', C('currencyCode = "THB"', 'R15', 'N')); row(p, 'compose', C('Currency.getInstance("THB")', 'R16', 'N')); }
+  else if (/locale/.test(f)) { web(p, C('locale "th-TH"', 'R14')); row(p, 'react-native', C('locale "th-TH"', 'R14')); row(p, 'swiftui', C('Locale(identifier: "th-TH")', 'R15', 'N')); row(p, 'compose', C('Locale.forLanguageTag("th-TH")', 'R16', 'N')); }
+}
+{ // rounding OMITTED: value-level default
+  const p = find('numberFormat', 'decimal');
+  web({ ...p, construct: 'numberFormat.field:rounding (omitted: platform default)', value: '(default)' }, C('default halfExpand (ties away from zero)', 'R14'));
+  row({ ...p, construct: 'numberFormat.field:rounding (omitted: platform default)', value: '(default)' }, 'react-native', C('default halfExpand', 'R14'));
+  row({ ...p, construct: 'numberFormat.field:rounding (omitted: platform default)', value: '(default)' }, 'swiftui', X('UNVERIFIED', 'FUNCTIONAL', 'same tie behaviour as web (half away from zero)', 'R15', 'N', 'no rounding mode emitted; Apple docs state no default (device check)'));
+  row({ ...p, construct: 'numberFormat.field:rounding (omitted: platform default)', value: '(default)' }, 'compose', X('DEFECT', 'FUNCTIONAL', 'same tie behaviour as web (half away from zero)', 'R16', 'E', 'no rounding mode emitted; NumberFormat default is HALF_EVEN (docs): ties differ from web'));
+}
+
+// ── DATE / TIME ───────────────────────────────────────────────────────────────
+for (const p of byGroup('dateTime')) {
+  const v = p.value, f = p.construct;
+  if (/dateStyle|timeStyle/.test(f)) {
+    const which = /dateStyle/.test(f) ? 'dateStyle' : 'timeStyle';
+    web(p, C(`${which}: "${v}"`, 'R17')); row(p, 'react-native', C(`${which}: "${v}"`, 'R17'));
+    row(p, 'swiftui', C(`${which} = .${v}`, 'R18', 'P', 'exact text is locale/OS dependent per Apple docs (cosmetic)'));
+    row(p, 'compose', C(`DateFormat.${v.toUpperCase()}`, 'R19', 'E', 'exact text is locale dependent (cosmetic)'));
+  } else if (/locale/.test(f)) { web(p, C('locale "en-GB"', 'R17')); row(p, 'react-native', C('locale "en-GB"', 'R17')); row(p, 'swiftui', C('Locale(identifier:)', 'R18', 'N')); row(p, 'compose', C('Locale.forLanguageTag', 'R19', 'N')); }
+  else { web(p, C('timeZone: "Asia/Bangkok"', 'R17')); row(p, 'react-native', C('timeZone option', 'R17')); row(p, 'swiftui', C('TimeZone(identifier:) ?? .current', 'R18', 'N')); row(p, 'compose', C('ZoneId.of(...) fallback systemDefault', 'R19', 'N')); }
+}
+
+// ── INPUT TYPE ────────────────────────────────────────────────────────────────
+for (const p of byGroup('inputType')) {
+  const t = p.value;
+  if (t === 'text') { web(p, C('type="text"', 'R10')); for (const a of ['react-native', 'swiftui', 'compose']) row(p, a, C('default text field', 'R11,R12,R13', 'N')); continue; }
+  if (/^number/.test(t)) { web(p, C('type="number"', 'R10', 'N')); row(p, 'react-native', C('keyboardType="numeric"', 'R11')); row(p, 'swiftui', C('Stepper (numeric control)', 'R12', 'N')); row(p, 'compose', X('SILENT-DROP', 'FUNCTIONAL', 'KeyboardOptions(keyboardType = KeyboardType.Number)', 'R13', 'E', 'numeric text field has no numeric keyboard')); continue; }
+  if (t === 'checkbox') web(p, X('DEFECT', 'FUNCTIONAL', 'type="checkbox" bound with checked={v} / e.target.checked', 'R9', 'E', 'emits value={v} and e.target.value: the checkbox never reflects its state'));
+  else web(p, C(`type="${t}"`, t === 'password' ? 'R10' : 'MDN input types', t === 'password' ? 'E' : 'N'));
+  const n = { email: ['keyboardType="email-address"', '.keyboardType(.emailAddress)', 'KeyboardOptions(keyboardType = KeyboardType.Email)', 'R11', 'R12', 'R13'], password: ['secureTextEntry', 'SecureField', 'PasswordVisualTransformation / KeyboardType.Password', 'R11', 'R12', 'R13'], checkbox: ['a checkbox/Switch control', 'Toggle', 'Checkbox', 'R3', 'R5', 'R4'] }[t];
+  const sev = 'FUNCTIONAL';
+  row(p, 'react-native', X('SILENT-DROP', sev, n[0], n[3], 'E', t === 'password' ? 'password is shown as plain text (privacy)' : undefined));
+  row(p, 'swiftui', X('SILENT-DROP', sev, n[1], n[4], t === 'checkbox' ? 'N' : 'P', t === 'password' ? 'password is shown as plain text (privacy)' : undefined));
+  row(p, 'compose', X('SILENT-DROP', sev, n[2], n[5], t === 'checkbox' ? 'N' : 'E', t === 'password' ? 'password is shown as plain text (privacy)' : undefined));
+}
+
+// ── STATE KIND ────────────────────────────────────────────────────────────────
+for (const p of byGroup('state')) {
+  const k = p.value;
+  const E = { boolean: ['<input type=checkbox checked>', 'Switch(value)', 'Toggle(isOn:)', 'Checkbox(checked)'], 'selected-value': ['<select>/<option>', 'Picker (external @react-native-picker/picker)', 'Picker(selection:)', 'RadioButton group'], 'numeric-range': ['<input type=range min max step>', 'Slider(min,max,step)', 'Slider(in:step:)', 'Slider(valueRange, steps = 9 for 0..10 step 1)'] }[k];
+  web(p, C(E[0], 'R9', 'N')); row(p, 'react-native', C(E[1], 'R3', 'N')); row(p, 'swiftui', C(E[2], 'Apple SwiftUI controls', 'N')); row(p, 'compose', C(E[3], k === 'numeric-range' ? 'R23' : 'Compose components', k === 'numeric-range' ? 'E' : 'N'));
+}
+
+// ── VARIANT INTENT ────────────────────────────────────────────────────────────
+for (const p of byGroup('variant')) { web(p, C('no output (scoping metadata; never emitted)', 'schema', 'N')); for (const a of ['react-native', 'swiftui', 'compose']) row(p, a, C('no output (scoping metadata; never emitted)', 'schema', 'N')); }
+
+// ── STYLE SLOTS ───────────────────────────────────────────────────────────────
+for (const p of byGroup('style-slot')) {
+  if (p.construct !== 'style-slot') continue; // the `size` probe is handled separately below
+  const s = p.value;
+  const T = { background: ['background-color', 'backgroundColor', '.background', 'Modifier.background'], color: ['color', 'color (Text only)', '.foregroundColor', 'Text(color =)'], padding: ['padding', 'padding', '.padding', 'Modifier.padding'], radius: ['border-radius', 'borderRadius', '.cornerRadius', 'Modifier.clip(RoundedCornerShape)'] };
+  if (T[s]) {
+    web(p, C(T[s][0], 'R20', 'N'));
+    row(p, 'react-native', s === 'color' ? X('DEFECT', 'VISUAL', 'color has effect only on Text; a View style color does not cascade to children', 'R24', 'E', 'emitted on a View: ignored; children do not inherit') : C(T[s][1], 'R21', 'N'));
+    row(p, 'swiftui', C(T[s][2], 'Apple SwiftUI modifiers', 'N', s === 'color' ? 'foregroundColor cascades to child Text' : undefined));
+    row(p, 'compose', s === 'color' ? X('SILENT-DROP', 'VISUAL', 'text color on the children (Column does not cascade)', 'R4', 'N', 'container `color` dropped with NO warning (the warning exists only for variant colors)') : C(T[s][3], 'Compose Modifier', 'N'));
+  } else if (s === 'gap') {
+    web(p, X('DEFECT', 'VISUAL', 'spacing between children', 'R20', 'E', 'gap emitted on a non-flex container is inert (gap applies to flex/grid/multicol); fixed only for oriented containers'));
+    row(p, 'react-native', C('gap (RN >= 0.71)', 'R21', 'E')); row(p, 'swiftui', X('SILENT-DROP', 'VISUAL', 'VStack/HStack(spacing: token)', 'Apple SwiftUI stacks', 'N', 'stack spacing is hard-coded 8')); row(p, 'compose', X('SILENT-DROP', 'VISUAL', 'Arrangement.spacedBy(token)', 'Compose Arrangement', 'N', 'no warning'));
+  } else if (s === 'border') {
+    web(p, X('DEFECT', 'VISUAL', 'a visible border: border-color AND border-style/width', 'R20', 'E', 'border-color alone shows nothing (style defaults to none)')); row(p, 'react-native', X('DEFECT', 'VISUAL', 'a visible border: borderColor AND borderWidth', 'R21', 'E', 'borderColor alone shows nothing')); row(p, 'swiftui', X('SILENT-DROP', 'VISUAL', '.border / overlay stroke', 'Apple SwiftUI', 'N')); row(p, 'compose', X('SILENT-DROP', 'VISUAL', 'Modifier.border', 'Compose Modifier', 'N'));
+  } else if (s === 'font') {
+    web(p, C('font-family', 'R20', 'N')); row(p, 'react-native', X('DEFECT', 'VISUAL', 'fontFamily', 'R21', 'E', 'emits the non-RN key `font:`')); row(p, 'swiftui', X('SILENT-DROP', 'VISUAL', '.font(.custom(...))', 'Apple SwiftUI', 'N')); row(p, 'compose', X('SILENT-DROP', 'VISUAL', 'fontFamily =', 'Compose Text', 'N'));
+  } else if (s === 'fontSize') {
+    web(p, C('font-size', 'R20', 'N')); row(p, 'react-native', C('fontSize', 'R21', 'E')); row(p, 'swiftui', X('SILENT-DROP', 'VISUAL', '.font(.system(size:))', 'Apple SwiftUI', 'N')); row(p, 'compose', X('SILENT-DROP', 'VISUAL', 'fontSize =', 'Compose Text', 'N'));
+  } else { // margin / width / height
+    web(p, C(`${s}`, 'R20', 'N', 'passes through STYLE_PROP fallthrough (incidental)')); row(p, 'react-native', C(`${s}`, 'R21', 'N', 'passes through the fallthrough (incidental)')); row(p, 'swiftui', X('SILENT-DROP', 'VISUAL', s === 'margin' ? '.padding outside the background / spacing' : '.frame(' + s + ':)', 'Apple SwiftUI', 'N')); row(p, 'compose', X('SILENT-DROP', 'VISUAL', s === 'margin' ? 'outer Modifier.padding' : 'Modifier.' + s + '()', 'Compose Modifier', 'N'));
+  }
+}
+{ const p = find('style-slot', 'space.6'); web(p, C('width/height', 'R20', 'N')); row(p, 'react-native', C('width/height', 'R21', 'N')); row(p, 'swiftui', C('.frame(width:height:)', 'Apple SwiftUI', 'N')); row(p, 'compose', C('Modifier.size', 'Compose Modifier', 'N')); }
+
+// ── ICON TOKENS ───────────────────────────────────────────────────────────────
+{
+  const CP_EXT = new Set(['icon.error', 'icon.chevron']);
+  for (const p of byGroup('icon')) {
+    const t = p.value;
+    if (t === 'icon.nonexistent') { for (const a of ADAPTERS) row(p, a, X('DEFECT', 'FUNCTIONAL', 'a mapped symbol (an unmapped token must not reach the output)', 'n/a', 'P', 'unmapped token is emitted verbatim as an identifier (uncompilable); token-guard unknown-token CATCHES it')); continue; }
+    web(p, X('UNVERIFIED', 'COSMETIC', 'lucide icon name exists in the installed lucide version', 'lucide.dev', 'N', 'check the name in the lucide release used'));
+    row(p, 'react-native', X('UNVERIFIED', 'COSMETIC', 'lucide-react-native icon name exists', 'lucide.dev', 'N', 'check the name in the lucide release used'));
+    row(p, 'swiftui', X('UNVERIFIED', 'COSMETIC', 'SF Symbol name exists on the deployment target', 'SF Symbols app', 'N', 'check in the SF Symbols app (availability varies by OS version)'));
+    row(p, 'compose', CP_EXT.has(t) ? X('UNVERIFIED', 'FUNCTIONAL', 'symbol available with the declared dependency', 'R22', 'E', 'docs excerpt places Error/ChevronRight in material-icons-extended (not core); output uses `Icons.Default.*` with no documented dependency: compile check needed') : X('UNVERIFIED', 'COSMETIC', 'symbol exists in Icons.Filled', 'R22', 'E', ['icon.success', 'icon.warning', 'icon.heart'].includes(t) ? 'CheckCircle/Warning/Favorite confirmed in core Icons.Filled' : 'name likely in core; confirm'));
+  }
+}
+
+writeFileSync(new URL('./audit-rows.json', import.meta.url), JSON.stringify(rows, null, 1));
+// ── summary ───────────────────────────────────────────────────────────────────
+const cnt = (k) => rows.reduce((m, r) => ((m[r[k]] = (m[r[k]] ?? 0) + 1), m), {});
+console.log('rows:', rows.length);
+console.log('verdicts:', JSON.stringify(cnt('verdict')));
+console.log('severity (non-CORRECT):', JSON.stringify(rows.filter((r) => r.verdict !== 'CORRECT').reduce((m, r) => ((m[r.severity] = (m[r.severity] ?? 0) + 1), m), {})));
+console.log('conf:', JSON.stringify(cnt('conf')));
