@@ -20,6 +20,11 @@
  *                        APPROVER; expiry missing, not a valid date, or past
  *   R6-duplicate         the same construct appears twice in the registry
  *   R0-load              the registry file is missing/unparseable/has no map
+ *   R7-unhandled-trait   a mapped entry's (declared) trait is not handled by all 6
+ *                        adapters: each adapter must contain a real
+ *                        express('<trait>') or diverge('<trait>') CALL, found by a
+ *                        code-only scan (comments and string-only mentions do not
+ *                        count). Names the adapters that miss it.
  *
  * Approver/expiry rules mirror loadWaivers() in ledger-gate.mjs exactly
  * (approver AND expires required; `new Date(expires)` must parse; expired when
@@ -32,7 +37,8 @@
  * in the registry use the same normalization (everything after `=` is `*`).
  *
  * Advisory (printed, never fails): declared ledger traits referenced by no
- * registry entry, and untracked entries expiring within 90 days.
+ * registry entry, untracked entries expiring within 90 days, and declared ledger
+ * traits not handled by all 6 adapters (listed per adapter).
  *
  * There is no whitelist and no bypass flag. The clock is an injectable function
  * parameter (default: now) so expiry can be tested; it is deliberately NOT a
@@ -41,11 +47,11 @@
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { parseDocument, isMap, isScalar } from 'yaml';
-import { REGISTRY_PATH, deriveConstructs, declaredTraitIds } from './schema-constructs.mjs';
+import { REGISTRY_PATH, ADAPTERS, deriveConstructs, declaredTraitIds, codeHandledTraitIdsByAdapter } from './schema-constructs.mjs';
 
 export const APPROVER = 'Ssuppanut (design-system a11y owner)';
 export const EXPIRY_WARN_DAYS = 90;
-export const RULES = ['R0-load', 'R1-missing', 'R2-stale', 'R3-shape', 'R4-dangling-trait', 'R5-untracked-quality', 'R6-duplicate'];
+export const RULES = ['R0-load', 'R1-missing', 'R2-stale', 'R3-shape', 'R4-dangling-trait', 'R5-untracked-quality', 'R6-duplicate', 'R7-unhandled-trait'];
 
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const nonEmptyStr = (v) => typeof v === 'string' && v.trim() !== '';
@@ -68,7 +74,7 @@ function readRegistry({ registryPath, registryText }) {
 }
 
 /** Same expiry semantics as loadWaivers(): unparseable -> invalid; `exp < now` -> past. */
-function expiryState(expires, now) {
+export function expiryState(expires, now) {
   const raw = expires instanceof Date ? expires.toISOString() : expires;
   if (raw === undefined || raw === null || raw === '') return 'missing';
   const exp = new Date(raw);
@@ -83,14 +89,16 @@ function expiryState(expires, now) {
  * @param {string} [o.registryText]    registry YAML text (overrides the file; for fixtures)
  * @param {string[]} [o.constructs]    derived construct ids (default: live walker)
  * @param {string[]} [o.declaredTraits] declared ledger traits (default: live scan)
+ * @param {Record<string,string[]>} [o.handledByAdapter] adapter -> traits it expresses/diverges (default: live code-only scan)
  * @param {Date} [o.now]               clock (default: now)
- * @returns {{ ok: boolean, issues: {rule:string, construct:string, msg:string}[], advisory: {unreferencedTraits:string[], expiringSoon:string[]}, counts: {constructs:number, entries:number, mapped:number, untracked:number}, now: string }}
+ * @returns {{ ok: boolean, issues: {rule:string, construct:string, msg:string}[], advisory: {unreferencedTraits:string[], expiringSoon:string[], unhandledTraits:{trait:string, missing:string[]}[]}, counts: {constructs:number, entries:number, mapped:number, untracked:number}, now: string }}
  */
 export function checkTraitRegistryGate({
   registryPath = REGISTRY_PATH,
   registryText,
   constructs = deriveConstructs(),
   declaredTraits = declaredTraitIds(),
+  handledByAdapter = codeHandledTraitIdsByAdapter(),
   now = new Date(),
 } = {}) {
   const issues = [];
@@ -131,8 +139,12 @@ export function checkTraitRegistryGate({
       const items = Array.isArray(e.trait) ? e.trait : [e.trait];
       if (Array.isArray(e.trait) && e.trait.length === 0) add('R4-dangling-trait', id, `entry "${id}" maps to an empty trait list`);
       for (const t of items) {
-        if (typeof t === 'string' && declared.has(t)) referenced.add(t);
-        else add('R4-dangling-trait', id, `entry "${id}" maps to ${JSON.stringify(t)}, which is not a declared ledger trait`);
+        if (typeof t === 'string' && declared.has(t)) {
+          referenced.add(t);
+          // R7 — a declared mapped trait must be handled (express/diverge) by all 6 adapters.
+          const missing = ADAPTERS.filter((a) => !(handledByAdapter[a] ?? []).includes(t));
+          if (missing.length) add('R7-unhandled-trait', id, `entry "${id}" maps to trait "${t}", which is not expressed or diverged (code-only scan) by ${missing.length === ADAPTERS.length ? `any of the ${ADAPTERS.length} adapters` : `adapter${missing.length === 1 ? '' : 's'}: ${missing.join(', ')}`}`);
+        } else add('R4-dangling-trait', id, `entry "${id}" maps to ${JSON.stringify(t)}, which is not a declared ledger trait`);
       }
       continue;
     }
@@ -154,7 +166,11 @@ export function checkTraitRegistryGate({
   const order = (r) => RULES.indexOf(r);
   issues.sort((a, b) => order(a.rule) - order(b.rule) || (a.construct < b.construct ? -1 : a.construct > b.construct ? 1 : a.msg < b.msg ? -1 : a.msg > b.msg ? 1 : 0));
   const unreferencedTraits = [...declared].filter((t) => !referenced.has(t)).sort();
-  return { ok: issues.length === 0, issues, advisory: { unreferencedTraits, expiringSoon: expiringSoon.sort() }, counts, now: day(now) };
+  // Advisory: declared ledger traits not handled by all 6 adapters, with the adapters that miss each.
+  const unhandledTraits = [...declared].sort()
+    .map((t) => ({ trait: t, missing: ADAPTERS.filter((a) => !(handledByAdapter[a] ?? []).includes(t)) }))
+    .filter((u) => u.missing.length > 0);
+  return { ok: issues.length === 0, issues, advisory: { unreferencedTraits, expiringSoon: expiringSoon.sort(), unhandledTraits }, counts, now: day(now) };
 }
 
 /** Deterministic text report. */
@@ -164,6 +180,7 @@ export function formatReport(r) {
   for (const i of r.issues) out.push(`  FAIL ${i.rule}  ${i.construct}: ${i.msg}`);
   out.push(`  ADVISORY ${r.advisory.unreferencedTraits.length} declared ledger trait(s) referenced by no registry entry${r.advisory.unreferencedTraits.length ? `: ${r.advisory.unreferencedTraits.join(', ')}` : ''}`);
   out.push(`  ADVISORY ${r.advisory.expiringSoon.length} untracked entr${r.advisory.expiringSoon.length === 1 ? 'y' : 'ies'} expiring within ${EXPIRY_WARN_DAYS} days`);
+  out.push(`  ADVISORY ${r.advisory.unhandledTraits.length} declared ledger trait(s) not handled by all ${ADAPTERS.length} adapters${r.advisory.unhandledTraits.length ? ': ' + r.advisory.unhandledTraits.map((u) => `${u.trait} (missing in ${u.missing.length === ADAPTERS.length ? 'all ' + ADAPTERS.length : u.missing.join(', ')})`).join('; ') : ''}`);
   out.push(r.ok ? 'trait-registry gate: PASS' : `trait-registry gate: FAIL (${r.issues.length} issue${r.issues.length === 1 ? '' : 's'})`);
   return out.join('\n');
 }

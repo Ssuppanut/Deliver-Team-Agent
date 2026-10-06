@@ -62,6 +62,10 @@ function main() {
   try { run('node _shared/scripts/check-trait-registry.mjs'); }
   catch { console.error('FAIL: check-trait-registry'); failures++; }
 
+  console.log('\n## 1f. corpus coverage gate (D3 — every schema construct is exercised by a corpus spec or has a dated, approved allowlist entry)');
+  try { run('node _shared/scripts/check-corpus-coverage.mjs'); }
+  catch { console.error('FAIL: check-corpus-coverage'); failures++; }
+
   console.log('\n## 2. run every feature');
   const feats = discoverFeatures();
   for (const [name, info] of feats) {

@@ -22,7 +22,9 @@ import { checkRefusal } from '../../.claude/skills/_meta/orchestrator/scripts/re
 import { loadSpec, validate } from './validate-schema.mjs';
 import { validateBriefs } from './validate-brief.mjs';
 import { checkTraitRegistryGate, formatReport } from './check-trait-registry.mjs';
-import { deriveConstructs, declaredTraitIds, handledTraitIds, loadTraitRegistry, checkTraitRegistry } from './schema-constructs.mjs';
+import { checkCorpusCoverage, formatCoverageReport, ALLOWLIST_PATH } from './check-corpus-coverage.mjs';
+import { parse as parseYaml } from 'yaml';
+import { ADAPTERS as D3_ADAPTERS, codeHandledTraitIdsByAdapter, exercisedConstructs, deriveConstructs, deriveSchemaConstructs, adapterStyleSlots, corpusStyleSlots, declaredTraitIds, handledTraitIds, loadTraitRegistry, checkTraitRegistry } from './schema-constructs.mjs';
 import { route, loadContext } from '../../.ai/router/route.mjs';
 import { loadWorkflow, evaluateWorkflow, runScenarios, lintWorkflow } from './workflow-eval.mjs';
 import { skillRegistryDrift } from './skill-registry.mjs';
@@ -1519,13 +1521,14 @@ check('P83', 'brief schema (PR B): every brief + template validates; a corrupted
   assert(V({ ...base, interaction: ['static'] }), 'interaction [static] alone must validate');
 });
 
-check('P84', 'trait registry scaffold (D1): the schema walker derives exactly 105 constructs, every one has a registry entry, none is orphaned, trait mappings only point at declared+handled traits (a11y.labelledBy is never covered); corrupted registries are caught', () => {
-  const DERIVED_COUNT = 105; // recorded in the D1 PR; changing the schema/corpus slots must update this AND the registry
+check('P84', 'trait registry scaffold (D1): the schema walker derives the schema constructs plus the style slots (count derived, not hard-coded), every one has a registry entry, none is orphaned, trait mappings only point at declared+handled traits (a11y.labelledBy is never covered); corrupted registries are caught', () => {
   const constructs = deriveConstructs();
+  // D3: the expected count is derived from the schema walk + the style-slot union, not a literal.
+  const DERIVED_COUNT = deriveSchemaConstructs().length + new Set([...adapterStyleSlots(), ...corpusStyleSlots()]).size;
   const declared = declaredTraitIds();
   const handled = handledTraitIds();
   const registry = loadTraitRegistry();
-  assert(constructs.length === DERIVED_COUNT, `walker must derive ${DERIVED_COUNT} constructs, got ${constructs.length}`);
+  assert(constructs.length === DERIVED_COUNT && DERIVED_COUNT > 0, `walker must derive the schema constructs plus the style slots (${DERIVED_COUNT}), got ${constructs.length}`);
   assert(new Set(constructs).size === constructs.length, 'derived construct ids must be unique');
   assert(constructs.every((c) => /^[a-zA-Z0-9.-]+:[^:\s]+$/.test(c)), 'every construct id must match <group>:<name>');
   const base = { constructs, registry, declared, handled };
@@ -1641,6 +1644,164 @@ check('P91', 'trait-registry gate wiring: ci.mjs runs it as a blocking step, out
   const near = d2Gate((t) => d2Line(t, 'style-slot:gap', () => `  "style-slot:gap": { untracked: { reason: "r", approver: "Ssuppanut (design-system a11y owner)", expires: "${soon}" } }`));
   assert(near.advisory.expiringSoon.includes('style-slot:gap') && near.advisory.expiringSoon.length > 0, 'an entry expiring inside the 90-day window must be listed as expiring-soon');
   assert(near.ok && near.issues.length === 0, 'expiring-soon is advisory only: the gate must still pass');
+});
+
+// --- D3: corpus coverage gate (C0..C4) + R7 (declared AND handled) + advisory + wiring ----
+// Every pin runs on TEMPORARY fixtures (temp specs / allowlist text / registry copies) with a
+// pinned clock, and derives anything it needs from the real files at run time, so none depends
+// on a real allowlist or registry date (D2's P89/P91 are the model).
+const D3_NOW = new Date('2026-10-06T00:00:00Z');
+const D3_APPROVER = 'Ssuppanut (design-system a11y owner)';
+const d3Day = (days) => new Date(D3_NOW.getTime() + days * 86400000).toISOString().slice(0, 10);
+const d3Entry = (id, { reason = 'r', approver = D3_APPROVER, expires = d3Day(120) } = {}) => `  "${id}": { ${[reason === null ? null : `reason: ${JSON.stringify(reason)}`, approver === null ? null : `approver: ${JSON.stringify(approver)}`, expires === null ? null : `expires: ${JSON.stringify(expires)}`].filter(Boolean).join(', ')} }\n`;
+const d3List = (...entries) => `allowlist:\n${entries.join('')}`;
+const D3_TINY = 'component: Tiny\nroot:\n  el: container\n  children:\n    - el: text\n      text: { kind: literal, value: hi }\n';
+function d3Cov({ allowlist, constructs, specs, ...opts }) {
+  const dir = mkdtempSync(join(tmpdir(), 'corpus-coverage-'));
+  try {
+    const specPaths = specs ? Object.entries(specs).map(([name, text]) => { const f = join(dir, name); writeFileSync(f, text); return f; }) : undefined;
+    return checkCorpusCoverage({ allowlistText: allowlist, constructs, ...(specPaths ? { specPaths } : {}), now: D3_NOW, ...opts });
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+}
+const d3Rules = (r) => [...new Set(r.issues.map((i) => i.rule))];
+const d3Only = (r, rule, construct, why) => {
+  assert(!r.ok, `${why}: the gate must FAIL`);
+  assert(r.issues.some((i) => i.rule === rule && i.construct === construct && i.msg.includes(construct)), `${why}: expected ${rule} naming "${construct}", got ${JSON.stringify(r.issues.map((i) => [i.rule, i.construct]))}`);
+  assert(JSON.stringify(d3Rules(r)) === JSON.stringify([rule]), `${why}: only ${rule} may fire, got ${d3Rules(r)}`);
+};
+const D3_LINK = ['el-kind:text', 'el-kind:link']; // the tiny corpus exercises text, never link
+
+check('P92', 'corpus coverage C1-uncovered: a derived construct exercised by no corpus spec and not allowlisted FAILS naming it; an allowlist entry resolves it', () => {
+  const real = readFileSync(ALLOWLIST_PATH, 'utf8');
+  d3Only(d3Cov({ allowlist: real, constructs: [...deriveConstructs(), 'element.field:brandNew'] }), 'C1-uncovered', 'element.field:brandNew', 'new schema construct nobody tests');
+  d3Only(d3Cov({ allowlist: d3List(), constructs: D3_LINK, specs: { 'tiny.yaml': D3_TINY } }), 'C1-uncovered', 'el-kind:link', 'tiny corpus never exercises link');
+  // A spec in a refused category (overlay / data-table) never reaches an adapter, so it is NOT coverage.
+  const refusedLink = 'component: Refused\ncategory: overlay\nroot:\n  el: container\n  children:\n    - el: link\n      href: { kind: literal, value: "https://example.com" }\n';
+  d3Only(d3Cov({ allowlist: d3List(), constructs: D3_LINK, specs: { 'tiny.yaml': D3_TINY, 'refused.yaml': refusedLink } }), 'C1-uncovered', 'el-kind:link', 'a refusal-fixture spec must not count as coverage');
+  assert(d3Cov({ allowlist: d3List(), constructs: D3_LINK, specs: { 'tiny.yaml': D3_TINY, 'lowered.yaml': refusedLink.replace('category: overlay', 'category: display') } }).ok, 'the same spec in a lowered category must count as coverage');
+  const ok = d3Cov({ allowlist: d3List(d3Entry('el-kind:link')), constructs: D3_LINK, specs: { 'tiny.yaml': D3_TINY } });
+  assert(ok.ok && ok.counts.covered === 1 && ok.counts.allowlisted === 1, `a valid allowlist entry must resolve C1 (covered 1, allowlisted 1): ${JSON.stringify(ok.issues)}`);
+});
+
+check('P93', 'corpus coverage C2-stale-allowlist: an entry naming a non-construct FAILS, and an entry for a construct that is now exercised FAILS (delete it)', () => {
+  d3Only(d3Cov({ allowlist: d3List(d3Entry('element.field:ghost')), constructs: ['el-kind:text'], specs: { 'tiny.yaml': D3_TINY } }), 'C2-stale-allowlist', 'element.field:ghost', 'entry naming a non-construct');
+  const now = d3Cov({ allowlist: d3List(d3Entry('el-kind:text')), constructs: ['el-kind:text'], specs: { 'tiny.yaml': D3_TINY } });
+  d3Only(now, 'C2-stale-allowlist', 'el-kind:text', 'entry for a construct that is now exercised');
+  assert(/delete/.test(now.issues[0].msg), 'the now-exercised message must tell the author to delete the entry');
+});
+
+check('P94', 'corpus coverage C3-allowlist-quality: empty/missing reason, wrong or case-differing approver, missing/invalid/past expiry, non-mapping FAILS; the expiry day is not inclusive', () => {
+  const base = { constructs: ['el-kind:link'], specs: { 'tiny.yaml': D3_TINY } };
+  const one = (opts, why, cfg = {}) => d3Only(d3Cov({ ...base, allowlist: d3List(d3Entry('el-kind:link', opts)), ...cfg }), 'C3-allowlist-quality', 'el-kind:link', why);
+  one({ reason: '' }, 'empty reason');
+  one({ reason: null }, 'missing reason');
+  one({ approver: 'Someone Else' }, 'wrong approver');
+  one({ approver: 'ssuppanut (design-system a11y owner)' }, 'approver differs only by case');
+  one({ approver: null }, 'missing approver');
+  one({ expires: null }, 'missing expiry');
+  one({ expires: 'not-a-date' }, 'invalid expiry');
+  one({ expires: d3Day(-1) }, 'past expiry');
+  one({ expires: d3Day(0) }, 'expiry day is NOT inclusive (past later on its own date)', { now: new Date(D3_NOW.getTime() + 12 * 3600000) });
+  const scalar = d3Cov({ ...base, allowlist: 'allowlist:\n  "el-kind:link": "just a string"\n' });
+  d3Only(scalar, 'C3-allowlist-quality', 'el-kind:link', 'non-mapping entry');
+  assert(scalar.issues.length === 1 && /must be a mapping/.test(scalar.issues[0].msg), `a non-mapping entry must be reported once as "must be a mapping", got ${JSON.stringify(scalar.issues.map((i) => i.msg))}`);
+  assert(d3Cov({ ...base, allowlist: d3List(d3Entry('el-kind:link', { expires: d3Day(1) })) }).ok, 'an expiry the day after the clock must pass');
+});
+
+check('P95', 'corpus coverage C4-duplicate: the same construct listed twice FAILS naming it', () => {
+  d3Only(d3Cov({ allowlist: d3List(d3Entry('el-kind:link'), d3Entry('el-kind:link')), constructs: D3_LINK, specs: { 'tiny.yaml': D3_TINY } }), 'C4-duplicate', 'el-kind:link', 'duplicate allowlist entry');
+});
+
+check('P96', 'corpus coverage C0-load: a missing/invalid allowlist, an allowlist with no map, an unparseable corpus spec, or an empty corpus FAILS', () => {
+  const has = (r, why) => assert(!r.ok && d3Rules(r).includes('C0-load'), `${why}: C0-load must fire, got ${d3Rules(r)}`);
+  has(checkCorpusCoverage({ allowlistPath: join(tmpdir(), 'no-such-allowlist.yaml'), constructs: D3_LINK, now: D3_NOW }), 'missing allowlist file');
+  has(d3Cov({ allowlist: 'allowlist: [unclosed', constructs: D3_LINK, specs: { 'tiny.yaml': D3_TINY } }), 'invalid YAML');
+  has(d3Cov({ allowlist: 'version: 1\n', constructs: D3_LINK, specs: { 'tiny.yaml': D3_TINY } }), 'no allowlist map');
+  has(d3Cov({ allowlist: d3List(), constructs: ['el-kind:text'], specs: { 'broken.yaml': 'root: [unclosed' } }), 'unparseable corpus spec');
+  has(d3Cov({ allowlist: d3List(), constructs: ['el-kind:text'], specs: {} }), 'empty corpus');
+  // A present-but-empty allowlist is the goal state (everything exercised): valid, never C0.
+  for (const empty of ['allowlist:\n', 'allowlist: {}\n']) assert(d3Cov({ allowlist: empty, constructs: ['el-kind:text'], specs: { 'tiny.yaml': D3_TINY } }).ok, `an empty allowlist (${JSON.stringify(empty)}) must be valid when every construct is exercised`);
+  has(d3Cov({ allowlist: 'allowlist: []\n', constructs: ['el-kind:text'], specs: { 'tiny.yaml': D3_TINY } }), 'allowlist that is a list, not a mapping');
+});
+
+check('P97', 'trait registry R7-unhandled-trait: a mapped trait must be expressed/diverged by all 6 adapters in real code (comments and string-only mentions do not count); names the adapters; dangling traits stay R4 only', () => {
+  const reg = loadTraitRegistry();
+  const [mappedId, mappedTrait] = [...reg.entries].map(([id, e]) => [id, e.trait]).find(([, t]) => typeof t === 'string' && declaredTraitIds().includes(t));
+  const handled = codeHandledTraitIdsByAdapter();
+  assert(D3_ADAPTERS.every((a) => handled[a].includes(mappedTrait)), `precondition: every adapter handles the mapped trait "${mappedTrait}" today`);
+  assert(d2Gate((t) => t, { handledByAdapter: handled }).ok, 'the real registry must pass R7 with the real adapters');
+  const without = (adapters) => Object.fromEntries(D3_ADAPTERS.map((a) => [a, adapters.includes(a) ? handled[a].filter((t) => t !== mappedTrait) : handled[a]]));
+  const one = d2Gate((t) => t, { handledByAdapter: without(['swiftui']) });
+  d2Only(one, 'R7-unhandled-trait', mappedId, 'one adapter does not handle a mapped trait');
+  assert(/swiftui/.test(one.issues[0].msg) && !/react|vue|svelte|compose/.test(one.issues[0].msg.split('adapter')[1] ?? ''), `R7 must name only the missing adapter (swiftui): ${one.issues[0].msg}`);
+  const all = d2Gate((t) => t, { handledByAdapter: without(D3_ADAPTERS) });
+  d2Only(all, 'R7-unhandled-trait', mappedId, 'no adapter handles the mapped trait');
+  assert(/any of the 6 adapters/.test(all.issues[0].msg), 'R7 must say no adapter handles it');
+  // Code-only scan: a commented-out call and a string-only mention do not handle the trait.
+  const real = `this.express(${JSON.stringify(mappedTrait)}, {});`;
+  const fake = `// ${real}\nconst s = "${real.replace(/"/g, "'")}"; const t = \`${real.replace(/"/g, "'")}\`;`;
+  const scanned = codeHandledTraitIdsByAdapter((a) => (a === 'compose' ? fake : real));
+  assert(!scanned.compose.includes(mappedTrait) && scanned.react.includes(mappedTrait), 'a commented-out call or string-only mention must not count as handling');
+  d2Only(d2Gate((t) => t, { handledByAdapter: scanned }), 'R7-unhandled-trait', mappedId, 'only comments / strings mention the trait in compose');
+  // A dangling (undeclared) trait is R4 only, never double-reported as R7.
+  d2Only(d2Gate((t) => d2Line(t, mappedId, () => `  "${mappedId}": { trait: "no-such-trait" }`), { handledByAdapter: handled }), 'R4-dangling-trait', mappedId, 'undeclared trait');
+});
+
+check('P98', 'trait registry advisory: declared traits not handled by all 6 adapters are listed per adapter and NEVER fail the gate', () => {
+  const handled = codeHandledTraitIdsByAdapter();
+  const declared = [...declaredTraitIds(), 'zz-synthetic-trait'];
+  const none = d2Gate((t) => t, { declaredTraits: declared, handledByAdapter: handled });
+  assert(none.ok && none.advisory.unhandledTraits.some((u) => u.trait === 'zz-synthetic-trait' && u.missing.length === D3_ADAPTERS.length), 'a declared trait no adapter handles must be advisory (missing in all 6) and must not fail');
+  const partial = Object.fromEntries(D3_ADAPTERS.map((a) => [a, a === 'vue' ? handled[a] : [...handled[a], 'zz-synthetic-trait']]));
+  const some = d2Gate((t) => t, { declaredTraits: declared, handledByAdapter: partial });
+  assert(some.ok && JSON.stringify(some.advisory.unhandledTraits.filter((u) => u.trait === 'zz-synthetic-trait')) === JSON.stringify([{ trait: 'zz-synthetic-trait', missing: ['vue'] }]), 'a trait missing in one adapter must list exactly that adapter');
+  assert(/ADVISORY .*not handled by all 6 adapters.*zz-synthetic-trait \(missing in vue\)/.test(formatReport(some)), 'the report must print the per-adapter advisory');
+});
+
+check('P99', 'D3 wiring: ci.mjs runs check-corpus-coverage as a blocking step; both gates are deterministic; the real files pass at the pinned clock', () => {
+  const ci = readFileSync(resolve(ROOT, '_shared/scripts/ci.mjs'), 'utf8');
+  assert(/run\('node _shared\/scripts\/check-corpus-coverage\.mjs'\);\s*\}\s*catch \{ console\.error\('FAIL: check-corpus-coverage'\); failures\+\+; \}/.test(ci), 'ci.mjs must run check-corpus-coverage.mjs and count a failure');
+  const cov = checkCorpusCoverage({ now: D3_NOW });
+  assert(cov.ok, `the real corpus + allowlist must pass: ${cov.issues.slice(0, 2).map((i) => i.msg).join('; ')}`);
+  assert(formatCoverageReport(cov) === formatCoverageReport(checkCorpusCoverage({ now: D3_NOW })), 'two corpus-coverage runs must be byte-identical');
+  assert(formatReport(checkTraitRegistryGate({ now: D3_NOW })) === formatReport(checkTraitRegistryGate({ now: D3_NOW })), 'two trait-registry runs must be byte-identical');
+  assert(cov.counts.covered + cov.counts.allowlisted === cov.counts.constructs, 'every derived construct is exercised or allowlisted');
+});
+
+check('P100', 'corpus coverage walker: exercisedConstructs() returns exactly the constructs a spec uses (schema-driven walk: nested conditional, variant style slots, a11y, number format, enum values) and nothing else', () => {
+  const doc = parseYaml(`
+component: Probe
+root:
+  el: container
+  orientation: horizontal
+  style: { gap: space.4 }
+  a11y: { live: polite, label: { kind: literal, value: x } }
+  children:
+    - el: conditional
+      when: flag
+      then:
+        el: text
+        text: { kind: format, value: amount, format: { style: currency, precision: 2 } }
+      else:
+        el: action
+        label: { kind: literal, value: Go }
+        variant: { prop: tone, intent: emphasis, cases: { a: { color: color.fg.default, icon: icon.x } } }
+`);
+  const expected = [
+    'el-kind:container', 'el-kind:conditional', 'el-kind:text', 'el-kind:action',
+    'element.field:el', 'element.field:orientation', 'element.field:style', 'element.field:a11y', 'element.field:children',
+    'element.field:when', 'element.field:then', 'element.field:else', 'element.field:text', 'element.field:label', 'element.field:variant',
+    'element.value:orientation=horizontal',
+    'a11y.field:live', 'a11y.field:label', 'a11y.value:live=polite',
+    'valueRef.field:kind', 'valueRef.field:value', 'valueRef.field:format', 'valueRef.value:kind=literal', 'valueRef.value:kind=format',
+    'numberFormat.field:style', 'numberFormat.field:precision', 'numberFormat.value:style=currency',
+    'variant.field:prop', 'variant.field:intent', 'variant.field:cases', 'variant.value:intent=emphasis',
+    'style-slot:gap', 'style-slot:color', 'style-slot:icon',
+  ].sort();
+  const got = [...exercisedConstructs(doc)].sort();
+  assert(JSON.stringify(got) === JSON.stringify(expected), `walker must return exactly the used constructs.\n  missing: ${expected.filter((x) => !got.includes(x))}\n  extra:   ${got.filter((x) => !expected.includes(x))}`);
+  const derived = new Set(deriveConstructs());
+  assert(got.every((c) => derived.has(c)), 'every exercised construct must be a derived construct');
 });
 
 console.log('\n=== verify-patches ===');
