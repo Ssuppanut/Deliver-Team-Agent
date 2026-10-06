@@ -58,6 +58,10 @@ function main() {
   try { run('node _shared/scripts/validate-brief.mjs'); }
   catch { console.error('FAIL: validate-brief'); failures++; }
 
+  console.log('\n## 1e. trait registry gate (D2 — every schema construct has a ledger trait or a dated, approved untracked reason)');
+  try { run('node _shared/scripts/check-trait-registry.mjs'); }
+  catch { console.error('FAIL: check-trait-registry'); failures++; }
+
   console.log('\n## 2. run every feature');
   const feats = discoverFeatures();
   for (const [name, info] of feats) {

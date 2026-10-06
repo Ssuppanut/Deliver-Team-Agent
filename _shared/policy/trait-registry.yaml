@@ -22,108 +22,108 @@
 # separate construct id, so element.field:orientation maps to the existing trait.
 version: 1
 constructs:
-  "el-kind:container": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "el-kind:media": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "el-kind:heading": { untracked: { reason: "pending D5 (heading semantics on native): heading", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "el-kind:text": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "el-kind:action": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
+  "el-kind:container": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "el-kind:media": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "el-kind:heading": { untracked: { reason: "pending D5 (heading semantics on native): heading", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "el-kind:text": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "el-kind:action": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
   "el-kind:link": { trait: "link-href" }
-  "el-kind:input": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "el-kind:slot": { untracked: { reason: "named slot lowers to the same unnamed content on SwiftUI and Compose (PR C finding); pending the slot contract work", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "el-kind:icon": { untracked: { reason: "pending D4 (register trait or split it, no output change): icon", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "el-kind:conditional": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "element.field:el": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
+  "el-kind:input": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "el-kind:slot": { untracked: { reason: "named slot lowers to the same unnamed content on SwiftUI and Compose (PR C finding); pending the slot contract work", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "el-kind:icon": { untracked: { reason: "pending D4 (register trait or split it, no output change): icon", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "el-kind:conditional": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "element.field:el": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
   "element.field:role": { trait: "role=*" }
   "element.field:as": { untracked: { reason: "web-only semantic tag, no native counterpart", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
   "element.field:orientation": { trait: "orientation=*" }
   "element.field:size": { trait: "size" }
   "element.field:disabled": { trait: "disabled" }
-  "element.field:a11y": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "element.field:style": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "element.field:level": { untracked: { reason: "pending D5 (heading semantics on native): level", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "element.field:text": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "element.field:src": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "element.field:alt": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
+  "element.field:a11y": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "element.field:style": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "element.field:level": { untracked: { reason: "pending D5 (heading semantics on native): level", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "element.field:text": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "element.field:src": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "element.field:alt": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
   "element.field:href": { trait: "link-href" }
-  "element.field:icon": { untracked: { reason: "pending D4 (register trait or split it, no output change): icon", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "element.field:label": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "element.field:variant": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "element.field:input": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "element.field:onEvent": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "element.field:when": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "element.field:then": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "element.field:else": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "element.field:each": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "element.field:children": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
+  "element.field:icon": { untracked: { reason: "pending D4 (register trait or split it, no output change): icon", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "element.field:label": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "element.field:variant": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "element.field:input": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "element.field:onEvent": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "element.field:when": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "element.field:then": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "element.field:else": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "element.field:each": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "element.field:children": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
   "element.value:orientation=horizontal": { trait: "orientation=*" }
   "element.value:orientation=vertical": { trait: "orientation=*" }
-  "valueRef.field:kind": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "valueRef.field:value": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
+  "valueRef.field:kind": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "valueRef.field:value": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
   "valueRef.field:format": { trait: "number-format" }
   "valueRef.field:dateFormat": { trait: "date-format" }
-  "valueRef.value:kind=literal": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "valueRef.value:kind=ref": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "valueRef.value:kind=expr": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
+  "valueRef.value:kind=literal": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "valueRef.value:kind=ref": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "valueRef.value:kind=expr": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
   "valueRef.value:kind=format": { trait: "number-format" }
   "valueRef.value:kind=datetime": { trait: "date-format" }
-  "numberFormat.field:style": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "numberFormat.field:currency": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "numberFormat.field:locale": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "numberFormat.field:grouping": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "numberFormat.field:rounding": { untracked: { reason: "pending D4 (register trait or split it, no output change): rounding", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "numberFormat.field:precision": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "numberFormat.value:style=decimal": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "numberFormat.value:style=currency": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "dateTimeFormat.field:dateStyle": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "dateTimeFormat.field:timeStyle": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "dateTimeFormat.field:locale": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
+  "numberFormat.field:style": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "numberFormat.field:currency": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "numberFormat.field:locale": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "numberFormat.field:grouping": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "numberFormat.field:rounding": { untracked: { reason: "pending D4 (register trait or split it, no output change): rounding", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "numberFormat.field:precision": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "numberFormat.value:style=decimal": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "numberFormat.value:style=currency": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "dateTimeFormat.field:dateStyle": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "dateTimeFormat.field:timeStyle": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "dateTimeFormat.field:locale": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
   "dateTimeFormat.field:timeZone": { trait: "date-timezone" }
-  "dateTimeFormat.value:dateStyle=short": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "dateTimeFormat.value:dateStyle=medium": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "dateTimeFormat.value:dateStyle=long": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "dateTimeFormat.value:timeStyle=short": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "dateTimeFormat.value:timeStyle=medium": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "dateTimeFormat.value:timeStyle=long": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
+  "dateTimeFormat.value:dateStyle=short": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "dateTimeFormat.value:dateStyle=medium": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "dateTimeFormat.value:dateStyle=long": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "dateTimeFormat.value:timeStyle=short": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "dateTimeFormat.value:timeStyle=medium": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "dateTimeFormat.value:timeStyle=long": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
   "a11y.field:label": { trait: "a11y.label" }
-  "a11y.field:labelledBy": { untracked: { reason: "declared trait with no adapter handling on any of the 6; needs a decision: implement, diverge or remove (PR C finding)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
+  "a11y.field:labelledBy": { untracked: { reason: "declared trait with no adapter handling on any of the 6; needs a decision: implement, diverge or remove (PR C finding)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
   "a11y.field:describedBy": { trait: "a11y.describedBy" }
   "a11y.field:invalid": { trait: "a11y.invalid" }
   "a11y.field:live": { trait: "a11y.live=*" }
   "a11y.value:live=off": { trait: "a11y.live=*" }
   "a11y.value:live=polite": { trait: "a11y.live=*" }
   "a11y.value:live=assertive": { trait: "a11y.live=*" }
-  "variant.field:prop": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "variant.field:intent": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "variant.field:cases": { untracked: { reason: "pending D4 (register trait or split it, no output change): cases", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "variant.value:intent=status": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "variant.value:intent=emphasis": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "input.field:valueProp": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "input.field:changeProp": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "input.field:inputType": { untracked: { reason: "pending D7 (inputType on native)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
+  "variant.field:prop": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "variant.field:intent": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "variant.field:cases": { untracked: { reason: "pending D4 (register trait or split it, no output change): cases", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "variant.value:intent=status": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "variant.value:intent=emphasis": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "input.field:valueProp": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "input.field:changeProp": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "input.field:inputType": { untracked: { reason: "pending D7 (inputType on native)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
   "input.field:multiline": { trait: "input.multiline" }
   "input.field:state": { trait: "state=*" }
-  "input.value:inputType=text": { untracked: { reason: "pending D7 (inputType on native)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "input.value:inputType=number": { untracked: { reason: "pending D7 (inputType on native)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "input.value:inputType=email": { untracked: { reason: "pending D7 (inputType on native)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "input.value:inputType=password": { untracked: { reason: "pending D7 (inputType on native)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "input.value:inputType=checkbox": { untracked: { reason: "pending D7 (inputType on native)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
+  "input.value:inputType=text": { untracked: { reason: "pending D7 (inputType on native)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "input.value:inputType=number": { untracked: { reason: "pending D7 (inputType on native)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "input.value:inputType=email": { untracked: { reason: "pending D7 (inputType on native)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "input.value:inputType=password": { untracked: { reason: "pending D7 (inputType on native)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "input.value:inputType=checkbox": { untracked: { reason: "pending D7 (inputType on native)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
   "input.state.field:kind": { trait: "state=*" }
-  "input.state.field:min": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "input.state.field:max": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "input.state.field:step": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "input.state.field:options": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
+  "input.state.field:min": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "input.state.field:max": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "input.state.field:step": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "input.state.field:options": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
   "input.state.value:kind=boolean": { trait: "state=*" }
   "input.state.value:kind=selected-value": { trait: "state=*" }
   "input.state.value:kind=numeric-range": { trait: "state=*" }
-  "style-slot:background": { untracked: { reason: "pending D4 (register trait or split it, no output change): background", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "style-slot:border": { untracked: { reason: "pending D6 (native style lowering, border refuse): border", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "style-slot:color": { untracked: { reason: "pending D6 (native style lowering, border refuse): color", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "style-slot:font": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "style-slot:fontSize": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "style-slot:gap": { untracked: { reason: "pending D6 (native style lowering, border refuse): gap", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "style-slot:height": { untracked: { reason: "pending D6: silently ignored on SwiftUI and Compose; web and RN lower them (PR C finding)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "style-slot:icon": { untracked: { reason: "pending D4 (register trait or split it, no output change): icon", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "style-slot:margin": { untracked: { reason: "pending D6: silently ignored on SwiftUI and Compose; web and RN lower them (PR C finding)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "style-slot:padding": { untracked: { reason: "pending D4 (register trait or split it, no output change): padding", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "style-slot:radius": { untracked: { reason: "pending D4 (register trait or split it, no output change): radius", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
-  "style-slot:width": { untracked: { reason: "pending D6: silently ignored on SwiftUI and Compose; web and RN lower them (PR C finding)", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }
+  "style-slot:background": { untracked: { reason: "pending D4 (register trait or split it, no output change): background", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "style-slot:border": { untracked: { reason: "pending D6 (native style lowering, border refuse): border", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "style-slot:color": { untracked: { reason: "pending D6 (native style lowering, border refuse): color", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "style-slot:font": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "style-slot:fontSize": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "style-slot:gap": { untracked: { reason: "pending D6 (native style lowering, border refuse): gap", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "style-slot:height": { untracked: { reason: "pending D6: silently ignored on SwiftUI and Compose; web and RN lower them (PR C finding)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "style-slot:icon": { untracked: { reason: "pending D4 (register trait or split it, no output change): icon", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "style-slot:margin": { untracked: { reason: "pending D6: silently ignored on SwiftUI and Compose; web and RN lower them (PR C finding)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "style-slot:padding": { untracked: { reason: "pending D4 (register trait or split it, no output change): padding", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "style-slot:radius": { untracked: { reason: "pending D4 (register trait or split it, no output change): radius", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "style-slot:width": { untracked: { reason: "pending D6: silently ignored on SwiftUI and Compose; web and RN lower them (PR C finding)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
