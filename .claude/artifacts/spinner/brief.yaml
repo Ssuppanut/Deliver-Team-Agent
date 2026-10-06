@@ -4,7 +4,7 @@ audience: End users of the product surface.
 platforms: [react, vue, svelte, react-native, swiftui, compose]
 variants: []
 states: [busy]
-interaction: static
+interaction: [static]
 a11y:
   - "role=status with aria-live=polite so AT announces the busy state"
   - "a visible/announced 'Loading' label (no icon-only spinner without a name)"

@@ -18,10 +18,24 @@ properties:
     items: { type: string }
   states:
     type: array
-    items: { type: string, enum: [default, loading, error, empty, disabled, selected] }
+    description: >
+      Free-identifier state names in lower-kebab-case (e.g. default, loading,
+      with-image, unchecked). No closed enum — real components name states the
+      design needs. `default` is allowed and implicit; it is not required.
+    items: { type: string, pattern: "^[a-z][a-z0-9-]*$" }
   interaction:
-    type: string
-    enum: [static, variants, controlled, iteration]
+    type: array
+    description: >
+      One or more interaction modes the component exhibits, derived from its
+      design-spec shape. `static` describes a component with no interaction and
+      therefore cannot be combined with any other value.
+    minItems: 1
+    uniqueItems: true
+    items: { type: string, enum: [static, variants, controlled, iteration, conditional] }
+    if:
+      contains: { const: static }
+    then:
+      maxItems: 1
   a11y:
     type: array
     items: { type: string }

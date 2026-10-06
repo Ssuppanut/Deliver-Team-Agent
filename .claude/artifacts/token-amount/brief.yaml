@@ -4,7 +4,7 @@ audience: End users of a fintech / crypto surface.
 platforms: [react, vue, svelte, react-native, swiftui, compose]
 variants: []
 states: [default]
-interaction: expression
+interaction: [static]
 a11y:
   - "the amount and symbol are plain text; no interactive affordance"
 scope:

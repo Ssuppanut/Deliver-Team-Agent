@@ -15,15 +15,16 @@ Convert intent into a `brief.yaml`.
 ## Output: `.claude/artifacts/<feature>/brief.yaml`
 
 Captures: component name, purpose, target platforms (subset of the 6), variants,
-states (default/loading/error/empty), interaction model, a11y requirements, and
-an explicit in/out-of-scope statement.
+states (free lower-kebab identifiers, e.g. default / busy / with-image),
+interaction model (an array of modes), a11y requirements, and an explicit
+in/out-of-scope statement.
 
 Start from `_shared/templates/brief.template.yaml`.
 
 ## Decision points (ask the user)
 
 - Which platforms? (all 6, web-only, native-only)
-- Static, variants, controlled state, or iteration?
+- Which interaction modes (an array, unique)? static | variants | controlled | iteration | conditional (static cannot combine with others).
 - Any overlay/table/chart intent -> route back to `orchestrator` refusal.
 
 ## Next

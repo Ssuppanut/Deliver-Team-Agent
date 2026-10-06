@@ -4,7 +4,7 @@ audience: End users of the product surface.
 platforms: [react, vue, svelte, react-native, swiftui, compose]
 variants: []
 states: [with-image, initials-fallback]
-interaction: conditional
+interaction: [conditional]
 a11y:
   - "role=img with an accessible label carrying the person's name"
   - "the image element carries alt text = name"

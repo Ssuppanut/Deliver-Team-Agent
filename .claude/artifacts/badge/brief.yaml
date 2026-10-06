@@ -4,7 +4,7 @@ audience: End users of the product surface.
 platforms: [react, vue, svelte, react-native, swiftui, compose]
 variants: [default, success, warning, error]
 states: [default]
-interaction: variants
+interaction: [variants]
 a11y:
   - "role=status so the label is exposed as a status region"
   - "per-state icon so state survives grayscale / color-blindness (not color alone)"

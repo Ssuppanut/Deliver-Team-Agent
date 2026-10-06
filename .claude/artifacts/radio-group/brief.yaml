@@ -4,7 +4,7 @@ audience: End users choosing one of N options as radios.
 platforms: [react, vue, svelte, react-native, swiftui, compose]
 variants: []
 states: [default]
-interaction: controlled
+interaction: [controlled]
 a11y:
   - "role=radiogroup on the group; radio semantics per option"
   - "single-select via each platform's native grouped-selection construct (no spec expression)"
@@ -15,4 +15,3 @@ scope:
     - "radiogroup/radio roles + option children"
   out:
     - "rich/nested option children (value+label only)"
-composes: "control-state(selected-value) + option-children + role=radiogroup a11y + tokens"

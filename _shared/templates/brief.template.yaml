@@ -1,11 +1,12 @@
-# Brief template — copy to .claude/artifacts/<feature>/brief.yaml (01-discover).
-component: ""            # PascalCase, e.g. ProductCard
-purpose: ""             # one sentence: what problem it solves
-audience: ""            # who uses it
-platforms: []           # subset of [react, vue, svelte, react-native, swiftui, compose]
+# Brief template — copy to .claude/artifacts/<feature>/brief.yaml (01-discover),
+# then replace the placeholder values. It is schema-valid as-is (validate-brief).
+component: Component    # PascalCase, e.g. ProductCard
+purpose: "One sentence: what problem it solves"
+audience: "Who uses it"
+platforms: [react, vue, svelte, react-native, swiftui, compose]  # subset of the 6
 variants: []            # e.g. [primary, secondary]
-states: [default]       # default | loading | error | empty | disabled | selected
-interaction: static     # static | variants | controlled | iteration
+states: [default]       # free lower-kebab identifiers, e.g. [default], [busy], [with-image, initials-fallback]
+interaction: [static]   # array, unique; static | variants | controlled | iteration | conditional (static cannot combine)
 a11y: []                # e.g. ["keyboard operable", "aria-label on icon button"]
 scope:
   in: []                # explicitly in scope

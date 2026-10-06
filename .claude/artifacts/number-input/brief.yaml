@@ -4,7 +4,7 @@ audience: End users entering a number.
 platforms: [react, vue, svelte, react-native, swiftui, compose]
 variants: []
 states: [default]
-interaction: controlled
+interaction: [controlled]
 a11y:
   - "visible label as the accessible name"
   - "numeric input with min/max/step constraints"
@@ -14,4 +14,3 @@ scope:
     - "min/max/step constraints (F-19 numeric portion)"
   out:
     - "number/currency/locale formatting (F-11/F-12 — explicitly out)"
-composes: "control-state(numeric-range, no slider role) + tokens"

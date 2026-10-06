@@ -54,6 +54,10 @@ function main() {
   try { run('node _shared/scripts/workflow-eval.mjs'); }
   catch { console.error('FAIL: workflow-eval'); failures++; }
 
+  console.log('\n## 1d. validate briefs (brief.schema.yaml — every artifact brief + the template)');
+  try { run('node _shared/scripts/validate-brief.mjs'); }
+  catch { console.error('FAIL: validate-brief'); failures++; }
+
   console.log('\n## 2. run every feature');
   const feats = discoverFeatures();
   for (const [name, info] of feats) {

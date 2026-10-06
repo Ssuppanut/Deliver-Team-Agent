@@ -4,7 +4,7 @@ audience: End users of the product surface.
 platforms: [react, vue, svelte, react-native, swiftui, compose]
 variants: [positive, negative]
 states: [default]
-interaction: variants
+interaction: [variants]
 a11y:
   - "delta direction carried by a per-direction icon + an explicit sign in the text, not color alone"
 scope:

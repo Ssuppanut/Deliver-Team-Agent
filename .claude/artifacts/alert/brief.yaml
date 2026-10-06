@@ -4,7 +4,7 @@ audience: End users of the product surface.
 platforms: [react, vue, svelte, react-native, swiftui, compose]
 variants: [info, success, warning, error]
 states: [default]
-interaction: variants
+interaction: [variants, conditional]
 a11y:
   - "role=alert with aria-live=polite so AT announces it"
   - "dismiss is an icon button with an accessible label"
