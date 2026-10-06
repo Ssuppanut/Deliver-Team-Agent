@@ -1,0 +1,24 @@
+component: LayoutRow
+description: A horizontal row of two labels — exercises the orientation layout axis (horizontal).
+category: layout
+props:
+  - { name: left, type: string, required: true }
+  - { name: right, type: string, required: true }
+tokens:
+  - space.4
+  - color.fg.default
+  - color.fg.muted
+root:
+  el: container
+  orientation: horizontal
+  style:
+    gap: space.4
+  children:
+    - el: text
+      text: { kind: ref, value: left }
+      style:
+        color: color.fg.default
+    - el: text
+      text: { kind: ref, value: right }
+      style:
+        color: color.fg.muted

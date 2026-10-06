@@ -153,6 +153,12 @@ function irNodes(ir) {
   return out;
 }
 
+/** True if the IR has a container that declares orientation AND has children
+ *  (PR A2: the case that lowers to a real layout axis on every adapter). */
+function hasOrientedContainer(ir) {
+  return irNodes(ir).some((n) => n.kind === 'container' && n.orientation && (n.children?.length));
+}
+
 const OPERATORS = [
   // O1 — drop a declared trait that is NOT in a11y-guard's enforced whitelist
   // (role=group/list/switch/…, a11y.label/live/invalid/describedBy). This is the
@@ -493,6 +499,50 @@ const OPERATORS = [
         });
       }
       return out;
+    },
+  },
+
+  // O12 (PR A2) — drop the web layout axis (display/flex-direction) per web
+  // adapter for an oriented container. The ledger stays green (orientation is
+  // still expressed), so only the layout-axis parity lint can kill this.
+  {
+    id: 'layout-axis-drop-web',
+    klass: 'parity',
+    expect: 'parity (layout-axis lint) — web output lacks flex-direction for an oriented container',
+    sites(bundle) {
+      if (!hasOrientedContainer(bundle.ir)) return [];
+      const STRIP = {
+        react: (s) => s.replace(/flexDirection: '(?:row|column)'/g, "flexN: 'x'"),
+        vue: (s) => s.replace(/flex-direction: (?:row|column)/g, 'flexN: x'),
+        svelte: (s) => s.replace(/flex-direction: (?:row|column)/g, 'flexN: x'),
+      };
+      return ['react', 'vue', 'svelte'].map((a) => ({
+        key: `${bundle.feature}:${a}`,
+        apply(c) { if (c.results[a]?.code) c.results[a].code = STRIP[a](c.results[a].code); },
+      }));
+    },
+  },
+
+  // O13 (PR A2) — flip the layout axis direction per adapter (web + native).
+  // The emitted axis no longer matches the spec orientation → layout-axis lint.
+  {
+    id: 'layout-axis-flip',
+    klass: 'parity',
+    expect: 'parity (layout-axis lint) — flipped axis no longer matches the spec orientation',
+    sites(bundle) {
+      if (!hasOrientedContainer(bundle.ir)) return [];
+      const FLIP = {
+        react: (s) => s.replace(/flexDirection: '(row|column)'/g, (_, d) => `flexDirection: '${d === 'row' ? 'column' : 'row'}'`),
+        vue: (s) => s.replace(/flex-direction: (row|column)/g, (_, d) => `flex-direction: ${d === 'row' ? 'column' : 'row'}`),
+        svelte: (s) => s.replace(/flex-direction: (row|column)/g, (_, d) => `flex-direction: ${d === 'row' ? 'column' : 'row'}`),
+        'react-native': (s) => s.replace(/flexDirection: "(row|column)"/g, (_, d) => `flexDirection: "${d === 'row' ? 'column' : 'row'}"`),
+        swiftui: (s) => s.replace(/HStack/g, '\u0001').replace(/VStack/g, 'HStack').replace(/\u0001/g, 'VStack'),
+        compose: (s) => s.replace(/\bRow\(/g, '\u0001').replace(/\bColumn\(/g, 'Row(').replace(/\u0001/g, 'Column('),
+      };
+      return Object.keys(FLIP).map((a) => ({
+        key: `${bundle.feature}:${a}`,
+        apply(c) { if (c.results[a]?.code) c.results[a].code = FLIP[a](c.results[a].code); },
+      }));
     },
   },
 

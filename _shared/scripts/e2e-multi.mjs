@@ -124,6 +124,31 @@ export function checkParity(results, ir) {
       if (re && !re.test(res.code ?? '')) issues.push(`${adapter}: el:link has no navigation primitive (expected ${re.source}) — a link must open its href, not render an inert body`);
     }
   }
+  // PR A2: an explicit container orientation WITH children is a real layout axis
+  // on every adapter. The ledger only records that an `orientation` mechanism was
+  // declared — it cannot verify the emitted axis matches the direction. This lint
+  // asserts each adapter's output contains its axis primitive for the correct
+  // direction (row/horizontal vs column/vertical). Gated to oriented containers
+  // that have children (matches the web lowering rule; a leaf like divider is
+  // semantic-only and not checked).
+  const orientedDirs = [];
+  (function w(n) { if (n?.kind === 'container' && n.orientation && (n.children?.length)) orientedDirs.push(n.orientation); (n?.children ?? []).forEach(w); })(ir.root);
+  if (orientedDirs.length) {
+    const AXIS = {
+      react: { horizontal: /flexDirection: 'row'/, vertical: /flexDirection: 'column'/ },
+      vue: { horizontal: /flex-direction: row/, vertical: /flex-direction: column/ },
+      svelte: { horizontal: /flex-direction: row/, vertical: /flex-direction: column/ },
+      'react-native': { horizontal: /flexDirection: "row"/, vertical: /flexDirection: "column"/ },
+      swiftui: { horizontal: /HStack/, vertical: /VStack/ },
+      compose: { horizontal: /\bRow\(/, vertical: /\bColumn\(/ },
+    };
+    for (const dir of new Set(orientedDirs)) {
+      for (const [adapter, res] of Object.entries(results)) {
+        const re = AXIS[adapter]?.[dir];
+        if (re && !re.test(res.code ?? '')) issues.push(`${adapter}: oriented container (${dir}) is missing its layout-axis primitive (expected ${re.source}) — orientation must lower to a real ${dir === 'horizontal' ? 'row' : 'column'} axis`);
+      }
+    }
+  }
   return { ok: issues.length === 0, issues, expectedProps };
 }
 
