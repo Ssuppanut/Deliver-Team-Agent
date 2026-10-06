@@ -2261,3 +2261,31 @@ URL via `LocalUriHandler.openUri` (the official Compose URI-opening API).
 
 Corpus: `.claude/artifacts/link-external` (literal href) and `link-external-ref`
 (prop-ref href) exercise the link path on all 6 adapters.
+
+## Residual (deferred to the navigation work) — link href runtime robustness
+
+PR A makes the navigation call real on every adapter, but it does **not** harden
+the *runtime* handling of a bad `href`. These are logged, not fixed here, and
+belong with the later navigation work item. Verified per adapter for a prop-ref
+`href` whose runtime value is not a valid/openable URL:
+
+| adapter | generated call | behaviour for an invalid runtime href | when |
+|---|---|---|---|
+| react / vue / svelte | `<a href={url}>` / `<a :href="url">` | no crash — the browser resolves or ignores the value (an invalid or relative string just yields a dead/relative anchor) | n/a |
+| react-native | `onPress={() => Linking.openURL(url)}` | `Linking.openURL` returns a **rejecting Promise** for an unopenable URL; the generated `onPress` does not `.catch`, so it surfaces as an **unhandled promise rejection** | on tap |
+| swiftui | `Link(label, destination: URL(string: url)!)` | **force-unwrap**: `URL(string:)` returns nil for a string it cannot parse (e.g. empty or containing spaces), and the `!` then **traps — a fatal crash at view-body evaluation (render time)** | at render |
+| compose | `Modifier.clickable { uriHandler.openUri(url) }` | `UriHandler.openUri` **throws `IllegalArgumentException("Can't open …")`** when the URI is invalid or no activity can handle it (it wraps `ActivityNotFoundException`); the generated call is not wrapped in try/catch, so it is uncaught | on tap |
+
+- **SwiftUI force-unwrap is the sharpest risk** — it is the only adapter that can
+  crash at *render* time (not just on interaction) for an invalid `href`. A later
+  fix would avoid `URL(string:)!` (e.g. guard the optional and omit/disable the
+  link when nil). Not changed in this PR.
+- **Compose `openUri` throw** — confirmed against the official `AndroidUriHandler`
+  reference: it catches `ActivityNotFoundException` and rethrows
+  `IllegalArgumentException`. A later fix would wrap the call. Not changed here.
+- **No scheme validation** — the engine does not validate `href` schemes (e.g. it
+  will emit `javascript:`, `data:`, `file:` as-is on every adapter). There is no
+  scheme-policy gate yet, so **callers must pass trusted URLs** until one exists.
+  Introducing a scheme allowlist/policy is deferred to the navigation work.
+
+No code or generated output changes for this item — documentation only.
