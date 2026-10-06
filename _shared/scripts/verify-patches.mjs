@@ -21,6 +21,7 @@ import { checkTbd } from '../../.claude/skills/_meta/critique/scripts/check-tbd.
 import { checkRefusal } from '../../.claude/skills/_meta/orchestrator/scripts/refusal.mjs';
 import { loadSpec, validate } from './validate-schema.mjs';
 import { validateBriefs } from './validate-brief.mjs';
+import { deriveConstructs, declaredTraitIds, handledTraitIds, loadTraitRegistry, checkTraitRegistry } from './schema-constructs.mjs';
 import { route, loadContext } from '../../.ai/router/route.mjs';
 import { loadWorkflow, evaluateWorkflow, runScenarios, lintWorkflow } from './workflow-eval.mjs';
 import { skillRegistryDrift } from './skill-registry.mjs';
@@ -1514,6 +1515,32 @@ check('P83', 'brief schema (PR B): every brief + template validates; a corrupted
   assert(!V({ ...base, interaction: 'variants' }), 'a scalar interaction (not an array) must be rejected');
   // Sanity: static alone is allowed.
   assert(V({ ...base, interaction: ['static'] }), 'interaction [static] alone must validate');
+});
+
+check('P84', 'trait registry scaffold (D1): the schema walker derives exactly 105 constructs, every one has a registry entry, none is orphaned, trait mappings only point at declared+handled traits (a11y.labelledBy is never covered); corrupted registries are caught', () => {
+  const DERIVED_COUNT = 105; // recorded in the D1 PR; changing the schema/corpus slots must update this AND the registry
+  const constructs = deriveConstructs();
+  const declared = declaredTraitIds();
+  const handled = handledTraitIds();
+  const registry = loadTraitRegistry();
+  assert(constructs.length === DERIVED_COUNT, `walker must derive ${DERIVED_COUNT} constructs, got ${constructs.length}`);
+  assert(new Set(constructs).size === constructs.length, 'derived construct ids must be unique');
+  assert(constructs.every((c) => /^[a-zA-Z0-9.-]+:[^:\s]+$/.test(c)), 'every construct id must match <group>:<name>');
+  const base = { constructs, registry, declared, handled };
+  const real = checkTraitRegistry(base);
+  assert(real.ok, `the seeded registry must be consistent: ${real.issues.slice(0, 3).join('; ')}`);
+  // The known declared-but-never-handled trait is detected (and must stay uncovered).
+  const unhandled = declared.filter((t) => !handled.includes(t));
+  assert(JSON.stringify(unhandled) === JSON.stringify(['a11y.labelledBy']), `declared-but-unhandled traits must be exactly [a11y.labelledBy], got [${unhandled}]`);
+  assert(registry.entries.get('a11y.field:labelledBy')?.untracked, 'a11y.field:labelledBy must be untracked, not mapped to a trait');
+  // Fired-gate: each corruption must be caught.
+  const withEntries = (mut) => { const m = new Map(registry.entries); mut(m); return { ...base, registry: { ...registry, entries: m } }; };
+  assert(!checkTraitRegistry(withEntries((m) => m.delete('style-slot:gap'))).ok, 'a derived construct with no entry must FAIL');
+  assert(!checkTraitRegistry(withEntries((m) => m.set('element.field:ghost', { trait: 'size' }))).ok, 'an orphaned entry must FAIL');
+  assert(!checkTraitRegistry(withEntries((m) => m.set('a11y.field:labelledBy', { trait: 'a11y.labelledBy' }))).ok, 'mapping a declared-but-unhandled trait must FAIL');
+  assert(!checkTraitRegistry(withEntries((m) => m.set('style-slot:gap', { trait: 'no-such-trait' }))).ok, 'mapping an undeclared trait must FAIL');
+  assert(!checkTraitRegistry({ ...base, registry: { ...registry, problems: ['"x" untracked is missing reason, approver and/or expires'] } }).ok, 'a malformed untracked entry must FAIL');
+  assert(!checkTraitRegistry({ ...base, constructs: [...constructs, constructs[0]] }).ok, 'a duplicate derived id must FAIL');
 });
 
 console.log('\n=== verify-patches ===');
