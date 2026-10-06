@@ -4,7 +4,7 @@
  * Each check pins a fix or a pipeline invariant so future edits can't silently
  * regress it. Run in CI and after any adapter change.
  */
-import { resolve, dirname } from 'node:path';
+import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { specToIrFromFile } from './spec-to-ir.mjs';
 import { generateReact } from '../../adapters/react/generate.mjs';
@@ -21,6 +21,7 @@ import { checkTbd } from '../../.claude/skills/_meta/critique/scripts/check-tbd.
 import { checkRefusal } from '../../.claude/skills/_meta/orchestrator/scripts/refusal.mjs';
 import { loadSpec, validate } from './validate-schema.mjs';
 import { validateBriefs } from './validate-brief.mjs';
+import { checkTraitRegistryGate, formatReport } from './check-trait-registry.mjs';
 import { deriveConstructs, declaredTraitIds, handledTraitIds, loadTraitRegistry, checkTraitRegistry } from './schema-constructs.mjs';
 import { route, loadContext } from '../../.ai/router/route.mjs';
 import { loadWorkflow, evaluateWorkflow, runScenarios, lintWorkflow } from './workflow-eval.mjs';
@@ -30,7 +31,8 @@ import { checkNativeExprLeak, checkDeclaredDropped } from './output-guards.mjs';
 import { checkLedger, loadWaivers } from './ledger-gate.mjs';
 import { runMutationTesting } from './mutate-gates.mjs';
 import { RendererBase } from '../../adapters/_shared/renderer-base.mjs';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { execSync } from 'node:child_process';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -1541,6 +1543,89 @@ check('P84', 'trait registry scaffold (D1): the schema walker derives exactly 10
   assert(!checkTraitRegistry(withEntries((m) => m.set('style-slot:gap', { trait: 'no-such-trait' }))).ok, 'mapping an undeclared trait must FAIL');
   assert(!checkTraitRegistry({ ...base, registry: { ...registry, problems: ['"x" untracked is missing reason, approver and/or expires'] } }).ok, 'a malformed untracked entry must FAIL');
   assert(!checkTraitRegistry({ ...base, constructs: [...constructs, constructs[0]] }).ok, 'a duplicate derived id must FAIL');
+});
+
+// --- D2 trait completeness gate: one firing pin per rule (R1..R6) + wiring ------
+// Every pin runs the gate on a TEMPORARY fixture copy of the registry (never the
+// real file) with a pinned clock, so these pins cannot time-bomb on an expiry date.
+const D2_NOW = new Date('2026-10-06T00:00:00Z');
+const D2_REGISTRY = resolve(ROOT, '_shared/policy/trait-registry.yaml');
+function d2Gate(mutate, opts = {}) {
+  const dir = mkdtempSync(join(tmpdir(), 'trait-registry-'));
+  try {
+    const p = join(dir, 'trait-registry.yaml');
+    writeFileSync(p, mutate(readFileSync(D2_REGISTRY, 'utf8')));
+    return checkTraitRegistryGate({ registryPath: p, now: D2_NOW, ...opts });
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+}
+const d2Rules = (r) => [...new Set(r.issues.map((i) => i.rule))];
+const d2Fired = (r, rule, construct) => r.issues.some((i) => i.rule === rule && i.construct === construct && i.msg.includes(construct));
+const d2Line = (text, id, fn) => text.split('\n').map((l) => (l.startsWith(`  "${id}":`) ? fn(l) : l)).join('\n');
+const d2Only = (r, rule, construct, why) => {
+  assert(!r.ok, `${why}: the gate must FAIL`);
+  assert(d2Fired(r, rule, construct), `${why}: expected ${rule} naming "${construct}", got ${JSON.stringify(r.issues.map((i) => [i.rule, i.construct]))}`);
+  assert(JSON.stringify(d2Rules(r)) === JSON.stringify([rule]), `${why}: only ${rule} may fire, got ${d2Rules(r)}`);
+};
+const D2_U = (extra) => `{ untracked: { ${extra} } }`;
+
+check('P85', 'trait-registry gate R1-missing: a derived construct with no registry entry FAILS naming it (a clean fixture copy passes)', () => {
+  assert(d2Gate((t) => t).ok, 'an unmodified fixture copy of the registry must pass');
+  d2Only(d2Gate((t) => t.split('\n').filter((l) => !l.startsWith('  "style-slot:gap":')).join('\n')), 'R1-missing', 'style-slot:gap', 'deleted entry');
+  d2Only(d2Gate((t) => t, { constructs: [...deriveConstructs(), 'element.field:brandNew'] }), 'R1-missing', 'element.field:brandNew', 'new derived construct');
+});
+
+check('P86', 'trait-registry gate R2-stale: a registry entry matching no derived construct FAILS naming it', () => {
+  d2Only(d2Gate((t) => `${t.trimEnd()}\n  "element.field:ghost": { trait: "size" }\n`), 'R2-stale', 'element.field:ghost', 'stale entry');
+  d2Only(d2Gate((t) => t, { constructs: deriveConstructs().filter((c) => c !== 'style-slot:gap') }), 'R2-stale', 'style-slot:gap', 'construct no longer derived');
+});
+
+check('P87', 'trait-registry gate R3-shape: neither mapped nor untracked, both, a mistyped key, or a non-mapping entry FAILS', () => {
+  d2Only(d2Gate((t) => d2Line(t, 'style-slot:gap', () => '  "style-slot:gap": { }')), 'R3-shape', 'style-slot:gap', 'neither');
+  d2Only(d2Gate((t) => d2Line(t, 'style-slot:gap', () => `  "style-slot:gap": { trait: "size", untracked: { reason: "r", approver: "Ssuppanut (design-system a11y owner)", expires: "2026-12-31" } }`)), 'R3-shape', 'style-slot:gap', 'both');
+  d2Only(d2Gate((t) => d2Line(t, 'style-slot:gap', () => '  "style-slot:gap": { traits: "size" }')), 'R3-shape', 'style-slot:gap', 'mistyped key');
+  d2Only(d2Gate((t) => d2Line(t, 'style-slot:gap', () => '  "style-slot:gap": "size"')), 'R3-shape', 'style-slot:gap', 'scalar entry');
+  d2Only(d2Gate((t) => d2Line(t, 'style-slot:gap', () => '  "style-slot:gap": { trait: "size", note: "extra key beside a valid trait" }')), 'R3-shape', 'style-slot:gap', 'unknown key beside a valid trait');
+});
+
+check('P88', 'trait-registry gate R4-dangling-trait: an undeclared trait, a bad item in a list, a non-normalized id, or an empty list FAILS; a valid list passes', () => {
+  const map = (v) => (t) => d2Line(t, 'style-slot:gap', () => `  "style-slot:gap": { trait: ${v} }`);
+  d2Only(d2Gate(map('"no-such-trait"')), 'R4-dangling-trait', 'style-slot:gap', 'undeclared trait');
+  d2Only(d2Gate(map('["size", "no-such-trait"]')), 'R4-dangling-trait', 'style-slot:gap', 'one bad item in a list');
+  d2Only(d2Gate(map('[]')), 'R4-dangling-trait', 'style-slot:gap', 'empty list');
+  d2Only(d2Gate(map('"role=button"')), 'R4-dangling-trait', 'style-slot:gap', 'non-normalized trait id');
+  assert(d2Gate(map('["size", "disabled"]')).ok, 'a list of declared traits must pass');
+  assert(d2Gate(map('"size"')).ok, 'a single declared trait must pass');
+});
+
+check('P89', 'trait-registry gate R5-untracked-quality: empty reason, wrong/missing approver, missing/invalid/past expiry FAILS; the day before expiry passes', () => {
+  const U = (a, b, c) => (t) => d2Line(t, 'style-slot:gap', () => `  "style-slot:gap": ${D2_U([a, b, c].filter(Boolean).join(', '))}`);
+  const ok = 'approver: "Ssuppanut (design-system a11y owner)"';
+  d2Only(d2Gate(U('reason: ""', ok, 'expires: "2026-12-31"')), 'R5-untracked-quality', 'style-slot:gap', 'empty reason');
+  d2Only(d2Gate(U(null, ok, 'expires: "2026-12-31"')), 'R5-untracked-quality', 'style-slot:gap', 'missing reason');
+  d2Only(d2Gate(U('reason: "r"', 'approver: "Someone Else"', 'expires: "2026-12-31"')), 'R5-untracked-quality', 'style-slot:gap', 'wrong approver');
+  d2Only(d2Gate(U('reason: "r"', 'approver: "ssuppanut (design-system a11y owner)"', 'expires: "2026-12-31"')), 'R5-untracked-quality', 'style-slot:gap', 'approver differs only by case');
+  d2Only(d2Gate(U('reason: "r"', null, 'expires: "2026-12-31"')), 'R5-untracked-quality', 'style-slot:gap', 'missing approver');
+  d2Only(d2Gate(U('reason: "r"', ok, null)), 'R5-untracked-quality', 'style-slot:gap', 'missing expiry');
+  d2Only(d2Gate(U('reason: "r"', ok, 'expires: "not-a-date"')), 'R5-untracked-quality', 'style-slot:gap', 'invalid expiry');
+  d2Only(d2Gate(U('reason: "r"', ok, 'expires: "2026-10-05"')), 'R5-untracked-quality', 'style-slot:gap', 'past expiry');
+  // Injected clock: every real untracked entry (expiring 2026-12-31) is past on 2027-01-01.
+  const late = d2Gate((t) => t, { now: new Date('2027-01-01T00:00:00Z') });
+  assert(!late.ok && d2Fired(late, 'R5-untracked-quality', 'style-slot:gap') && JSON.stringify(d2Rules(late)) === '["R5-untracked-quality"]', 'with the clock after 2026-12-31 the real untracked entries must fail R5');
+  assert(d2Gate((t) => t, { now: new Date('2026-12-30T00:00:00Z') }).ok, 'the day before expiry must still pass');
+});
+
+check('P90', 'trait-registry gate R6-duplicate: the same construct twice FAILS naming it (even with two otherwise-valid entries)', () => {
+  d2Only(d2Gate((t) => `${t.trimEnd()}\n${t.split('\n').find((l) => l.startsWith('  "style-slot:gap":'))}\n`), 'R6-duplicate', 'style-slot:gap', 'duplicate construct');
+});
+
+check('P91', 'trait-registry gate wiring: ci.mjs runs it as a blocking step, output is deterministic, advisories never fail, the real registry passes at the pinned clock', () => {
+  const ci = readFileSync(resolve(ROOT, '_shared/scripts/ci.mjs'), 'utf8');
+  assert(/run\('node _shared\/scripts\/check-trait-registry\.mjs'\);\s*\}\s*catch \{ console\.error\('FAIL: check-trait-registry'\); failures\+\+; \}/.test(ci), 'ci.mjs must run check-trait-registry.mjs and count a failure');
+  const real = checkTraitRegistryGate({ now: D2_NOW });
+  assert(real.ok, `the real registry must pass: ${real.issues.slice(0, 2).map((i) => i.msg).join('; ')}`);
+  assert(formatReport(real) === formatReport(checkTraitRegistryGate({ now: D2_NOW })), 'two runs must produce byte-identical output');
+  assert(real.advisory.unreferencedTraits.includes('a11y.labelledBy'), 'advisory must list the unreferenced a11y.labelledBy trait');
+  assert(real.advisory.expiringSoon.length > 0 && real.ok, 'expiring-soon is advisory only: entries listed, gate still passes');
 });
 
 console.log('\n=== verify-patches ===');

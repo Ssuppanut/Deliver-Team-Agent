@@ -2377,3 +2377,62 @@ specs only add outputs). `rm -rf out/ && node _shared/scripts/ci.mjs` → exit 0
 `verify-patches` 83/83 (unchanged); mutation **704 / 704 / 0** (up from 671/671/0
 — the existing operators now also run on the 4 new specs; every new mutant
 killed, 0 survivors).
+
+---
+
+# D2 — trait completeness gate (trait registry enforcement)
+
+D1 derived the output-affecting constructs of the design-spec language
+(`_shared/scripts/schema-constructs.mjs`) and seeded
+`_shared/policy/trait-registry.yaml`. D2 **enforces** it:
+`_shared/scripts/check-trait-registry.mjs` runs as a blocking step in `ci.mjs`
+(and stand-alone: `node _shared/scripts/check-trait-registry.mjs`, exit non-zero
+on any FAIL). Goal: a construct cannot exist without either a ledger trait or an
+explicit, dated, approved reason for being untracked.
+
+## Rules
+
+Each failure carries a stable rule id and names the construct.
+
+| rule | catches |
+|---|---|
+| `R1-missing` | a derived construct has no registry entry |
+| `R2-stale` | a registry entry matches no derived construct |
+| `R3-shape` | an entry is neither `{ trait }` nor `{ untracked }`, or is both, or has unknown keys |
+| `R4-dangling-trait` | a mapped entry names a trait that is not a declared ledger trait; `trait` may be one id or a list, every item is checked, an empty list fails |
+| `R5-untracked-quality` | reason missing/empty; approver missing or not exactly `Ssuppanut (design-system a11y owner)`; expiry missing, not a valid date, or already past |
+| `R6-duplicate` | the same construct appears twice in the registry |
+| `R0-load` | the registry is missing, not valid YAML, or has no `constructs` map |
+
+Approver/expiry semantics mirror `loadWaivers()` in `ledger-gate.mjs`
+(`new Date(expires)` must parse; expired when it is earlier than the clock, so an
+entry is already past on its own expiry date). Declared traits come from the
+static scan of `RendererBase.declaredTraits` (`declaredTraitIds()`); trait ids use
+the D1 normalization (everything after `=` is `*`: `role=*`, `a11y.live=*`).
+
+**Advisory (printed, never fails):** declared ledger traits referenced by no
+registry entry, and untracked entries expiring within 90 days. There is no
+whitelist and no bypass flag; the clock is a function parameter used by the
+firing pins, deliberately not a CLI option.
+
+## How to add a construct or an untracked entry
+
+- **A schema field, enum value or new style slot** (in `design-spec.schema.yaml`,
+  or a slot first used by a corpus spec) appears in `node
+  _shared/scripts/schema-constructs.mjs`. Add one entry for its id. Either map it
+  to the ledger trait(s) that account for it —
+  `"el-kind:foo": { trait: "foo-trait" }` (or `trait: ["a", "b"]`) — which must
+  already be a declared trait in `renderer-base.mjs`; or, if it is genuinely not
+  tracked yet:
+  `"el-kind:foo": { untracked: { reason: "<specific reason>", approver: "Ssuppanut (design-system a11y owner)", expires: "YYYY-MM-DD" } }`.
+  The reason must say what resolves it; the expiry must be in the future.
+- **Removing a construct** from the schema/corpus: delete its entry (`R2-stale`).
+- **Resolving an untracked entry**: replace it with a `{ trait }` mapping once an
+  adapter expresses or diverges the trait. Do not push an expiry out without
+  re-approval.
+- Expiry is enforced: once an `expires` date passes, CI goes RED (`R5`) until the
+  entry is resolved or re-approved.
+
+Firing pins: `verify-patches` P85–P90 (one per rule R1–R6, each on a temporary
+fixture copy of the registry with a pinned clock) and P91 (CI wiring,
+determinism, advisories never fail).
