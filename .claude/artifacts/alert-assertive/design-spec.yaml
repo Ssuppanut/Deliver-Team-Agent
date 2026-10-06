@@ -1,0 +1,17 @@
+component: AlertAssertive
+description: Urgent error message exposed as an assertive live region (interrupts the screen reader).
+category: feedback
+props:
+  - { name: message, type: string, required: true }
+tokens:
+  - color.fg.default
+root:
+  el: container
+  role: alert
+  a11y:
+    live: assertive
+  children:
+    - el: text
+      text: { kind: ref, value: message }
+      style:
+        color: color.fg.default
