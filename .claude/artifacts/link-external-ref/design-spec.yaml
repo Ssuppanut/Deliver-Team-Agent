@@ -1,0 +1,14 @@
+component: ExternalLinkRef
+description: A text link whose external destination URL is supplied at runtime by a prop.
+category: navigation
+props:
+  - { name: label, type: string, required: true }
+  - { name: url, type: string, required: true }
+tokens:
+  - color.accent.default
+root:
+  el: link
+  href: { kind: ref, value: url }
+  label: { kind: ref, value: label }
+  style:
+    color: color.accent.default

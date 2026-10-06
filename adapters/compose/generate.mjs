@@ -229,7 +229,13 @@ class ComposeRenderer extends RendererBase {
   }
 
   visitLink(node, children) {
-    return `Text(text = ${node.label ? this.strExpr(node.label) : `"${'link'}"`}, modifier = Modifier.clickable { /* open ${node.href?.value ?? ''} */ })`;
+    const label = node.label ? this.strExpr(node.label) : `"${'link'}"`;
+    if (!node.href) return `Text(text = ${label})`;
+    // PR A: open the external URL for real via Compose's LocalUriHandler
+    // (hoisted to `uriHandler` in the composable preamble). `uriHandler.openUri`
+    // is a String overload, so a literal or a prop-ref href both pass directly.
+    this.express('link-href', { mechanism: 'LocalUriHandler.openUri' });
+    return `Text(text = ${label}, modifier = Modifier.clickable { uriHandler.openUri(${this.strExpr(node.href)}) })`;
   }
   plain(vr) {
     if (!vr) return null;
@@ -402,6 +408,12 @@ class ComposeRenderer extends RendererBase {
       (/\brole = Role\./.test(root) ? `import androidx.compose.ui.semantics.role\nimport androidx.compose.ui.semantics.Role\n` : '')
       + (/\bliveRegion = LiveRegionMode\./.test(root) ? `import androidx.compose.ui.semantics.liveRegion\nimport androidx.compose.ui.semantics.LiveRegionMode\n` : '')
       + (/\.selectableGroup\(\)/.test(root) ? `import androidx.compose.foundation.selection.selectableGroup\n` : '');
+    // PR A: LocalUriHandler must be read in composable scope (not inside the
+    // clickable lambda), so hoist it to a body preamble and import it — gated on
+    // the body actually using it, so link-free specs are byte-identical.
+    const usesUri = /\buriHandler\.openUri\(/.test(root);
+    const uriImport = usesUri ? `import androidx.compose.ui.platform.LocalUriHandler\n` : '';
+    const uriPreamble = usesUri ? `${indent('val uriHandler = LocalUriHandler.current', 2)}\n` : '';
     return `import androidx.compose.foundation.layout.*\n`
       + `import androidx.compose.foundation.background\n`
       + `import androidx.compose.foundation.shape.RoundedCornerShape\n`
@@ -413,10 +425,11 @@ class ComposeRenderer extends RendererBase {
       + `import androidx.compose.ui.semantics.contentDescription\n`
       + `import androidx.compose.ui.semantics.semantics\n`
       + semExtra
+      + uriImport
       + `import androidx.compose.foundation.clickable\n`
       + `import coil.compose.AsyncImage\n`
       + `${iconImport}import designtokens.DesignTokens\n\n`
-      + `${itemClass}${optionIcons}@Composable\nfun ${name}(\n${params}\n) {\n${indent(root, 2)}\n}\n`;
+      + `${itemClass}${optionIcons}@Composable\nfun ${name}(\n${params}\n) {\n${uriPreamble}${indent(root, 2)}\n}\n`;
   }
 }
 

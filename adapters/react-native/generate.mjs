@@ -124,6 +124,7 @@ class RNRenderer extends RendererBase {
   }
 
   visitLink(node, children) {
+    if (node.href) this.express('link-href', { mechanism: 'Linking.openURL' });
     const press = node.href ? ` onPress={() => Linking.openURL(${this.attr(node.href)})}` : '';
     return `<Pressable accessibilityRole="link"${press}${this.style(node)}>\n  <Text>${node.label ? this.interp(node.label) : children}</Text>\n</Pressable>`;
   }

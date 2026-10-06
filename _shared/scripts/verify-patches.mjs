@@ -671,7 +671,9 @@ check('P44', 'mutation testing: baseline all-green; each killer operator kills i
   const KILLERS = ['drop-trait', 'remove-a11y', 'native-expr-leak', 'ref-as-literal', 'hardcode-token-web', 'hardcode-token-native', 'unresolved-tbd',
     // F-22: state-by-color-only became a blocking a11y contract; all four of its
     // operators must now kill every mutant they inject (0 survivors).
-    'state-by-color-only', 'strip-icon-all-but-one', 'same-icon-every-case', 'flip-intent-to-emphasis'];
+    'state-by-color-only', 'strip-icon-all-but-one', 'same-icon-every-case', 'flip-intent-to-emphasis',
+    // PR A: an emptied link navigation body must be killed by the parity lint.
+    'link-empty-body'];
   for (const op of KILLERS) {
     const ms = mutants.filter((m) => m.operator === op);
     assert(ms.length > 0, `operator ${op} produced no mutants`);
@@ -696,6 +698,8 @@ check('P44', 'mutation testing: baseline all-green; each killer operator kills i
   killerGate('strip-icon-all-but-one', 'a11y');
   killerGate('same-icon-every-case', 'a11y');
   killerGate('flip-intent-to-emphasis', 'a11y');
+  // PR A: the emptied-link-body mutant is killed by the parity nav-primitive lint.
+  killerGate('link-empty-body', 'parity');
 
   // Every survivor must be a KNOWN blind spot (logged finding). A new survivor
   // class is a fresh blind spot and must fail here so it cannot ship silently.
@@ -1430,6 +1434,30 @@ check('P80', 'F-22: a variant with NO intent key defaults to status (fail-closed
   const r = checkA11y(ir, {});
   assert(!r.ok, 'omitted intent must be treated as status, so a colour-only variant FAILS');
   assert(r.issues.some((i) => i.rule === 'status-color-only'), 'status-color-only expected under the default (status) intent');
+});
+
+check('P81', 'link (PR A): el:link opens its href on all 6 (href / Linking.openURL / Link / uriHandler.openUri); Compose reads LocalUriHandler in composable scope; parity fires on an emptied body', () => {
+  const LINK = resolve(ROOT, '.claude/artifacts/link-external/design-spec.yaml');
+  const ir = specToIrFromFile(LINK);
+  const results = {
+    react: generateReact(LINK, '_verify'),
+    vue: generateVue(LINK, '_verify'),
+    svelte: generateSvelte(LINK, '_verify'),
+    'react-native': generateReactNative(LINK, '_verify'),
+    swiftui: generateSwiftUI(LINK, '_verify'),
+    compose: generateCompose(LINK, '_verify'),
+  };
+  const NAV = { react: /href=/, vue: /href=/, svelte: /href=/, 'react-native': /Linking\.openURL\(/, swiftui: /Link\(/, compose: /uriHandler\.openUri\(/ };
+  for (const [a, re] of Object.entries(NAV)) assert(re.test(results[a].code), `${a} link must contain its navigation primitive ${re.source}`);
+  // Compose: LocalUriHandler must be hoisted to composable scope + imported (not read inside the lambda).
+  assert(/val uriHandler = LocalUriHandler\.current/.test(results.compose.code), 'compose must hoist `val uriHandler = LocalUriHandler.current`');
+  assert(/import androidx\.compose\.ui\.platform\.LocalUriHandler/.test(results.compose.code), 'compose must import LocalUriHandler');
+  // No residual inert stub.
+  assert(!/\/\* open/.test(results.compose.code), 'compose must not emit the old comment-only link stub');
+  // Parity passes on real output; emptying the compose nav body makes parity RED (ledger alone cannot catch this).
+  assert(checkParity(results, ir).ok, 'link parity must pass on real output');
+  const broken = { ...results, compose: { ...results.compose, code: results.compose.code.replace(/uriHandler\.openUri\(/g, 'run(') } };
+  assert(!checkParity(broken, ir).ok, 'parity must FAIL when the compose navigation body is emptied');
 });
 
 console.log('\n=== verify-patches ===');

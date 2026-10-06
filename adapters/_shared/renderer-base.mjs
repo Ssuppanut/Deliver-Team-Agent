@@ -47,6 +47,10 @@ export class RendererBase {
   declaredTraits(node) {
     const t = [];
     if (node.role) t.push(`role=${node.role}`);
+    // PR A: a link's href is a trait every adapter must express via its native
+    // URL-navigation primitive (<a href> / Linking.openURL / Link / openUri), or
+    // the ledger flags a silent drop (e.g. an empty clickable body).
+    if (node.kind === 'link' && node.href) t.push('link-href');
     const a = node.a11y || {};
     if (a.label) t.push('a11y.label');
     if (a.live) t.push(`a11y.live=${a.live}`);

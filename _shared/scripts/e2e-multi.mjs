@@ -111,6 +111,19 @@ export function checkParity(results, ir) {
       }
     }
   }
+  // PR A: an el:link must realize REAL URL navigation on every adapter. The
+  // ledger proves the `link-href` trait was declared + expressed, but it cannot
+  // see that the navigation body is empty (the old Compose `/* open */` stub).
+  // This per-adapter content lint closes that gap: each adapter's output must
+  // contain its navigation primitive whenever the IR has a link.
+  const hasLink = (() => { let f = false; const w = (n) => { if (n?.kind === 'link') f = true; (n?.children ?? []).forEach(w); }; w(ir.root); return f; })();
+  if (hasLink) {
+    const NAV = { react: /href=/, vue: /href=/, svelte: /href=/, 'react-native': /Linking\.openURL\(/, swiftui: /Link\(/, compose: /uriHandler\.openUri\(/ };
+    for (const [adapter, res] of Object.entries(results)) {
+      const re = NAV[adapter];
+      if (re && !re.test(res.code ?? '')) issues.push(`${adapter}: el:link has no navigation primitive (expected ${re.source}) — a link must open its href, not render an inert body`);
+    }
+  }
   return { ok: issues.length === 0, issues, expectedProps };
 }
 

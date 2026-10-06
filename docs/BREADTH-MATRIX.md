@@ -2223,3 +2223,41 @@ way to reach this gap is an explicit, reviewable mislabel — not an accident.
 `variant.intent` is metadata only — **no adapter output changed** (byte-identical
 `diff -rq`); no dependency added; F-6 / F-8 and the F-27 timezone code untouched;
 no gate, mutant, or the ledger weakened or whitelisted to reach green.
+
+---
+
+# PR A — link navigation (external URL)
+
+`el: link` means **external URL navigation**: the component opens an absolute
+URL (`href`, a literal or a plain prop-ref) in the platform browser. **Internal
+screen-to-screen navigation is NOT yet supported** — there are no routes,
+screens, or navigation state in the schema/IR/adapters; that is a separate,
+later work item.
+
+## Native mapping (all 6 open the URL for real)
+
+| adapter | primitive |
+|---|---|
+| react / vue / svelte | `<a href=…>` (browser navigation) |
+| react-native | `<Pressable accessibilityRole="link" onPress={() => Linking.openURL(href)}>` |
+| swiftui | `Link(label, destination: URL(string: href)!)` |
+| compose | `Text(…, Modifier.clickable { uriHandler.openUri(href) })`, where `uriHandler = LocalUriHandler.current` is hoisted to composable scope and `androidx.compose.ui.platform.LocalUriHandler` is imported |
+
+Previously the Compose adapter emitted the href only as a comment inside an empty
+`clickable { /* open … */ }` — an inert link. That is fixed: Compose now opens the
+URL via `LocalUriHandler.openUri` (the official Compose URI-opening API).
+
+## Gate coverage
+
+- **Ledger:** a link node declares a `link-href` trait; every adapter `express()`s
+  it with its real mechanism (0 unaccounted), so a *dropped* trait is caught by the
+  ledger.
+- **Parity (nav-primitive lint):** the ledger cannot see an *inert body*, so
+  `checkParity` additionally asserts each adapter's output contains its navigation
+  primitive whenever the IR has a link. An emptied navigation body is ledger-green
+  but parity-RED.
+- **Mutants:** `drop-trait` (ledger) drops `link-href` per adapter; `link-empty-body`
+  (parity) empties the navigation body per adapter. All killed; 0 survivors.
+
+Corpus: `.claude/artifacts/link-external` (literal href) and `link-external-ref`
+(prop-ref href) exercise the link path on all 6 adapters.
