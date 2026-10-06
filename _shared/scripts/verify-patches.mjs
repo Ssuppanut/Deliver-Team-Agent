@@ -20,6 +20,7 @@ import { checkSlop } from '../../.claude/skills/_guards/slop-guard/scripts/check
 import { checkTbd } from '../../.claude/skills/_meta/critique/scripts/check-tbd.mjs';
 import { checkRefusal } from '../../.claude/skills/_meta/orchestrator/scripts/refusal.mjs';
 import { loadSpec, validate } from './validate-schema.mjs';
+import { validateBriefs } from './validate-brief.mjs';
 import { route, loadContext } from '../../.ai/router/route.mjs';
 import { loadWorkflow, evaluateWorkflow, runScenarios, lintWorkflow } from './workflow-eval.mjs';
 import { skillRegistryDrift } from './skill-registry.mjs';
@@ -1493,6 +1494,26 @@ check('P82', 'layout axis (PR A2): an oriented container with children lowers to
   assert(checkParity(row, ir).ok, 'row axis parity must pass');
   const flipped = { ...row, swiftui: { ...row.swiftui, code: row.swiftui.code.replace(/HStack/g, 'VStack') } };
   assert(!checkParity(flipped, ir).ok, 'parity must FAIL when the swiftui axis is flipped to VStack');
+});
+
+check('P83', 'brief schema (PR B): every brief + template validates; a corrupted brief is caught for undeclared key / bad state pattern / unknown interaction / static-combined / scalar interaction', () => {
+  const BRIEF_SCHEMA = resolve(ROOT, '_shared/schemas/brief.schema.yaml');
+  // All real briefs + the template pass.
+  const rows = validateBriefs();
+  const bad = rows.filter((r) => !r.ok);
+  assert(bad.length === 0, `all briefs must validate; invalid: ${bad.map((b) => b.path).join(', ')}`);
+  assert(rows.length >= 20, `expected >=20 brief targets (19 briefs + template), got ${rows.length}`);
+  // A well-formed brief passes; each corruption fails.
+  const base = { component: 'Widget', purpose: 'p', platforms: ['react'], states: ['default'], interaction: ['variants'] };
+  const V = (doc) => validate(doc, BRIEF_SCHEMA).ok;
+  assert(V(base), 'a well-formed brief must validate');
+  assert(!V({ ...base, foo: 1 }), 'undeclared top-level key must be rejected (additionalProperties:false)');
+  assert(!V({ ...base, states: ['With-Image'] }), 'a state violating lower-kebab pattern must be rejected');
+  assert(!V({ ...base, interaction: ['expression'] }), 'an interaction value outside the enum must be rejected');
+  assert(!V({ ...base, interaction: ['static', 'variants'] }), 'static combined with another interaction value must be rejected');
+  assert(!V({ ...base, interaction: 'variants' }), 'a scalar interaction (not an array) must be rejected');
+  // Sanity: static alone is allowed.
+  assert(V({ ...base, interaction: ['static'] }), 'interaction [static] alone must validate');
 });
 
 console.log('\n=== verify-patches ===');

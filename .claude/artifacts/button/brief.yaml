@@ -4,7 +4,7 @@ audience: End users of the product surface.
 platforms: [react, vue, svelte, react-native, swiftui, compose]
 variants: [primary, secondary, ghost, destructive]
 states: [default]
-interaction: variants
+interaction: [variants]
 a11y:
   - "native button element / role=button with an accessible label from the text"
   - "leading icon is decorative (aria-hidden), the label carries the name"

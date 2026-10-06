@@ -4,7 +4,7 @@ audience: End users filling validated forms.
 platforms: [react, vue, svelte, react-native, swiftui, compose]
 variants: []
 states: [unchecked, checked, invalid]
-interaction: controlled
+interaction: [controlled, conditional]
 a11y:
   - "role=checkbox + controlled boolean"
   - "invalid state exposed (aria-invalid / documented native divergence)"
@@ -16,4 +16,3 @@ scope:
     - "conditional error text (F-3)"
   out:
     - "validation logic (caller owns it)"
-composes: "control-state(boolean) + role=checkbox + describedBy/invalid + conditional(F-3) + tokens"

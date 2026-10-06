@@ -4,7 +4,7 @@ audience: End users choosing a value in a range.
 platforms: [react, vue, svelte, react-native, swiftui, compose]
 variants: []
 states: [default]
-interaction: controlled
+interaction: [controlled]
 a11y:
   - "role=slider with the current value exposed (aria-valuenow / accessibilityValue)"
   - "visible label as the accessible name"
@@ -15,4 +15,3 @@ scope:
     - "slider role across all 6 adapters"
   out:
     - "value display formatting (F-11/F-12 — a distinct concern)"
-composes: "control-state(numeric-range) + role=slider a11y + tokens"

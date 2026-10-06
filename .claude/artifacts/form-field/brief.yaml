@@ -4,7 +4,7 @@ audience: End users filling forms.
 platforms: [react, vue, svelte, react-native, swiftui, compose]
 variants: []
 states: [default, error]
-interaction: controlled
+interaction: [controlled, conditional]
 a11y:
   - "visible label programmatically associated with the input (for/id)"
   - "error message linked via aria-describedby and aria-invalid when present"

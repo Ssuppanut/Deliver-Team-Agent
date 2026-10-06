@@ -4,7 +4,7 @@ audience: End users of the product surface.
 platforms: [react, vue, svelte, react-native, swiftui, compose]
 variants: []
 states: [default]
-interaction: static
+interaction: [static]
 a11y:
   - "role=separator so assistive tech announces a boundary"
 scope:

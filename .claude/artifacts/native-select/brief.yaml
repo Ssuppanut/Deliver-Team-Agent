@@ -4,7 +4,7 @@ audience: End users choosing one of N options.
 platforms: [react, vue, svelte, react-native, swiftui, compose]
 variants: []
 states: [default]
-interaction: controlled
+interaction: [controlled]
 a11y:
   - "native single-select control; the control matches the bound value (no per-option expression in the spec)"
   - "visible label as the accessible name"
@@ -15,4 +15,3 @@ scope:
   out:
     - "custom-overlay / combobox select (REFUSED — overlay boundary)"
     - "rich/nested option children (value+label only; logged if needed)"
-composes: "control-state(selected-value) + option-children + tokens"

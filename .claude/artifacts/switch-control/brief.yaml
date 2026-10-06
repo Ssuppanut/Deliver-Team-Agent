@@ -4,7 +4,7 @@ audience: End users toggling settings.
 platforms: [react, vue, svelte, react-native, swiftui, compose]
 variants: []
 states: [off, on]
-interaction: controlled
+interaction: [controlled]
 a11y:
   - "role=switch with the on/off state exposed"
   - "visible label as the accessible name"
@@ -14,4 +14,3 @@ scope:
     - "switch role across all 6 adapters"
   out:
     - "validation logic"
-composes: "control-state(boolean) + role=switch a11y + tokens"
