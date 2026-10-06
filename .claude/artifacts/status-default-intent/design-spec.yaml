@@ -1,0 +1,23 @@
+component: StatusDefaultIntent
+description: A status variant that omits intent (defaults to status) and distinguishes states by a per-state icon.
+category: display
+props:
+  - { name: level, type: enum, required: true, values: [ok, warn] }
+  - { name: label, type: string, required: true }
+tokens:
+  - color.success.fg
+  - color.danger.fg
+  - space.inset.sm
+root:
+  el: container
+  role: status
+  variant:
+    prop: level
+    cases:
+      ok:   { color: color.success.fg, icon: icon.success }
+      warn: { color: color.danger.fg,  icon: icon.error }
+  style:
+    padding: space.inset.sm
+  children:
+    - el: text
+      text: { kind: ref, value: label }
