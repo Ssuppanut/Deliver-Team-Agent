@@ -1,0 +1,15 @@
+component: StyleDimensions
+description: Container exercising margin, width and height style slots with existing dimension tokens.
+category: layout
+tokens:
+  - space.4
+  - space.8
+root:
+  el: container
+  style:
+    margin: space.4
+    width: space.8
+    height: space.8
+  children:
+    - el: text
+      text: { kind: literal, value: "box" }

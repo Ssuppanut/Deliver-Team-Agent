@@ -1,0 +1,12 @@
+component: PriceCeil
+description: A number formatted with ceil rounding to a fixed precision.
+category: display
+props:
+  - { name: amount, type: number, required: true }
+tokens:
+  - color.fg.default
+root:
+  el: text
+  text: { kind: format, value: amount, format: { style: decimal, rounding: ceil, precision: 0 } }
+  style:
+    color: color.fg.default

@@ -1,0 +1,13 @@
+component: SlotHost
+description: Container projecting one unnamed slot and one named slot.
+category: layout
+tokens:
+  - space.inset.sm
+root:
+  el: container
+  style:
+    padding: space.inset.sm
+  children:
+    - el: slot
+    - el: slot
+      label: { kind: literal, value: "header" }

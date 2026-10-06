@@ -2340,3 +2340,40 @@ containers set a `gap` token but have **no** `orientation`, so web emits `gap:
 scope); these containers have no orientation so they are untouched and remain
 byte-identical. A future layout pass should make a `gap` token imply a flex (or
 grid) context on web, or gate `gap` behind an explicit layout mode.
+
+---
+
+# PR C — coverage backfill (specs for previously-uncovered capabilities)
+
+Earlier audits found engine capabilities that **no corpus spec exercised**, so
+their adapter paths and gate behaviour were never run in CI. This adds the
+smallest specs that exercise them through e2e-multi on all 6 adapters. No
+adapter, gate, mutant, or ledger trait was changed (that is later work).
+
+## Now covered
+
+| capability | spec | notes |
+|---|---|---|
+| `el: slot` (unnamed + named) | `slot-host` | web react/vue/svelte + RN distinguish the named slot (`{header}` / `<slot name="header">`); **SwiftUI and Compose collapse both the unnamed and named slot to `content` / `content()`** — the slot name is not conveyed on native (behaviour, not a gate failure). |
+| variant with **no `intent`** (fail-closed default = `status`, F-22) | `status-default-intent` | distinguishes states by a per-state icon (`icon.success` / `icon.error`), so the defaulted-status F-22 rule passes; `role=status` expressed on web, diverged under the existing `a11y-role-status` waiver on the 3 natives. |
+| number format **`rounding: ceil`** | `price-ceil` | the third rounding mode (round/floor already in corpus); lowers through each adapter's native formatter; all gates pass. |
+| style slots **`margin` / `width` / `height`** | `style-dimensions` | **web (react/vue/svelte) and React Native lower them** (CSS / RN style passthrough — `margin: var(--space-4)`, `width/height: var(--space-8)` / `tokens.space.*`); **SwiftUI and Compose silently ignore them** (not in their modifier maps). No warning, no error — these style slots are not ledger traits, so the native silent-drop passes every gate. Uses existing tokens (`space.4`, `space.8`); no new tokens or schema fields. |
+
+## Attempted but excluded (decision 2 — a spec that fails any gate is not committed)
+
+- **`a11y.labelledBy`** — excluded. `labelledBy` **is a declared ledger trait**
+  (`renderer-base.mjs` `declaredTraits`) but **no adapter expresses or diverges
+  it**, so a spec using it produces a `ledger-unaccounted` **critical** on all 6
+  adapters (`component "…" (input) drops trait a11y.labelledBy — neither
+  expressed nor diverged`). This is a real engine defect: the trait is declared
+  but unhandled everywhere. Fixing it (express `aria-labelledby` on web, a
+  documented divergence on native) belongs to a later PR; the `labelledBy`
+  capability therefore remains uncovered for now and is recorded here.
+
+## Checks
+
+`diff -rq` of all pre-existing generated outputs main vs branch → identical (new
+specs only add outputs). `rm -rf out/ && node _shared/scripts/ci.mjs` → exit 0;
+`verify-patches` 83/83 (unchanged); mutation **704 / 704 / 0** (up from 671/671/0
+— the existing operators now also run on the 4 new specs; every new mutant
+killed, 0 survivors).
