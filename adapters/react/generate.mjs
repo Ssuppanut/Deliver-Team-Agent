@@ -37,9 +37,16 @@ class ReactRenderer extends RendererBase {
   }
 
   styleAttr(node) {
-    const base = node.style
-      ? Object.entries(node.style).map(([slot, token]) => `${STYLE_PROP[slot] ?? slot}: '${mapToken(token)}'`)
+    // F-4 orientation (PR A2): an explicit orientation on a container WITH
+    // children is a real layout axis — emit display:flex + flex-direction
+    // (keywords, not tokens). No orientation or no children → nothing added.
+    const flex = (node.orientation && node.children?.length)
+      ? [`display: 'flex'`, `flexDirection: '${node.orientation === 'horizontal' ? 'row' : 'column'}'`]
       : [];
+    const base = [
+      ...flex,
+      ...(node.style ? Object.entries(node.style).map(([slot, token]) => `${STYLE_PROP[slot] ?? slot}: '${mapToken(token)}'`) : []),
+    ];
     // F-7 size slot: a dimension TOKEN drives width/height (never a raw px).
     if (node.size) {
       base.push(`width: '${mapToken(node.size)}'`, `height: '${mapToken(node.size)}'`);
@@ -67,7 +74,8 @@ class ReactRenderer extends RendererBase {
   // F-4 orientation: WAI-ARIA semantic on the container (correct for separator).
   orientationAttr(node) {
     if (!node.orientation) return '';
-    this.express(`orientation=${node.orientation}`, { mechanism: `aria-orientation="${node.orientation}"` });
+    const axis = node.children?.length ? ` + display:flex/flex-direction:${node.orientation === 'horizontal' ? 'row' : 'column'}` : '';
+    this.express(`orientation=${node.orientation}`, { mechanism: `aria-orientation="${node.orientation}"${axis}` });
     return ` aria-orientation="${node.orientation}"`;
   }
 

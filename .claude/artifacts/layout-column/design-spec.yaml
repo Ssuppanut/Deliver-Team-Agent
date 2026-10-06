@@ -1,0 +1,24 @@
+component: LayoutColumn
+description: A vertical stack of two labels — exercises the orientation layout axis (vertical).
+category: layout
+props:
+  - { name: title, type: string, required: true }
+  - { name: subtitle, type: string, required: true }
+tokens:
+  - space.4
+  - color.fg.default
+  - color.fg.muted
+root:
+  el: container
+  orientation: vertical
+  style:
+    gap: space.4
+  children:
+    - el: text
+      text: { kind: ref, value: title }
+      style:
+        color: color.fg.default
+    - el: text
+      text: { kind: ref, value: subtitle }
+      style:
+        color: color.fg.muted

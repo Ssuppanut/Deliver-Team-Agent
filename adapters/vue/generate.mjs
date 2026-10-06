@@ -33,18 +33,25 @@ class VueRenderer extends RendererBase {
     const v = this.variantData(node);
     // F-7 size slot: a dimension TOKEN drives width/height (never a raw px).
     if (node.size) this.express('size', { mechanism: 'width/height (dimension token)' });
-    if (!node.style && !v && !node.size) return '';
+    // F-4 orientation (PR A2): an oriented container WITH children gets a real
+    // layout axis — display:flex + flex-direction (keywords, not tokens).
+    const oriented = node.orientation && node.children?.length;
+    const flexStr = oriented ? [`display: flex`, `flex-direction: ${node.orientation === 'horizontal' ? 'row' : 'column'}`] : [];
+    const flexObj = oriented ? [`'display': 'flex'`, `'flex-direction': '${node.orientation === 'horizontal' ? 'row' : 'column'}'`] : [];
+    if (!node.style && !v && !node.size && !oriented) return '';
     if (!v) {
       const entries = [
+        ...flexStr,
         ...(node.style ? Object.entries(node.style).map(([slot, token]) => `${STYLE_PROP[slot] ?? slot}: ${mapToken(token)}`) : []),
         ...(node.size ? [`width: ${mapToken(node.size)}`, `height: ${mapToken(node.size)}`] : []),
       ];
       return ` style="${entries.join('; ')}"`;
     }
     // Dynamic :style object binding so the variant resolves at runtime.
-    const base = node.style
-      ? Object.entries(node.style).map(([slot, token]) => `'${STYLE_PROP[slot] ?? slot}': '${mapToken(token)}'`)
-      : [];
+    const base = [
+      ...flexObj,
+      ...(node.style ? Object.entries(node.style).map(([slot, token]) => `'${STYLE_PROP[slot] ?? slot}': '${mapToken(token)}'`) : []),
+    ];
     const sizeObj = node.size ? [`'width': '${mapToken(node.size)}'`, `'height': '${mapToken(node.size)}'`] : [];
     const cases = Object.entries(v.styleCases)
       .map(([value, slots]) => {
@@ -58,7 +65,8 @@ class VueRenderer extends RendererBase {
   // F-4 orientation: WAI-ARIA semantic on the container (correct for separator).
   orientationAttr(node) {
     if (!node.orientation) return '';
-    this.express(`orientation=${node.orientation}`, { mechanism: `aria-orientation="${node.orientation}"` });
+    const axis = node.children?.length ? ` + display:flex/flex-direction:${node.orientation === 'horizontal' ? 'row' : 'column'}` : '';
+    this.express(`orientation=${node.orientation}`, { mechanism: `aria-orientation="${node.orientation}"${axis}` });
     return ` aria-orientation="${node.orientation}"`;
   }
   // F-5 boolean-attribute binding: a caller boolean flag ref -> bound `:disabled`.

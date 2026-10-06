@@ -673,7 +673,9 @@ check('P44', 'mutation testing: baseline all-green; each killer operator kills i
     // operators must now kill every mutant they inject (0 survivors).
     'state-by-color-only', 'strip-icon-all-but-one', 'same-icon-every-case', 'flip-intent-to-emphasis',
     // PR A: an emptied link navigation body must be killed by the parity lint.
-    'link-empty-body'];
+    'link-empty-body',
+    // PR A2: a dropped or flipped layout axis must be killed by the parity lint.
+    'layout-axis-drop-web', 'layout-axis-flip'];
   for (const op of KILLERS) {
     const ms = mutants.filter((m) => m.operator === op);
     assert(ms.length > 0, `operator ${op} produced no mutants`);
@@ -700,6 +702,9 @@ check('P44', 'mutation testing: baseline all-green; each killer operator kills i
   killerGate('flip-intent-to-emphasis', 'a11y');
   // PR A: the emptied-link-body mutant is killed by the parity nav-primitive lint.
   killerGate('link-empty-body', 'parity');
+  // PR A2: dropped / flipped layout-axis mutants are killed by the parity axis lint.
+  killerGate('layout-axis-drop-web', 'parity');
+  killerGate('layout-axis-flip', 'parity');
 
   // Every survivor must be a KNOWN blind spot (logged finding). A new survivor
   // class is a fresh blind spot and must fail here so it cannot ship silently.
@@ -1458,6 +1463,36 @@ check('P81', 'link (PR A): el:link opens its href on all 6 (href / Linking.openU
   assert(checkParity(results, ir).ok, 'link parity must pass on real output');
   const broken = { ...results, compose: { ...results.compose, code: results.compose.code.replace(/uriHandler\.openUri\(/g, 'run(') } };
   assert(!checkParity(broken, ir).ok, 'parity must FAIL when the compose navigation body is emptied');
+});
+
+check('P82', 'layout axis (PR A2): an oriented container with children lowers to a real axis on all 6 (web display:flex+flex-direction / RN flexDirection / HStack|VStack / Row|Column); divider (leaf) unchanged; parity fires on a flipped axis', () => {
+  const ROW = resolve(ROOT, '.claude/artifacts/layout-row/design-spec.yaml');
+  const COL = resolve(ROOT, '.claude/artifacts/layout-column/design-spec.yaml');
+  const gen = (p) => ({
+    react: generateReact(p, '_verify'), vue: generateVue(p, '_verify'), svelte: generateSvelte(p, '_verify'),
+    'react-native': generateReactNative(p, '_verify'), swiftui: generateSwiftUI(p, '_verify'), compose: generateCompose(p, '_verify'),
+  });
+  const row = gen(ROW), col = gen(COL);
+  // Horizontal row → row axis on every adapter.
+  assert(/display: 'flex', flexDirection: 'row'/.test(row.react.code), 'react row axis');
+  assert(/display: flex; flex-direction: row/.test(row.vue.code), 'vue row axis');
+  assert(/display: flex; flex-direction: row/.test(row.svelte.code), 'svelte row axis');
+  assert(/flexDirection: "row"/.test(row['react-native'].code), 'rn row axis');
+  assert(/HStack/.test(row.swiftui.code), 'swiftui HStack');
+  assert(/\bRow\(/.test(row.compose.code), 'compose Row');
+  // Vertical column → column axis on every adapter.
+  assert(/flexDirection: 'column'/.test(col.react.code) && /flex-direction: column/.test(col.vue.code) && /flex-direction: column/.test(col.svelte.code), 'web column axis');
+  assert(/flexDirection: "column"/.test(col['react-native'].code) && /VStack/.test(col.swiftui.code) && /\bColumn\(/.test(col.compose.code), 'native column axis');
+  // aria-orientation preserved (decision 2).
+  assert(/aria-orientation="horizontal"/.test(row.react.code), 'aria-orientation kept on web');
+  // divider (oriented leaf, no children) must NOT get a web layout axis (unchanged).
+  const DIV = resolve(ROOT, '.claude/artifacts/divider/design-spec.yaml');
+  assert(!/display: 'flex'/.test(generateReact(DIV, '_verify').code), 'divider (leaf) must not gain display:flex');
+  // Parity catches a flipped axis (ledger cannot).
+  const ir = specToIrFromFile(ROW);
+  assert(checkParity(row, ir).ok, 'row axis parity must pass');
+  const flipped = { ...row, swiftui: { ...row.swiftui, code: row.swiftui.code.replace(/HStack/g, 'VStack') } };
+  assert(!checkParity(flipped, ir).ok, 'parity must FAIL when the swiftui axis is flipped to VStack');
 });
 
 console.log('\n=== verify-patches ===');

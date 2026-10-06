@@ -131,10 +131,14 @@ definitions:
         type: string
         enum: [horizontal, vertical]
         description: >
-          Layout / semantic orientation of the element. On web a role-bearing
-          element also carries the semantic aria-orientation; every platform
-          conveys it as the container's main layout axis (row = horizontal,
-          column = vertical).
+          Layout / semantic orientation of a container (row = horizontal,
+          column = vertical). On web it lowers to a real layout axis —
+          display:flex + flex-direction — when the container has children, and a
+          role-bearing element also carries the semantic aria-orientation. Native
+          adapters always lower it to the platform layout axis: React Native
+          flexDirection, SwiftUI HStack/VStack, Compose Row/Column. A leaf
+          container (no children) conveys only the semantic on web and the
+          default stack on native.
       size:
         type: string
         description: >

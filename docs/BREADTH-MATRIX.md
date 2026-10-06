@@ -2289,3 +2289,54 @@ belong with the later navigation work item. Verified per adapter for a prop-ref
   Introducing a scheme allowlist/policy is deferred to the navigation work.
 
 No code or generated output changes for this item — documentation only.
+
+---
+
+# PR A2 — container orientation as a real layout axis (web)
+
+Previously `orientation` on web emitted **only** `aria-orientation` (a semantic
+attribute), so a horizontal container did **not** actually lay its children out
+in a row — the layout axis was native-only. The single trait id conflated two
+different effects (prior audit finding). This makes web honor the axis too.
+
+## Change
+
+react / vue / svelte now emit **`display:flex` + `flex-direction`** (row for
+`horizontal`, column for `vertical`) on a container that has an explicit
+`orientation` **and** has children. `aria-orientation` is unchanged (kept). A
+container with no orientation, or an oriented **leaf** (e.g. `divider`), is
+unchanged — output byte-identical. `display` and `flex-direction` are CSS
+keywords, not tokens, so token-guard still passes.
+
+Native lowering is unchanged: React Native `flexDirection`, SwiftUI
+`HStack`/`VStack`, Compose `Row`/`Column` (default when orientation is absent:
+RN column, SwiftUI VStack, Compose Column).
+
+## Gate coverage — layout-axis parity
+
+The ledger only records that an `orientation` mechanism was *declared*; it cannot
+verify the emitted axis **matches the direction**. So `checkParity` (the parity
+lint, same home as the link nav-primitive lint — it already runs in the gate
+battery and does per-adapter source lints) now asserts, for every oriented
+container **with children**, that each adapter's output contains its axis
+primitive for the correct direction (web `flex-direction: row|column`, RN
+`flexDirection`, SwiftUI `HStack|VStack`, Compose `Row|Column`). Mutants:
+`layout-axis-drop-web` (strip the web axis, 6) and `layout-axis-flip` (flip the
+direction on all 6, 12) — all killed by the parity lint; `drop-trait` also drops
+the `orientation` ledger trait per adapter (ledger kill). 0 survivors.
+
+Corpus: `.claude/artifacts/layout-row` (horizontal, 2 children) and
+`layout-column` (vertical, 2 children) exercise the axis on all 6 adapters.
+
+## Residual (logged, not fixed here) — CSS `gap` is inert without a flex/grid context
+
+CSS `gap` only applies under `display:flex` or `display:grid`. 14 existing
+containers set a `gap` token but have **no** `orientation`, so web emits `gap:
+…` with **no `display:flex`** — the gap currently produces **no spacing on web**
+(`stat-card`, `form-field`, `checkbox-error`, `empty-state`, `number-input`,
+`radio-group`, `radio-group-icons`, `slider-control`, `state-boolean`,
+`state-range`, `state-select`, `token-amount`, and examples `cond-list`,
+`cond-peritem`). This PR does **not** change gap handling (decision: out of
+scope); these containers have no orientation so they are untouched and remain
+byte-identical. A future layout pass should make a `gap` token imply a flex (or
+grid) context on web, or gate `gap` behind an explicit layout mode.
