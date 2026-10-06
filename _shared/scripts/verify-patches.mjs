@@ -1608,10 +1608,19 @@ check('P89', 'trait-registry gate R5-untracked-quality: empty reason, wrong/miss
   d2Only(d2Gate(U('reason: "r"', ok, null)), 'R5-untracked-quality', 'style-slot:gap', 'missing expiry');
   d2Only(d2Gate(U('reason: "r"', ok, 'expires: "not-a-date"')), 'R5-untracked-quality', 'style-slot:gap', 'invalid expiry');
   d2Only(d2Gate(U('reason: "r"', ok, 'expires: "2026-10-05"')), 'R5-untracked-quality', 'style-slot:gap', 'past expiry');
-  // Injected clock: every real untracked entry (expiring 2026-12-31) is past on 2027-01-01.
-  const late = d2Gate((t) => t, { now: new Date('2027-01-01T00:00:00Z') });
-  assert(!late.ok && d2Fired(late, 'R5-untracked-quality', 'style-slot:gap') && JSON.stringify(d2Rules(late)) === '["R5-untracked-quality"]', 'with the clock after 2026-12-31 the real untracked entries must fail R5');
-  assert(d2Gate((t) => t, { now: new Date('2026-12-30T00:00:00Z') }).ok, 'the day before expiry must still pass');
+  // Injected clock derived from the REAL registry's own expiry dates at run time (no
+  // hard-coded real-registry dates, so extending expiry can never break this pin).
+  const real = [...loadTraitRegistry().entries].filter(([, e]) => e.untracked).map(([id, e]) => [id, new Date(e.untracked.expires).getTime()]);
+  assert(real.length > 0 && real.every(([, t]) => !Number.isNaN(t)), 'the real registry must have untracked entries with parseable expiries');
+  const DAY = 86400000;
+  const latest = Math.max(...real.map(([, t]) => t));
+  const earliest = Math.min(...real.map(([, t]) => t));
+  // After the LATEST expiry (that date + 1 day, 12:00 UTC) every real untracked entry is past -> R5 only.
+  const late = d2Gate((t) => t, { now: new Date(latest + DAY + 12 * 3600000) });
+  assert(!late.ok && JSON.stringify(d2Rules(late)) === '["R5-untracked-quality"]', 'after the latest real expiry the gate must fail with R5 only');
+  assert(real.every(([id]) => d2Fired(late, 'R5-untracked-quality', id)), 'after the latest real expiry every real untracked entry must be named by R5');
+  // The day before the EARLIEST expiry nothing is past, so the real registry passes.
+  assert(d2Gate((t) => t, { now: new Date(earliest - DAY) }).ok, 'the day before the earliest real expiry the gate must pass');
 });
 
 check('P90', 'trait-registry gate R6-duplicate: the same construct twice FAILS naming it (even with two otherwise-valid entries)', () => {
@@ -1625,7 +1634,13 @@ check('P91', 'trait-registry gate wiring: ci.mjs runs it as a blocking step, out
   assert(real.ok, `the real registry must pass: ${real.issues.slice(0, 2).map((i) => i.msg).join('; ')}`);
   assert(formatReport(real) === formatReport(checkTraitRegistryGate({ now: D2_NOW })), 'two runs must produce byte-identical output');
   assert(real.advisory.unreferencedTraits.includes('a11y.labelledBy'), 'advisory must list the unreferenced a11y.labelledBy trait');
-  assert(real.advisory.expiringSoon.length > 0 && real.ok, 'expiring-soon is advisory only: entries listed, gate still passes');
+  // Advisory expiring-soon must never fail the gate. Proven on a temp fixture copy whose
+  // style-slot:gap entry expires 40 days after the pinned clock (inside the 90-day window),
+  // so this does not depend on any real-registry date.
+  const soon = new Date(D2_NOW.getTime() + 40 * 86400000).toISOString().slice(0, 10);
+  const near = d2Gate((t) => d2Line(t, 'style-slot:gap', () => `  "style-slot:gap": { untracked: { reason: "r", approver: "Ssuppanut (design-system a11y owner)", expires: "${soon}" } }`));
+  assert(near.advisory.expiringSoon.includes('style-slot:gap') && near.advisory.expiringSoon.length > 0, 'an entry expiring inside the 90-day window must be listed as expiring-soon');
+  assert(near.ok && near.issues.length === 0, 'expiring-soon is advisory only: the gate must still pass');
 });
 
 console.log('\n=== verify-patches ===');
