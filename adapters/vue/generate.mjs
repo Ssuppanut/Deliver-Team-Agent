@@ -115,6 +115,7 @@ class VueRenderer extends RendererBase {
   }
 
   visitLink(node, children) {
+    if (node.href) this.express('link-href', { mechanism: '<a href> (browser navigation)' });
     return `<a${this.bind('href', node.href)}${this.styleAttr(node)}>${node.label ? this.interp(node.label) : children}</a>`;
   }
   // Control-state primitive — controlled (caller-held) two-way binding. Pure

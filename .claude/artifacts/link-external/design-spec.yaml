@@ -1,0 +1,13 @@
+component: ExternalLink
+description: A text link that opens a fixed external URL in the platform browser.
+category: navigation
+props:
+  - { name: label, type: string, required: true }
+tokens:
+  - color.accent.default
+root:
+  el: link
+  href: { kind: literal, value: "https://example.com" }
+  label: { kind: ref, value: label }
+  style:
+    color: color.accent.default

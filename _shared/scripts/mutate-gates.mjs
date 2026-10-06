@@ -464,6 +464,38 @@ const OPERATORS = [
     },
   },
 
+  // O11 (PR A) — empty the link navigation body in ONE adapter WITHOUT touching
+  // the ledger (the trait stays expressed). This isolates the parity nav-primitive
+  // lint: the ledger alone cannot see an inert body (the old Compose `/* open */`
+  // stub), so only the parity gate can kill this. One mutant per adapter per link
+  // feature.
+  {
+    id: 'link-empty-body',
+    klass: 'parity',
+    expect: 'parity (link nav-primitive lint) — an emptied navigation body is ledger-green but parity RED',
+    sites(bundle) {
+      const hasLink = (() => { let f = false; const w = (n) => { if (n?.kind === 'link') f = true; (n?.children ?? []).forEach(w); }; w(bundle.ir.root); return f; })();
+      if (!hasLink) return [];
+      const STRIP = {
+        react: (s) => s.replace(/href=/g, 'x='),
+        vue: (s) => s.replace(/href=/g, 'x='),
+        svelte: (s) => s.replace(/href=/g, 'x='),
+        'react-native': (s) => s.replace(/Linking\.openURL\(/g, 'noop('),
+        swiftui: (s) => s.replace(/Link\(/g, 'Text('),
+        compose: (s) => s.replace(/uriHandler\.openUri\(/g, 'run('),
+      };
+      const out = [];
+      for (const adapter of Object.keys(bundle.results)) {
+        if (!STRIP[adapter]) continue;
+        out.push({
+          key: `${bundle.feature}:${adapter}`,
+          apply(c) { if (c.results[adapter]?.code) c.results[adapter].code = STRIP[adapter](c.results[adapter].code); },
+        });
+      }
+      return out;
+    },
+  },
+
   // O10 (F-22) — flip a status variant's `intent` to `emphasis`. Its enum values
   // are status vocabulary, so a11y-guard's emphasis backstop fires → a11y RED.
   // This proves the backstop can't be used to silence a real status variant.

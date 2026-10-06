@@ -190,8 +190,11 @@ class SwiftUIRenderer extends RendererBase {
   }
 
   visitLink(node) {
+    if (node.href) this.express('link-href', { mechanism: 'Link(destination: URL)' });
     const url = node.href.kind === 'literal' ? JSON.stringify(String(node.href.value)) : safe(node.href.value);
-    const label = node.label ? JSON.stringify(String(node.label.value)) : '""';
+    // A ref label must bind the variable, not emit its own name as a literal
+    // (mirrors the url handling above; parity enforces this).
+    const label = node.label ? (node.label.kind === 'literal' ? JSON.stringify(String(node.label.value)) : safe(node.label.value)) : '""';
     return `Link(${label}, destination: URL(string: ${url})!)${this.modifiers(node)}`;
   }
   plain(vr, fallback = '""') {

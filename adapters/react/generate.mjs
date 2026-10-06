@@ -132,6 +132,7 @@ class ReactRenderer extends RendererBase {
   }
 
   visitLink(node, children) {
+    if (node.href) this.express('link-href', { mechanism: '<a href> (browser navigation)' });
     const label = node.label ? this.interp(node.label) : children;
     return `<a href=${this.attr(node.href)}${this.styleAttr(node)}>${label}</a>`;
   }
