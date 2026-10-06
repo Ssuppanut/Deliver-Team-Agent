@@ -1,0 +1,18 @@
+component: EventDateTimeShort
+description: F-26 date/time — static en-GB locale, short date + medium time preset via native date formatter.
+category: display
+props:
+  - { name: when, type: date, required: true }
+tokens:
+  - color.fg.default
+root:
+  el: text
+  text:
+    kind: datetime
+    value: when
+    dateFormat:
+      dateStyle: short
+      timeStyle: medium
+      locale: en-GB
+  style:
+    color: color.fg.default
