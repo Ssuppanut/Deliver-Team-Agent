@@ -1,0 +1,29 @@
+# Corpus coverage allowlist (D3).
+#
+# Every derived schema construct (see _shared/scripts/schema-constructs.mjs) must be
+# exercised by at least one corpus spec, or be listed here. check-corpus-coverage.mjs
+# enforces it as a blocking CI step. An entry is a dated, approved exemption, not a
+# permanent one. Format:
+#
+#   allowlist:
+#     "<construct-id>": { reason: "<specific: why no spec covers it and what resolves it>", approver: "Ssuppanut (design-system a11y owner)", expires: "YYYY-MM-DD" }
+#
+# Rules: the id must be a derived construct (C2); the construct must NOT already be
+# exercised by a corpus spec, otherwise delete the entry (C2); reason non-empty,
+# approver exactly as above, expiry a valid future date (C3; an entry is already past
+# on its own expiry date, same semantics as the trait registry and a11y-waivers.json);
+# no construct listed twice (C4). To resolve an entry: add a corpus spec that uses the
+# construct and delete the entry in the same change.
+version: 1
+allowlist:
+  "dateTimeFormat.value:dateStyle=short": { reason: "No corpus spec sets dateStyle: short. The corpus covers dateStyle medium (event-datetime, event-tz-static) and long (event-datetime-locale, event-tz-ref), so the short preset is never generated or parity-checked on any adapter. Backfill: one datetime spec using dateStyle: short.", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" }
+  "dateTimeFormat.value:timeStyle=medium": { reason: "No corpus spec sets timeStyle: medium. Only timeStyle short is used (event-datetime, event-tz-static), so the medium time preset is never generated or parity-checked. Backfill: one datetime spec using timeStyle: medium.", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" }
+  "dateTimeFormat.value:timeStyle=long": { reason: "No corpus spec sets timeStyle: long. Only timeStyle short is used (event-datetime, event-tz-static), so the long time preset is never generated or parity-checked. Backfill: one datetime spec using timeStyle: long.", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" }
+  "a11y.field:labelledBy": { reason: "Declared ledger trait that no adapter expresses or diverges (PR C finding): a spec using a11y.labelledBy fails ledger-unaccounted (critical) on all 6 adapters, so a covering spec cannot pass the gates. Resolved by the D4 decision (implement, diverge or remove). Delete this entry when a corpus spec uses it.", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" }
+  "a11y.value:live=off": { reason: "No corpus spec sets a11y.live: off. Only polite is used (alert, checkbox-error, form-field and others), so the off value is never generated on any adapter. Backfill: one spec using a11y.live: off.", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" }
+  "a11y.value:live=assertive": { reason: "No corpus spec sets a11y.live: assertive. Only polite is used, but every adapter has an assertive branch (RN accessibilityLiveRegion, Compose LiveRegionMode.Assertive, web aria-live) that no spec generates. Backfill: one spec using a11y.live: assertive.", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" }
+  "input.value:inputType=email": { reason: "No corpus spec sets inputType: email. Web emits type=\"email\" from inputType, but React Native, SwiftUI and Compose only consult inputType === \"number\" and ignore email (no keyboard type). Native lowering of inputType is pending D7; backfill after D7 so the spec asserts the native behaviour.", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" }
+  "input.value:inputType=password": { reason: "No corpus spec sets inputType: password. Web emits type=\"password\" (masked), but React Native, SwiftUI and Compose ignore inputType other than number, so the field is plain text on all natives. Pending the D7 decision on inputType on native; backfill after D7.", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" }
+  "input.value:inputType=checkbox": { reason: "No corpus spec sets inputType: checkbox. Checkbox controls in the corpus use input.state.kind: boolean (no inputType), and the native adapters ignore inputType other than number. Pending the D7 decision on inputType on native; backfill after D7.", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" }
+  "style-slot:font": { reason: "No corpus spec sets the font style slot. It is recognized only by the react, vue and svelte STYLE_PROP tables (font-family); React Native, SwiftUI and Compose do not lower it. It needs a native-lowering decision (D6 area) before a covering spec is meaningful.", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" }
+  "style-slot:fontSize": { reason: "No corpus spec sets the fontSize style slot. It is recognized by react, vue, svelte and react-native STYLE_PROP; SwiftUI and Compose drop it silently (not in MODIFIER or the Compose modifier chain). It needs a native-lowering decision (D6 area) before a covering spec is meaningful.", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" }

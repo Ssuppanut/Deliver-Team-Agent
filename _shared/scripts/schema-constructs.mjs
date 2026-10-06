@@ -156,6 +156,53 @@ export function deriveConstructs() {
   return [...deriveSchemaConstructs(), ...slots.map((s) => `style-slot:${s}`)];
 }
 
+const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+/**
+ * Which constructs a spec document EXERCISES, found by walking the spec against
+ * the SAME schema + OBJECTS walk set that deriveConstructs() uses (no hand-kept
+ * list): for every instance of a walked object, each present property key is an
+ * `<object>.field:<key>`, each present enum-valued property is an
+ * `<object>.value:<key>=<value>` (or `el-kind:<kind>` for `el`), and every key of
+ * an element's `style` map or of a variant-case map is a `style-slot:<slot>`.
+ * Used by the D3 corpus coverage gate (check-corpus-coverage.mjs).
+ * @param {object} specDoc  a parsed design-spec document (has `root`)
+ * @returns {Set<string>}
+ */
+export function exercisedConstructs(specDoc, schemaPath = SCHEMA_PATH) {
+  const schema = parse(readFileSync(schemaPath, 'utf8'));
+  const names = new Map(OBJECTS.map((o) => [o.path.join('.'), o.name]));
+  const out = new Set();
+  const refPath = (ref) => ref.replace(/^#\//, '').split('/');
+
+  const visit = (sch, path, data) => {
+    if (!isObj(data)) return;
+    const name = names.get(path.join('.'));
+    if (name) {
+      for (const [k, v] of Object.entries(data)) {
+        const prop = sch.properties?.[k];
+        if (!prop || EXCLUDED_KEYS.has(k)) continue;
+        out.add(`${name}.field:${k}`);
+        if (Array.isArray(prop.enum) && prop.enum.includes(v)) out.add(name === 'element' && k === 'el' ? `el-kind:${v}` : `${name}.value:${k}=${v}`);
+      }
+      if (name === 'element') {
+        for (const k of Object.keys(data.style ?? {})) out.add(`style-slot:${k}`);
+        for (const c of Object.values(data.variant?.cases ?? {})) for (const k of Object.keys(c ?? {})) out.add(`style-slot:${k}`);
+      }
+    }
+    for (const [k, prop] of Object.entries(sch.properties ?? {})) if (k in data) descend(prop, [...path, 'properties', k], data[k]);
+  };
+  const descend = (prop, path, value) => {
+    let sch = prop;
+    let p = path;
+    if (prop.$ref) { p = refPath(prop.$ref); sch = at(schema, p); }
+    if (sch.type === 'array' && sch.items) { for (const item of Array.isArray(value) ? value : []) descend(sch.items, [...p, 'items'], item); return; }
+    if (sch.properties) visit(sch, p, value);
+  };
+  descend({ $ref: '#/definitions/element' }, ['definitions', 'element'], specDoc?.root);
+  return out;
+}
+
 // ── trait enumeration ────────────────────────────────────────────────────────
 
 /** Normalize a trait id: `${...}` -> `*`, and everything after the first `=` -> `*`. */
@@ -197,6 +244,107 @@ export function handledTraitIdsByAdapter() {
     const ids = [...firstLiteralArgs(src, '(?:this\\.)?express'), ...firstLiteralArgs(src, '(?:this\\.)?diverge')];
     by[a] = [...new Set(ids.map(normalizeTraitId))].sort();
   }
+  return by;
+}
+
+/**
+ * Code-only scan: the first string-literal argument of every `express(` /
+ * `diverge(` CALL that is real code. Text inside comments, string literals and
+ * template literals is skipped, so a commented-out call or a string-only mention
+ * never counts as handling a trait. A small JS tokenizer (comments, '/" strings,
+ * template literals with nested ${}, and regex literals by the usual
+ * previous-token heuristic). Template interpolations in the argument become `*`.
+ * Throws if the source ends inside a string/template/comment (a scan this tool
+ * cannot trust must not silently under-report).
+ * @returns {string[]} raw first-argument literals (normalize with normalizeTraitId)
+ */
+export function codeTraitCalls(src) {
+  const calls = [];
+  const n = src.length;
+  let i = 0;
+  let prev = ''; // last significant code char (for the regex-literal heuristic)
+  let prevWord = '';
+  const REGEX_AFTER = new Set(['', '(', ',', '=', ':', '[', '!', '&', '|', '?', '{', '}', ';', '+', '-', '*', '%', '<', '>', '~', '^']);
+  const fail = (what) => { throw new Error(`codeTraitCalls: unterminated ${what} (scan cannot be trusted)`); };
+  // Read a string/template literal starting at src[i] (the opening quote); returns { end, text } where text is the inner
+  // content with every ${...} replaced by `*`.
+  const readLiteral = (start) => {
+    const q = src[start];
+    let j = start + 1;
+    let text = '';
+    while (j < n) {
+      const c = src[j];
+      if (c === '\\') { text += src.slice(j, j + 2); j += 2; continue; }
+      if (c === q) return { end: j + 1, text };
+      if (q === '`' && c === '$' && src[j + 1] === '{') {
+        let depth = 1;
+        j += 2;
+        while (j < n && depth > 0) {
+          const d = src[j];
+          if (d === '{') depth++;
+          else if (d === '}') depth--;
+          else if (d === '"' || d === "'" || d === '`') { j = readLiteral(j).end; continue; }
+          j++;
+        }
+        if (depth > 0) fail('template interpolation');
+        text += '*';
+        continue;
+      }
+      if (q !== '`' && c === '\n') fail('string');
+      text += c;
+      j++;
+    }
+    return fail(q === '`' ? 'template literal' : 'string');
+  };
+  while (i < n) {
+    const c = src[i];
+    if (c === '/' && src[i + 1] === '/') { while (i < n && src[i] !== '\n') i++; continue; }
+    if (c === '/' && src[i + 1] === '*') { const e = src.indexOf('*/', i + 2); if (e === -1) fail('block comment'); i = e + 2; continue; }
+    if (c === '"' || c === "'" || c === '`') { i = readLiteral(i).end; prev = 'a'; prevWord = ''; continue; }
+    if (c === '/' && (REGEX_AFTER.has(prev) || prevWord === 'return' || prevWord === 'typeof')) {
+      let j = i + 1;
+      let inClass = false;
+      while (j < n) {
+        const d = src[j];
+        if (d === '\\') { j += 2; continue; }
+        if (d === '\n') fail('regex literal');
+        if (d === '[') inClass = true;
+        else if (d === ']') inClass = false;
+        else if (d === '/' && !inClass) break;
+        j++;
+      }
+      if (j >= n) fail('regex literal');
+      i = j + 1;
+      while (/[a-z]/.test(src[i] ?? '')) i++;
+      prev = 'a'; prevWord = '';
+      continue;
+    }
+    if (/[A-Za-z_$]/.test(c)) {
+      let j = i;
+      while (j < n && /[\w$]/.test(src[j])) j++;
+      const word = src.slice(i, j);
+      if (word === 'express' || word === 'diverge') {
+        let k = j;
+        while (/\s/.test(src[k] ?? '')) k++;
+        if (src[k] === '(') {
+          k++;
+          while (/\s/.test(src[k] ?? '')) k++;
+          if (src[k] === '"' || src[k] === "'" || src[k] === '`') calls.push(readLiteral(k).text);
+        }
+      }
+      prev = 'a'; prevWord = word; i = j;
+      continue;
+    }
+    if (!/\s/.test(c)) { prev = c; prevWord = ''; }
+    i++;
+  }
+  return calls;
+}
+
+/** Handled traits per adapter from the CODE-ONLY scan (see codeTraitCalls). */
+export function codeHandledTraitIdsByAdapter(read = (a) => readFileSync(resolve(ROOT, `adapters/${a}/generate.mjs`), 'utf8')) {
+  const by = {};
+  for (const a of ADAPTERS) by[a] = [...new Set(codeTraitCalls(read(a)).map(normalizeTraitId))].sort();
   return by;
 }
 

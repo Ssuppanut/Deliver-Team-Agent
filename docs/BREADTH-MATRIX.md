@@ -2436,3 +2436,66 @@ firing pins, deliberately not a CLI option.
 Firing pins: `verify-patches` P85–P90 (one per rule R1–R6, each on a temporary
 fixture copy of the registry with a pinned clock) and P91 (CI wiring,
 determinism, advisories never fail).
+
+---
+
+# D3 — corpus coverage gate + "declared and handled" (R7)
+
+D2 made the trait registry blocking. D3 adds two more structural guarantees.
+
+## Corpus coverage gate
+
+`_shared/scripts/check-corpus-coverage.mjs` runs as a blocking step in `ci.mjs`
+(and stand-alone, exit non-zero on FAIL). Every derived schema construct
+(`node _shared/scripts/schema-constructs.mjs`, same ids as the trait registry)
+must be **exercised by at least one corpus spec**, or carry a dated, approved
+entry in `_shared/policy/corpus-coverage-allowlist.yaml`, so a new schema
+capability cannot ship untested.
+
+What a spec exercises is found by walking it against the same schema walk set
+that derives the constructs (`exercisedConstructs()`); there is no hand-kept
+list. The corpus is the same set `ci.mjs` runs (schema examples plus every
+`.claude/artifacts/<name>/design-spec.yaml`). Specs in a refused category
+(`overlay`, `data-table`: the `modal` and `data-grid` refusal fixtures) never
+reach an adapter, so they prove no lowering and do not count as coverage.
+
+| rule | catches |
+|---|---|
+| `C0-load` | the allowlist or a corpus spec is missing / unparseable, or the corpus is empty |
+| `C1-uncovered` | a derived construct is exercised by no corpus spec and has no allowlist entry |
+| `C2-stale-allowlist` | an entry names no derived construct, or names one that **is now exercised** (delete the entry) |
+| `C3-allowlist-quality` | empty reason; approver not exactly `Ssuppanut (design-system a11y owner)`; expiry missing, invalid or past |
+| `C4-duplicate` | the same construct listed twice |
+
+Approver and expiry semantics are the D2 gate's (`APPROVER`, `expiryState`,
+mirroring `loadWaivers`): an entry is already past on its own expiry date, with
+no knob to change that. There is no bypass flag; the clock is a function
+parameter only.
+
+- **Adding a construct** (a schema field, enum value, or a style slot first used
+  by a corpus spec): either add a corpus spec that uses it, or add an allowlist
+  entry. A new construct also needs a trait-registry entry (D2).
+- **Adding an allowlist entry:** `"<construct-id>": { reason: "<specific>", approver: "Ssuppanut (design-system a11y owner)", expires: "YYYY-MM-DD" }`.
+  The reason must say why no spec covers it and what resolves it.
+- **Removing an entry:** when a corpus spec starts exercising the construct,
+  delete its entry in the same change (the gate fails with `C2` until you do).
+  An empty `allowlist:` is the goal state and is valid.
+
+## R7 and the advisory (trait registry gate)
+
+- **R7 `R7-unhandled-trait` (FAIL):** every trait named by a mapped registry
+  entry must be handled by all 6 adapters: each adapter's `generate.mjs` must
+  contain a real `express('<trait>')` or `diverge('<trait>')` call. The scan is
+  code-only (`codeTraitCalls`): comments, string literals and template text are
+  skipped, so a commented-out call or a string-only mention does not count. The
+  message names the adapters that miss it. A trait that is not declared at all
+  stays `R4` only (it is not double-reported as R7).
+- **Advisory (printed, never fails):** every declared ledger trait that is not
+  handled by all 6 adapters, listed per adapter. Today this is
+  `a11y.labelledBy` (missing in all 6), a decision for D4.
+- P84 no longer hard-codes the construct count; it is derived from the schema
+  walk plus the style-slot union.
+
+Firing pins: `verify-patches` P92 (C1), P93 (C2, both branches), P94 (C3), P95
+(C4), P96 (C0), P97 (R7), P98 (advisory never fails), P99 (CI wiring and
+determinism).
