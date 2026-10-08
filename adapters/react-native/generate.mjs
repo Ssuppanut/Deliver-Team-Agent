@@ -81,7 +81,18 @@ class RNRenderer extends RendererBase {
         this.warnings.push(`a11y: role "${node.role}" has no React Native accessibilityRole; conveyed via live region / label where present (documented divergence)`);
       }
     }
-    if (node.a11y?.live) { out.push(` accessibilityLiveRegion="${node.a11y.live === 'assertive' ? 'assertive' : 'polite'}"`); this.express(`a11y.live=${node.a11y.live}`, { mechanism: 'accessibilityLiveRegion' }); }
+    // F-28: the live value is lowered 1:1 (off -> "none"). accessibilityLiveRegion is
+    // tagged @platform android with no iOS consumer, so polite/assertive are emitted
+    // but inert on iOS: a value-level divergence under a waiver (the prop stays emitted).
+    if (node.a11y?.live) {
+      const live = node.a11y.live;
+      out.push(` accessibilityLiveRegion="${live === 'off' ? 'none' : live}"`);
+      if (live === 'off') this.express('a11y.live=off', { mechanism: 'accessibilityLiveRegion="none"' });
+      else {
+        this.diverge(`a11y.live=${live}`, { reason: 'accessibilityLiveRegion is Android-only (no iOS consumer); inert on iOS', fallback: 'accessibilityLiveRegion emitted, effective on Android only', waiver: `a11y-live-${live}-react-native` });
+        this.warnings.push(`a11y: live "${live}" is accessibilityLiveRegion, effective on Android only; inert on iOS (documented divergence)`);
+      }
+    }
     // A live status region is a busy/updating region (e.g. Spinner).
     if (node.role === 'status' && node.a11y?.live) out.push(` accessibilityState={{ busy: true }}`);
     return out.join('');

@@ -131,8 +131,18 @@ class SwiftUIRenderer extends RendererBase {
       this.diverge(`role=${node.role}`, { reason: `no direct SwiftUI trait for role "${node.role}"`, fallback: 'label / live updates convey the role', waiver: `a11y-role-${node.role}` });
       this.warnings.push(`a11y: role "${node.role}" has no direct SwiftUI trait; conveyed via label / updates where present (documented divergence)`);
     }
-    // A live region — .updatesFrequently is SwiftUI's closest "re-announce on change" signal.
-    if (node.a11y?.live) { out.push(`\n  .accessibilityAddTraits(.updatesFrequently)`); this.express(`a11y.live=${node.a11y.live}`, { mechanism: '.accessibilityAddTraits(.updatesFrequently)' }); }
+    // F-28: SwiftUI has no declarative live region. .updatesFrequently only tells the system the
+    // element may be polled (it does not announce changes), so NOTHING is emitted for any value.
+    // off is correctly expressed by omission; polite/assertive are waived divergences (a spoken
+    // announcement needs the imperative AccessibilityNotification.Announcement, future work).
+    if (node.a11y?.live) {
+      const live = node.a11y.live;
+      if (live === 'off') this.express('a11y.live=off', { mechanism: 'omitted (no live region = off)' });
+      else {
+        this.diverge(`a11y.live=${live}`, { reason: 'SwiftUI has no declarative live region; .updatesFrequently does not announce changes', fallback: 'nothing emitted', waiver: `a11y-live-${live}-swiftui` });
+        this.warnings.push(`a11y: live "${live}" has no declarative SwiftUI live region; nothing emitted (documented divergence)`);
+      }
+    }
     return out.join('');
   }
   variantIcon(node) {

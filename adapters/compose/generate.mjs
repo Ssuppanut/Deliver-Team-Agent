@@ -147,7 +147,12 @@ class ComposeRenderer extends RendererBase {
         this.warnings.push(`a11y: role "${node.role}" has no Compose Role; conveyed via liveRegion / contentDescription where present (documented divergence)`);
       }
     }
-    if (node.a11y?.live) { props.push(`liveRegion = LiveRegionMode.${node.a11y.live === 'assertive' ? 'Assertive' : 'Polite'}`); this.express(`a11y.live=${node.a11y.live}`, { mechanism: 'liveRegion' }); }
+    // F-28: LiveRegionMode has only Polite and Assertive; "off" is expressed by omitting liveRegion.
+    if (node.a11y?.live) {
+      const live = node.a11y.live;
+      if (live === 'off') this.express('a11y.live=off', { mechanism: 'liveRegion omitted (LiveRegionMode has no off; absent = none)' });
+      else { props.push(`liveRegion = LiveRegionMode.${live === 'assertive' ? 'Assertive' : 'Polite'}`); this.express(`a11y.live=${live}`, { mechanism: 'liveRegion' }); }
+    }
     if (!props.length) return '';
     return `.semantics { ${props.join('; ')} }`;
   }

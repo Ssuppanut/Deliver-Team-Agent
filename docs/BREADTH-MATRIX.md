@@ -2499,3 +2499,63 @@ parameter only.
 Firing pins: `verify-patches` P92 (C1), P93 (C2, both branches), P94 (C3), P95
 (C4), P96 (C0), P97 (R7), P98 (advisory never fails), P99 (CI wiring and
 determinism).
+
+---
+
+# F-28 - live region value fidelity
+
+Source: `docs/audits/F-28-value-lowering-audit.md`. Before this change the Lowering Ledger counted
+every `a11y.live` value as expressed on all 6 adapters and no gate looked at the emitted value, so
+`live: off` passed every gate while React Native emitted `polite`, Compose emitted `Polite` and
+SwiftUI emitted `.updatesFrequently` (the same trait as every other value).
+
+## Per-adapter live behaviour
+
+| Adapter | off | polite | assertive | Evidence |
+|---|---|---|---|---|
+| react, vue, svelte | `aria-live="off"` | `aria-live="polite"` | `aria-live="assertive"` | MDN aria-live (DOC) |
+| react-native | `accessibilityLiveRegion="none"` | `accessibilityLiveRegion="polite"` | `accessibilityLiveRegion="assertive"` | react-native 0.87.1 source (SOURCE) |
+| compose | `liveRegion` omitted | `liveRegion = LiveRegionMode.Polite` | `liveRegion = LiveRegionMode.Assertive` | androidx compose-ui source: `LiveRegionMode` has only Polite and Assertive (SOURCE) |
+| swiftui | nothing emitted | nothing emitted | nothing emitted | `updatesFrequently` only marks the element as pollable; device-confirmed it does not announce (DEVICE) |
+
+- **React Native:** `accessibilityLiveRegion` is tagged `@platform android` and has no iOS consumer
+  (source-verified, and device-confirmed silent on a real iPhone with VoiceOver). The prop is still
+  emitted for polite and assertive and is effective on Android only. `off` is `none`.
+- **Android runtime behaviour (TalkBack) was NOT device-tested.** The React Native and Compose
+  behaviour on Android is source-verified only.
+- **SwiftUI:** there is no declarative live region API. Nothing is emitted for any value. `off` is
+  correctly expressed by omission; `polite` and `assertive` are divergences.
+- **Imperative announcements are future work** (React Native `AccessibilityInfo.announceForAccessibility`,
+  SwiftUI `AccessibilityNotification.Announcement`) and are not part of this change.
+- The older Batch 1.1 notes above (F-2) describe the earlier `.updatesFrequently` and always-`polite`
+  lowering; this section supersedes them.
+
+## Waivers (4, value-level divergences)
+
+Ledger trait ids carry the value (`a11y.live=polite`), so a divergence is recorded per value. Each
+waiver is approved by `Ssuppanut (design-system a11y owner)`, expires 2027-03-31 (not inclusive, the
+same semantics as every other waiver) and cites the audit:
+
+| Waiver id | Adapter | Value | Fallback |
+|---|---|---|---|
+| `a11y-live-polite-swiftui` | swiftui | polite | nothing emitted |
+| `a11y-live-assertive-swiftui` | swiftui | assertive | nothing emitted |
+| `a11y-live-polite-react-native` | react-native | polite | prop emitted, effective on Android only |
+| `a11y-live-assertive-react-native` | react-native | assertive | prop emitted, effective on Android only |
+
+## Gates
+
+- **`check-live-lowering.mjs` (new, blocking step 1g in `ci.mjs`):** for every corpus spec that uses
+  `a11y.live`, for every adapter, compares the emitted live fragment(s) with the row in
+  `_shared/policy/live-lowering-expectations.yaml` (6 adapters x 3 values, each row with a doc
+  reference and an evidence label SOURCE, DEVICE or DOC). Rules: `L0-load`, `L1-mismatch` (including
+  anything emitted where `NONE` is expected), `L2-uncovered` (an adapter x value without a row),
+  `L3-row-quality`. The rows are written from platform facts, not copied from adapter output.
+- **a11y-guard output tier:** a missing live trait is accepted only for `off` on SwiftUI and Compose
+  (omission is correct there) or when the adapter's ledger holds a divergence for exactly that value
+  that cites a waiver id. A free-text warning no longer justifies a missing live trait, and the
+  regexes are unchanged apart from SwiftUI, which has no live trait to look for.
+- The `live-region-off` corpus spec is restored and the `a11y.value:live=off` allowlist entry is gone.
+
+Pins: `verify-patches` P101 to P106 (one per adapter, 3 values each), P107 (L0), P108 (L2),
+P109 (L3), P110 (a11y-guard), P111 (wiring and waivers), P112 (determinism).

@@ -3,12 +3,12 @@
   "note": "Each entry authorizes the Lowering Ledger (_shared/scripts/ledger-gate.mjs) to accept a `diverged` trait. A ledger entry whose waiver id is absent, expired, or missing approver/expires FAILS the gate. Adding a trait a platform CAN express never belongs here — express it instead.",
   "waivers": {
     "a11y-role-status": {
-      "reason": "role=status has no dedicated accessibilityRole (RN), accessibility trait (SwiftUI), or Compose Role. Conveyed via the accompanying live region (aria-live -> accessibilityLiveRegion / .updatesFrequently / liveRegion), which carries the polite-announce semantics status implies.",
+      "reason": "role=status has no dedicated accessibilityRole (RN), accessibility trait (SwiftUI), or Compose Role. Conveyed via the accompanying live region (aria-live -> accessibilityLiveRegion / liveRegion), which carries the polite-announce semantics status implies. On SwiftUI no live trait is emitted (updatesFrequently does not announce, device-confirmed), so the role is conveyed by nothing until an imperative announcement capability exists; see docs/audits/F-28-value-lowering-audit.md.",
       "approver": "Ssuppanut (design-system a11y owner)",
       "expires": "2027-06-30"
     },
     "a11y-role-alert": {
-      "reason": "role=alert has no SwiftUI trait or Compose Role. RN maps it to accessibilityRole=\"alert\"; on SwiftUI/Compose it is conveyed via the assertive/polite live region on the same node.",
+      "reason": "role=alert has no SwiftUI trait or Compose Role. RN maps it to accessibilityRole=\"alert\"; on Compose it is conveyed via the assertive/polite live region on the same node. On SwiftUI no live trait is emitted (updatesFrequently does not announce, device-confirmed), so the role is conveyed by nothing until an imperative announcement capability exists; see docs/audits/F-28-value-lowering-audit.md.",
       "approver": "Ssuppanut (design-system a11y owner)",
       "expires": "2027-06-30"
     },
@@ -46,6 +46,26 @@
       "reason": "A Compose Checkbox/Switch/Slider/RadioButton has no isError parameter (unlike a text field), so a11y-invalid on a non-text control has no direct trait. The invalid state is conveyed by the adjacent error Text (a live region); a11y-invalid maps to aria-invalid on web/RN, so this control diverges.",
       "approver": "Ssuppanut (design-system a11y owner)",
       "expires": "2027-06-30"
+    },
+    "a11y-live-polite-swiftui": {
+      "reason": "a11y.live=polite on SwiftUI: there is no declarative live region API. The updatesFrequently trait only tells the system the element may be polled and, device-confirmed on a real iPhone with VoiceOver, it does NOT announce changes; only an imperative AccessibilityNotification.Announcement speaks (future capability, not implemented). Nothing is emitted for this value. See docs/audits/F-28-value-lowering-audit.md.",
+      "approver": "Ssuppanut (design-system a11y owner)",
+      "expires": "2027-03-31"
+    },
+    "a11y-live-assertive-swiftui": {
+      "reason": "a11y.live=assertive on SwiftUI: there is no declarative live region API. The updatesFrequently trait only tells the system the element may be polled and, device-confirmed on a real iPhone with VoiceOver, it does NOT announce changes; only an imperative AccessibilityNotification.Announcement speaks (future capability, not implemented). Nothing is emitted for this value. See docs/audits/F-28-value-lowering-audit.md.",
+      "approver": "Ssuppanut (design-system a11y owner)",
+      "expires": "2027-03-31"
+    },
+    "a11y-live-polite-react-native": {
+      "reason": "a11y.live=polite on React Native: accessibilityLiveRegion is tagged @platform android and has no iOS consumer (source-verified in react-native 0.87.1; device-confirmed inert on a real iPhone with VoiceOver). Android behaviour is source-verified only: TalkBack was NOT device-tested. The prop is emitted and is effective on Android only; an imperative AccessibilityInfo.announceForAccessibility call for iOS is future work, not implemented. See docs/audits/F-28-value-lowering-audit.md.",
+      "approver": "Ssuppanut (design-system a11y owner)",
+      "expires": "2027-03-31"
+    },
+    "a11y-live-assertive-react-native": {
+      "reason": "a11y.live=assertive on React Native: accessibilityLiveRegion is tagged @platform android and has no iOS consumer (source-verified in react-native 0.87.1; device-confirmed inert on a real iPhone with VoiceOver). Android behaviour is source-verified only: TalkBack was NOT device-tested. The prop is emitted and is effective on Android only; an imperative AccessibilityInfo.announceForAccessibility call for iOS is future work, not implemented. See docs/audits/F-28-value-lowering-audit.md.",
+      "approver": "Ssuppanut (design-system a11y owner)",
+      "expires": "2027-03-31"
     }
   }
 }
