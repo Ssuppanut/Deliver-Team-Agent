@@ -2339,6 +2339,15 @@ check('P131', 'D4b docs: docs/BREADTH-MATRIX.md has a D4b section with the rules
   assert(sec.includes(DELETE_SENTENCE), 'the section must contain the exact sentence on how to delete an entry');
   assert(/An entry is removed only when a gate checks the emitted value for that construct and kills the mutant\./.test(sec) && /does not kill a mutant; it only makes a correct expected value possible/.test(sec) && /value-lowering gate/.test(sec), 'the section must state the burn-down rule');
   assert(!/burn down in the cluster fix PRs/.test(sec), 'the old cluster-fix burn-down claim must be gone');
+  // The old claim ("burned down by the cluster fix PRs") must not survive in the entry reasons or the harness header either.
+  const OLD_CLAIM = /burn(?:ed)?[ -]?down|burns? the entry|cluster fix/i;
+  const staleReasons = loadKnownSurvivors().entries.filter((e) => OLD_CLAIM.test(e.reason));
+  assert(staleReasons.length === 0, `_shared/policy/mutation-known-survivors.yaml: ${staleReasons.length} reason(s) still carry the old burn-down claim, e.g. ${staleReasons[0]?.operator}/${staleReasons[0]?.adapter}: ${staleReasons[0]?.reason.slice(-90)}`);
+  assert(loadKnownSurvivors().entries.every((e) => /Removed when a gate checks the emitted value for this construct and kills the mutants\.|closed when an? [a-z-]+ (lowering |emitted-alt )?check exists\./.test(e.reason)), '_shared/policy/mutation-known-survivors.yaml: every reason must end with the removal rule (a gate checks the emitted value and kills the mutants)');
+  const harness = readFileSync(resolve(ROOT, '_shared/scripts/mutate-gates.mjs'), 'utf8');
+  const harnessHeader = harness.slice(0, harness.indexOf('\nimport '));
+  assert(!OLD_CLAIM.test(harnessHeader), `_shared/scripts/mutate-gates.mjs: the header comment still carries the old burn-down claim: ${(harnessHeader.match(OLD_CLAIM) ?? [])[0]}`);
+  assert(/An entry is removed only when a gate\s+\*\s+checks the emitted value for that construct and kills the mutant/.test(harnessHeader), '_shared/scripts/mutate-gates.mjs: the header comment must state that an entry is removed only when a gate kills the mutant');
 });
 
 console.log('\n=== verify-patches ===');

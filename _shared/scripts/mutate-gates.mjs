@@ -34,8 +34,9 @@
  * _shared/policy/mutation-known-survivors.yaml (rules M0 to M4, see
  * mutation-known-survivors.mjs), and no entry is stale. Non-zero on a dirty baseline,
  * on a NEW survivor (M1), or on a stale / over-broad / malformed entry. Survivors that
- * are already-logged findings do NOT fail the run: they are triage data, burned down by
- * the cluster fix PRs.
+ * are already-logged findings do NOT fail the run: they are triage data. An entry is removed only when a gate
+ * checks the emitted value for that construct and kills the mutant; the cluster field is context, and fixing the
+ * defect alone does not kill a mutant (planned: a value-lowering gate).
  *
  * Scope note (D4b): the harness mutates generated OUTPUT text, ledger and IR clones. It
  * never edits adapter source, so an adapter regression is only seen by gates that run
