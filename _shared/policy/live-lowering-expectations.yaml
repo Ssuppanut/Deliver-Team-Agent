@@ -1,0 +1,42 @@
+# Live-region lowering expectations (F-28). One row per adapter x a11y.live value.
+#
+# Each row says what the generated source must contain for a node that declares
+# that live value. These rows are written from the platform facts, NOT copied from
+# what the adapters emit; the gate check-live-lowering.mjs compares the two.
+#
+#   adapter   one of react, vue, svelte, react-native, swiftui, compose
+#   value     one of the a11y.live enum values (off, polite, assertive)
+#   expected  the exact live fragment the output must contain (compared after
+#             collapsing whitespace), or the literal NONE meaning NO live fragment
+#             at all (no aria-live, accessibilityLiveRegion, liveRegion,
+#             updatesFrequently or AccessibilityNotification)
+#   doc       URL or source path the row rests on (never empty)
+#   evidence  SOURCE (read in the platform's source), DEVICE (observed on a real
+#             device) or DOC (official documentation)
+#
+# Android runtime behaviour (TalkBack) was NOT device-tested: the react-native and
+# compose rows rest on source and documentation only.
+rows:
+  - { adapter: react, value: off, expected: 'aria-live="off"', doc: "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-live", evidence: DOC }
+  - { adapter: react, value: polite, expected: 'aria-live="polite"', doc: "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-live", evidence: DOC }
+  - { adapter: react, value: assertive, expected: 'aria-live="assertive"', doc: "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-live", evidence: DOC }
+  - { adapter: vue, value: off, expected: 'aria-live="off"', doc: "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-live", evidence: DOC }
+  - { adapter: vue, value: polite, expected: 'aria-live="polite"', doc: "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-live", evidence: DOC }
+  - { adapter: vue, value: assertive, expected: 'aria-live="assertive"', doc: "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-live", evidence: DOC }
+  - { adapter: svelte, value: off, expected: 'aria-live="off"', doc: "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-live", evidence: DOC }
+  - { adapter: svelte, value: polite, expected: 'aria-live="polite"', doc: "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-live", evidence: DOC }
+  - { adapter: svelte, value: assertive, expected: 'aria-live="assertive"', doc: "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-live", evidence: DOC }
+  # React Native: accessibilityLiveRegion accepts none, polite, assertive and is tagged @platform android
+  # (no iOS consumer; inert on a real iPhone, device-confirmed). View.js maps aria-live="off" to "none".
+  - { adapter: react-native, value: off, expected: 'accessibilityLiveRegion="none"', doc: "react-native 0.87.1 Libraries/Components/View/ViewAccessibility.d.ts (accessibilityLiveRegion, @platform android) and Libraries/Components/View/View.js (aria-live off -> none)", evidence: SOURCE }
+  - { adapter: react-native, value: polite, expected: 'accessibilityLiveRegion="polite"', doc: "react-native 0.87.1 Libraries/Components/View/ViewAccessibility.d.ts (accessibilityLiveRegion, @platform android); Android only, TalkBack not device-tested", evidence: SOURCE }
+  - { adapter: react-native, value: assertive, expected: 'accessibilityLiveRegion="assertive"', doc: "react-native 0.87.1 Libraries/Components/View/ViewAccessibility.d.ts (accessibilityLiveRegion, @platform android); Android only, TalkBack not device-tested", evidence: SOURCE }
+  # SwiftUI: no declarative live region exists. updatesFrequently only marks the element as pollable and was
+  # device-confirmed NOT to announce changes (real iPhone, VoiceOver); only AccessibilityNotification.Announcement speaks.
+  - { adapter: swiftui, value: off, expected: NONE, doc: "https://developer.apple.com/documentation/swiftui/accessibilitytraits/updatesfrequently (off is expressed by omission; updatesFrequently must not be emitted)", evidence: DEVICE }
+  - { adapter: swiftui, value: polite, expected: NONE, doc: "https://developer.apple.com/documentation/swiftui/accessibilitytraits/updatesfrequently (polls only; device-confirmed it does not announce); imperative AccessibilityNotification.Announcement is future work", evidence: DEVICE }
+  - { adapter: swiftui, value: assertive, expected: NONE, doc: "https://developer.apple.com/documentation/swiftui/accessibilitytraits/updatesfrequently (polls only; device-confirmed it does not announce); imperative AccessibilityNotification.Announcement is future work", evidence: DEVICE }
+  # Compose: LiveRegionMode has only Polite and Assertive; off means the liveRegion property is omitted.
+  - { adapter: compose, value: off, expected: NONE, doc: "androidx.compose.ui.semantics SemanticsProperties.kt (LiveRegionMode has only Polite and Assertive; absent liveRegion = none); https://developer.android.com/reference/kotlin/androidx/compose/ui/semantics/package-summary", evidence: SOURCE }
+  - { adapter: compose, value: polite, expected: 'liveRegion = LiveRegionMode.Polite', doc: "androidx.compose.ui.semantics SemanticsProperties.kt (LiveRegionMode.Polite); https://developer.android.com/reference/kotlin/androidx/compose/ui/semantics/package-summary; TalkBack not device-tested", evidence: SOURCE }
+  - { adapter: compose, value: assertive, expected: 'liveRegion = LiveRegionMode.Assertive', doc: "androidx.compose.ui.semantics SemanticsProperties.kt (LiveRegionMode.Assertive); https://developer.android.com/reference/kotlin/androidx/compose/ui/semantics/package-summary; TalkBack not device-tested", evidence: SOURCE }

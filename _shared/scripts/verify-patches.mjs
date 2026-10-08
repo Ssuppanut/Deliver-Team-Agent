@@ -23,6 +23,7 @@ import { loadSpec, validate } from './validate-schema.mjs';
 import { validateBriefs } from './validate-brief.mjs';
 import { checkTraitRegistryGate, formatReport } from './check-trait-registry.mjs';
 import { checkCorpusCoverage, formatCoverageReport, ALLOWLIST_PATH } from './check-corpus-coverage.mjs';
+import { checkLiveLowering, formatLiveReport, EXPECTATIONS_PATH as LIVE_EXPECTATIONS_PATH, RULES as RULES_L } from './check-live-lowering.mjs';
 import { parse as parseYaml } from 'yaml';
 import { ADAPTERS as D3_ADAPTERS, codeHandledTraitIdsByAdapter, exercisedConstructs, deriveConstructs, deriveSchemaConstructs, adapterStyleSlots, corpusStyleSlots, declaredTraitIds, handledTraitIds, loadTraitRegistry, checkTraitRegistry } from './schema-constructs.mjs';
 import { route, loadContext } from '../../.ai/router/route.mjs';
@@ -1802,6 +1803,175 @@ root:
   assert(JSON.stringify(got) === JSON.stringify(expected), `walker must return exactly the used constructs.\n  missing: ${expected.filter((x) => !got.includes(x))}\n  extra:   ${got.filter((x) => !expected.includes(x))}`);
   const derived = new Set(deriveConstructs());
   assert(got.every((c) => derived.has(c)), 'every exercised construct must be a derived construct');
+});
+
+// --- F-28: live-region value fidelity (gate L0..L3, a11y-guard output tier, wiring, determinism) ----
+// Every pin runs on TEMPORARY specs / table text and pins its own clock; generated code goes to the
+// existing out/<adapter>/_verify folders. None depends on a real waiver or table date.
+const F28_GEN = { react: generateReact, vue: generateVue, svelte: generateSvelte, 'react-native': generateReactNative, swiftui: generateSwiftUI, compose: generateCompose };
+const F28_VALUES = ['off', 'polite', 'assertive'];
+const F28_SPEC = (value) => `component: LiveProbe\ncategory: feedback\nroot:\n  el: container\n  a11y:\n    live: ${value}\n  children:\n    - el: text\n      text: { kind: literal, value: hi }\n`;
+const F28_REAL_TABLE = () => readFileSync(LIVE_EXPECTATIONS_PATH, 'utf8');
+function f28Gate({ spec, table = F28_REAL_TABLE(), tweak = (_a, _v, code) => code, ...opts }) {
+  const dir = mkdtempSync(join(tmpdir(), 'live-lowering-'));
+  try {
+    const specPaths = Object.entries(spec).map(([name, text]) => { const f = join(dir, name); writeFileSync(f, text); return f; });
+    const generate = (adapter, p) => tweak(adapter, readFileSync(p, 'utf8').match(/live: (\w+)/)?.[1], F28_GEN[adapter](p, '_verify').code);
+    return checkLiveLowering({ expectationsText: table, specPaths, generate, ...opts });
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+}
+const f28Rules = (r) => [...new Set(r.issues.map((i) => i.rule))];
+// A deliberately wrong lowering per adapter x value (the OLD F-28 behaviour or another value's form).
+const F28_BREAK = {
+  react: { off: ['aria-live="off"', 'aria-live="polite"'], polite: ['aria-live="polite"', 'aria-live="assertive"'], assertive: ['aria-live="assertive"', 'aria-live="off"'] },
+  vue: { off: ['aria-live="off"', 'aria-live="polite"'], polite: ['aria-live="polite"', 'aria-live="assertive"'], assertive: ['aria-live="assertive"', 'aria-live="off"'] },
+  svelte: { off: ['aria-live="off"', 'aria-live="polite"'], polite: ['aria-live="polite"', 'aria-live="assertive"'], assertive: ['aria-live="assertive"', 'aria-live="off"'] },
+  'react-native': { off: ['accessibilityLiveRegion="none"', 'accessibilityLiveRegion="polite"'], polite: ['accessibilityLiveRegion="polite"', 'accessibilityLiveRegion="none"'], assertive: ['accessibilityLiveRegion="assertive"', 'accessibilityLiveRegion="polite"'] },
+};
+function f28Broken(adapter, value, code) {
+  if (F28_BREAK[adapter]) { const [from, to] = F28_BREAK[adapter][value]; assert(code.includes(from), `${adapter}/${value}: expected the real output to contain ${from}`); return code.replace(from, to); }
+  if (adapter === 'swiftui') return `${code}\n  .accessibilityAddTraits(.updatesFrequently)\n`; // the OLD behaviour, for every value
+  if (adapter === 'compose') return value === 'off' ? `${code}\n  Modifier.semantics { liveRegion = LiveRegionMode.Polite }\n` // the OLD behaviour for off
+    : code.replace(value === 'polite' ? 'LiveRegionMode.Polite' : 'LiveRegionMode.Assertive', value === 'polite' ? 'LiveRegionMode.Assertive' : 'LiveRegionMode.Polite');
+  throw new Error(`no break for ${adapter}`);
+}
+function f28AdapterPin(adapter) {
+  for (const value of F28_VALUES) {
+    const spec = { 'design-spec.yaml': F28_SPEC(value) };
+    const clean = f28Gate({ spec });
+    assert(clean.ok && clean.counts.comparisons === 6, `real ${adapter}-era adapters must pass the gate for live: ${value}: ${JSON.stringify(clean.issues.map((i) => i.msg))}`);
+    const bad = f28Gate({ spec, tweak: (a, v, code) => (a === adapter ? f28Broken(a, v, code) : code) });
+    assert(!bad.ok && JSON.stringify(f28Rules(bad)) === JSON.stringify(['L1-mismatch']), `${adapter}/${value}: breaking the lowering must fire only L1, got ${f28Rules(bad)}`);
+    assert(bad.issues.length === 1 && bad.issues[0].adapter === adapter && bad.issues[0].value === value && bad.issues[0].msg.includes(adapter) && bad.issues[0].msg.includes(`live=${value}`) && bad.issues[0].spec.endsWith('design-spec.yaml'),
+      `${adapter}/${value}: L1 must name exactly the adapter, the value and the spec: ${JSON.stringify(bad.issues)}`);
+  }
+}
+check('P101', 'live lowering L1 (react): aria-live must equal the value; a wrong value FAILS naming adapter + value for off, polite, assertive', () => f28AdapterPin('react'));
+check('P102', 'live lowering L1 (vue): aria-live must equal the value; a wrong value FAILS naming adapter + value for off, polite, assertive', () => f28AdapterPin('vue'));
+check('P103', 'live lowering L1 (svelte): aria-live must equal the value; a wrong value FAILS naming adapter + value for off, polite, assertive', () => f28AdapterPin('svelte'));
+check('P104', 'live lowering L1 (react-native): accessibilityLiveRegion must be none/polite/assertive; the OLD off -> polite FAILS naming adapter + value, as does every other wrong value', () => f28AdapterPin('react-native'));
+check('P105', 'live lowering L1 (swiftui): NOTHING may be emitted for any value; the OLD updatesFrequently FAILS naming adapter + value', () => f28AdapterPin('swiftui'));
+check('P106', 'live lowering L1 (compose): off omits liveRegion, polite/assertive map to LiveRegionMode; the OLD off -> Polite FAILS naming adapter + value, as does every other wrong value', () => f28AdapterPin('compose'));
+
+check('P107', 'live lowering L0-load: a missing or invalid table, a table with no rows, an unparseable corpus spec, or an adapter that fails to generate FAILS', () => {
+  const spec = { 'design-spec.yaml': F28_SPEC('off') };
+  const missing = checkLiveLowering({ expectationsPath: join(tmpdir(), 'no-such-live-table.yaml'), specPaths: [] });
+  assert(!missing.ok && missing.issues.some((i) => i.rule === 'L0-load' && /not found/.test(i.msg)), 'a missing table must be L0');
+  for (const [why, table] of [['invalid YAML', 'rows: [unclosed'], ['no rows list', 'version: 1\n'], ['rows not a list', 'rows: nope\n']]) {
+    const r = f28Gate({ spec, table });
+    assert(!r.ok && r.issues.some((i) => i.rule === 'L0-load'), `${why} must be L0, got ${f28Rules(r)}`);
+  }
+  const bad = f28Gate({ spec: { 'design-spec.yaml': 'root: [unclosed' } });
+  assert(!bad.ok && bad.issues.some((i) => i.rule === 'L0-load' && /unparseable/.test(i.msg)), 'an unparseable corpus spec must be L0');
+  const boom = f28Gate({ spec, tweak: () => { throw new Error('adapter exploded'); } });
+  assert(!boom.ok && boom.issues.some((i) => i.rule === 'L0-load' && /failed to generate/.test(i.msg)), 'a generator failure must be L0, never a silent pass');
+});
+
+check('P108', 'live lowering L2-uncovered: a missing adapter x value row, or a spec value with no row, FAILS naming adapter and value', () => {
+  const spec = { 'design-spec.yaml': F28_SPEC('polite') };
+  const lines = F28_REAL_TABLE().split('\n');
+  const without = (adapter, value) => lines.filter((l) => !(l.includes(`adapter: ${adapter},`) && l.includes(`value: ${value},`))).join('\n');
+  for (const [adapter, value] of [['swiftui', 'assertive'], ['react-native', 'off'], ['compose', 'polite']]) {
+    const r = f28Gate({ spec, table: without(adapter, value) });
+    assert(r.issues.some((i) => i.rule === 'L2-uncovered' && i.adapter === adapter && i.value === value && i.msg.includes(adapter) && i.msg.includes(value)), `dropping ${adapter}/${value} must be L2 naming both, got ${JSON.stringify(r.issues.map((i) => [i.rule, i.adapter, i.value]))}`);
+    assert(JSON.stringify(f28Rules(r)) === JSON.stringify(['L2-uncovered']), `only L2 may fire for a dropped row, got ${f28Rules(r)}`);
+  }
+  // A new enum value with no rows is uncovered on all 6 adapters.
+  const fresh = f28Gate({ spec, values: [...F28_VALUES, 'rude'] });
+  assert(fresh.issues.filter((i) => i.rule === 'L2-uncovered' && i.value === 'rude').length === 6, 'a new live value must be uncovered on all 6 adapters');
+  // A spec that declares a value outside the enum (and so without rows) names the spec.
+  const stray = f28Gate({ spec: { 'design-spec.yaml': F28_SPEC('rude') } });
+  assert(stray.issues.some((i) => i.rule === 'L2-uncovered' && i.value === 'rude' && i.spec.endsWith('design-spec.yaml')), 'a spec value with no row must be L2 naming the spec');
+});
+
+check('P109', 'live lowering L3-row-quality: empty expected/doc, evidence outside SOURCE/DEVICE/DOC, unknown adapter/value, a duplicate or a non-mapping row FAILS', () => {
+  const spec = { 'design-spec.yaml': F28_SPEC('off') };
+  const lines = F28_REAL_TABLE().split('\n');
+  const target = (adapter, value) => lines.findIndex((l) => l.includes(`adapter: ${adapter},`) && l.includes(`value: ${value},`));
+  const edit = (adapter, value, fn) => { const i = target(adapter, value); const c = [...lines]; c[i] = fn(c[i]); return c.join('\n'); };
+  const cases = [
+    ['empty doc reference', edit('react', 'off', (l) => l.replace(/doc: "[^"]*"/, 'doc: ""')), 'react', 'off'],
+    ['evidence outside the set', edit('vue', 'polite', (l) => l.replace('evidence: DOC', 'evidence: GUESS')), 'vue', 'polite'],
+    ['missing evidence', edit('swiftui', 'assertive', (l) => l.replace(', evidence: DEVICE', '')), 'swiftui', 'assertive'],
+    ['empty expected form', edit('compose', 'off', (l) => l.replace('expected: NONE', 'expected: ""')), 'compose', 'off'],
+    ['unknown adapter', edit('svelte', 'off', (l) => l.replace('adapter: svelte', 'adapter: flutter')), 'flutter', 'off'],
+    ['unknown value', edit('svelte', 'assertive', (l) => l.replace('value: assertive', 'value: shouty')), 'svelte', 'shouty'],
+  ];
+  for (const [why, table, adapter, value] of cases) {
+    const r = f28Gate({ spec, table });
+    assert(r.issues.some((i) => i.rule === 'L3-row-quality' && i.adapter === adapter && i.value === value), `${why}: expected L3 naming ${adapter}/${value}, got ${JSON.stringify(r.issues.map((i) => [i.rule, i.adapter, i.value]))}`);
+  }
+  const dup = f28Gate({ spec, table: `${F28_REAL_TABLE()}${lines[target('react', 'off')]}\n` });
+  assert(dup.issues.some((i) => i.rule === 'L3-row-quality' && i.adapter === 'react' && i.value === 'off' && /duplicate/.test(i.msg)), 'a duplicate row must be L3');
+  const nonMap = f28Gate({ spec, table: `${F28_REAL_TABLE()}  - just a string\n` });
+  assert(nonMap.issues.some((i) => i.rule === 'L3-row-quality' && /must be a mapping/.test(i.msg)), 'a non-mapping row must be L3');
+  assert(f28Gate({ spec }).ok, 'the unmodified real table must pass on the probe spec');
+});
+
+check('P110', 'a11y-guard output tier (F-28): a missing live trait is accepted ONLY for off-by-omission (swiftui, compose) or a waiver-backed ledger divergence for that value; a warning alone is not enough', () => {
+  const spec = (value) => { const f = join(tmpdir(), `f28-a11y-${process.pid}.yaml`); writeFileSync(f, F28_SPEC(value)); return f; };
+  for (const value of F28_VALUES) {
+    const f = spec(value);
+    try {
+      const ir = specToIrFromFile(f);
+      const real = Object.fromEntries(Object.entries(F28_GEN).map(([a, g]) => [a, g(f, '_verify')]));
+      const clean = checkA11y(ir, real);
+      assert(clean.ok, `real output for live: ${value} must pass the guard: ${JSON.stringify(clean.issues)}`);
+      // swiftui emits nothing: strip its ledger and the guard must refuse (value-blind acceptance closed)
+      const noLedger = checkA11y(ir, { swiftui: { ...real.swiftui, ledger: [] } });
+      assert(!noLedger.ok && noLedger.issues.some((i) => i.rule === 'a11y-output-live' && i.msg.startsWith('swiftui:')), `swiftui/${value}: an absent live trait with no ledger reason must FAIL`);
+      // a free-text warning must NOT be accepted any more
+      const warnOnly = checkA11y(ir, { swiftui: { ...real.swiftui, ledger: [], warnings: ['a11y: live is documented elsewhere'] } });
+      assert(!warnOnly.ok, `swiftui/${value}: a warning alone must not justify a missing live trait`);
+      if (value !== 'off') {
+        const noWaiver = checkA11y(ir, { swiftui: { ...real.swiftui, ledger: real.swiftui.ledger.map((e) => (e.traitId === `a11y.live=${value}` ? { ...e, waiver: undefined } : e)) } });
+        assert(!noWaiver.ok, `swiftui/${value}: a divergence with no waiver id must FAIL`);
+        const wrongValue = checkA11y(ir, { swiftui: { ...real.swiftui, ledger: real.swiftui.ledger.map((e) => (e.traitId === `a11y.live=${value}` ? { ...e, traitId: 'a11y.live=off', status: 'expressed' } : e)) } });
+        assert(!wrongValue.ok, `swiftui/${value}: an off-by-omission entry must not justify a different value`);
+      } else {
+        // off is only correct by omission where the platform has no off value: web must emit it
+        const webNoTrait = checkA11y(ir, { react: { ...real.react, code: real.react.code.replace(/ aria-live="off"/, '') } });
+        assert(!webNoTrait.ok && webNoTrait.issues.some((i) => i.rule === 'a11y-output-live'), 'react/off: a missing aria-live="off" must FAIL (omission is not correct on web)');
+      }
+    } finally { rmSync(f, { force: true }); }
+  }
+});
+
+check('P111', 'F-28 wiring: ci.mjs runs check-live-lowering as a blocking step; the real table has all 18 adapter x value rows; the 4 waivers exist, cite the audit and are approved; the real corpus passes', () => {
+  const ci = readFileSync(resolve(ROOT, '_shared/scripts/ci.mjs'), 'utf8');
+  assert(/run\('node _shared\/scripts\/check-live-lowering\.mjs'\);\s*\}\s*catch \{ console\.error\('FAIL: check-live-lowering'\); failures\+\+; \}/.test(ci), 'ci.mjs must run check-live-lowering.mjs and count a failure');
+  const table = parseYaml(F28_REAL_TABLE());
+  const keys = table.rows.map((r) => `${r.adapter}/${r.value}`).sort();
+  const want = D3_ADAPTERS.flatMap((a) => F28_VALUES.map((v) => `${a}/${v}`)).sort();
+  assert(JSON.stringify(keys) === JSON.stringify(want), `the real table must have exactly the 18 adapter x value rows, got ${keys.length}`);
+  const waivers = JSON.parse(readFileSync(resolve(ROOT, '_shared/policy/a11y-waivers.json'), 'utf8')).waivers;
+  for (const id of ['a11y-live-polite-swiftui', 'a11y-live-assertive-swiftui', 'a11y-live-polite-react-native', 'a11y-live-assertive-react-native']) {
+    const w = waivers[id];
+    assert(w && w.approver === 'Ssuppanut (design-system a11y owner)' && typeof w.expires === 'string' && !Number.isNaN(new Date(w.expires).getTime()) && /F-28-value-lowering-audit\.md/.test(w.reason), `waiver ${id} must exist, be approved, have a parseable expiry and cite the audit`);
+  }
+  // The ledger accepts the real divergences under the pinned clock and refuses one with an unknown waiver id.
+  const f = join(tmpdir(), `f28-wire-${process.pid}.yaml`); writeFileSync(f, F28_SPEC('polite'));
+  try {
+    const ledger = ['react-native', 'swiftui'].flatMap((a) => F28_GEN[a](f, '_verify').ledger);
+    assert(ledger.filter((e) => e.status === 'diverged' && e.traitId === 'a11y.live=polite').length === 2, 'react-native and swiftui must each diverge on live=polite');
+    assert(checkLedger(ledger, { now: D3_NOW }).ok, 'the real divergences must be accepted under the pinned clock');
+    const orphan = ledger.map((e) => (e.traitId === 'a11y.live=polite' ? { ...e, waiver: 'a11y-live-nonexistent' } : e));
+    assert(!checkLedger(orphan, { now: D3_NOW }).ok, 'a live divergence under an unknown waiver id must FAIL the ledger');
+  } finally { rmSync(f, { force: true }); }
+  const r = checkLiveLowering();
+  assert(r.ok && r.counts.liveSpecs >= 6, `the real corpus must pass the live lowering gate: ${r.issues.slice(0, 2).map((i) => i.msg).join('; ')}`);
+});
+
+check('P112', 'live lowering gate is deterministic: two runs on the real corpus and on a failing fixture produce byte-identical reports; issues sort by rule, adapter, value, spec', () => {
+  assert(formatLiveReport(checkLiveLowering()) === formatLiveReport(checkLiveLowering()), 'two real-corpus runs must be byte-identical');
+  const specs = { 'b.yaml': F28_SPEC('polite'), 'a.yaml': F28_SPEC('off') };
+  const run = () => f28Gate({ spec: specs, tweak: (a, v, code) => (a === 'compose' || a === 'react' ? f28Broken(a, v, code) : code) });
+  const one = run(); const two = run();
+  const norm = (r) => formatLiveReport(r).replace(/\S*live-lowering-[A-Za-z0-9]+\//g, '<tmp>/'); // each run gets its own temp dir
+  assert(norm(one) === norm(two), 'two failing-fixture runs must be byte-identical');
+  const order = one.issues.map((i) => [i.rule, i.adapter, i.value, i.spec]);
+  assert(JSON.stringify(order) === JSON.stringify([...order].sort((x, y) => RULES_L.indexOf(x[0]) - RULES_L.indexOf(y[0]) || (x[1] < y[1] ? -1 : x[1] > y[1] ? 1 : 0) || (x[2] < y[2] ? -1 : x[2] > y[2] ? 1 : 0) || (x[3] < y[3] ? -1 : x[3] > y[3] ? 1 : 0))), 'issues must be sorted by rule, adapter, value, spec');
+  assert(one.issues.length === 4, `2 specs x 2 broken adapters must give 4 L1 issues, got ${one.issues.length}`);
 });
 
 console.log('\n=== verify-patches ===');

@@ -66,6 +66,10 @@ function main() {
   try { run('node _shared/scripts/check-corpus-coverage.mjs'); }
   catch { console.error('FAIL: check-corpus-coverage'); failures++; }
 
+  console.log('\n## 1g. live lowering gate (F-28 — the emitted live-region fragment of every live corpus spec matches the per-adapter expectation table)');
+  try { run('node _shared/scripts/check-live-lowering.mjs'); }
+  catch { console.error('FAIL: check-live-lowering'); failures++; }
+
   console.log('\n## 2. run every feature');
   const feats = discoverFeatures();
   for (const [name, info] of feats) {

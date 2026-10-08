@@ -1,0 +1,16 @@
+component: LiveRegionOff
+description: Caption that changes often but is explicitly NOT announced (live region off).
+category: feedback
+props:
+  - { name: caption, type: string, required: true }
+tokens:
+  - color.fg.default
+root:
+  el: container
+  a11y:
+    live: off
+  children:
+    - el: text
+      text: { kind: ref, value: caption }
+      style:
+        color: color.fg.default

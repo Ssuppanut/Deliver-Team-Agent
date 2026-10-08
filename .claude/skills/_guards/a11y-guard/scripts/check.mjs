@@ -36,9 +36,28 @@ const LIVE_TRAIT = {
   vue: /aria-live=/,
   svelte: /aria-live=/,
   'react-native': /accessibilityLiveRegion=/,
-  swiftui: /updatesFrequently/,
+  // F-28: SwiftUI has no declarative live-region trait (.updatesFrequently does not announce), so
+  // there is nothing to look for: `null` means "never present", so absence needs a ledger reason.
+  swiftui: null,
   compose: /liveRegion\s*=/,
 };
+
+// F-28: where OMITTING the live trait is the correct lowering of `live: off` (the platform has no
+// "off" value, absence is off). On every other adapter `off` is emitted explicitly.
+const LIVE_OFF_BY_OMISSION = new Set(['swiftui', 'compose']);
+
+/**
+ * Is a missing live-region trait justified for this adapter and value? Only by (a) the correct
+ * omission for `off` on an adapter with no off value, or (b) a ledger divergence for exactly this
+ * value that cites a waiver id (the ledger gate validates the waiver itself). A free-text warning
+ * is NOT enough.
+ */
+function liveAbsenceJustified(adapter, live, ledger) {
+  const id = `a11y.live=${live}`;
+  const entries = (ledger ?? []).filter((e) => e.adapter === adapter && e.traitId === id);
+  if (live === 'off' && LIVE_OFF_BY_OMISSION.has(adapter)) return entries.some((e) => e.status === 'expressed');
+  return entries.some((e) => e.status === 'diverged' && typeof e.waiver === 'string' && e.waiver !== '');
+}
 
 // Per-role, per-adapter regex for the expressed trait. A missing adapter entry
 // means that platform cannot express the role as a trait — it must instead have
@@ -136,11 +155,10 @@ export function checkA11y(ir, results) {
       for (const n of nodes) {
         if (n.a11y?.live) {
           const re = LIVE_TRAIT[adapter];
-          const hasTrait = re ? re.test(code) : true; // unknown adapter: don't invent a failure
-          const warned = /a11y:.*live/i.test(warns);
-          if (!hasTrait && !warned) {
+          const hasTrait = re === null ? false : re ? re.test(code) : true; // unknown adapter: don't invent a failure
+          if (!hasTrait && !liveAbsenceJustified(adapter, n.a11y.live, res?.ledger)) {
             issues.push({ severity: 'serious', rule: 'a11y-output-live', at: `/${n.kind}`,
-              msg: `${adapter}: IR declares aria-live="${n.a11y.live}" but the output has no live-region trait and no divergence warning` });
+              msg: `${adapter}: IR declares aria-live="${n.a11y.live}" but the output has no live-region trait and no waiver-backed ledger divergence for this value` });
           }
         }
         if (n.role && ENFORCED_ROLES.has(n.role)) {
