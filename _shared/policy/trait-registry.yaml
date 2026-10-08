@@ -15,7 +15,8 @@
 # Trait ids are NORMALIZED: everything after the first "=" is "*"
 # (role=*, a11y.live=*, orientation=*, state=*). A `trait` must be both declared
 # in RendererBase.declaredTraits and expressed/diverged by at least one adapter;
-# a declared-but-unhandled trait (a11y.labelledBy) is never "covered".
+# a declared-but-unhandled trait is never "covered". The `style=` prefix is the one exception to
+# that normalization: style=background and style=radius are separate traits (D4a).
 #
 # NOTE (D4): orientation=* is ONE trait that conflates the semantic
 # aria-orientation (web) and the layout axis (all 6). The D4 split has no
@@ -30,7 +31,7 @@ constructs:
   "el-kind:link": { trait: "link-href" }
   "el-kind:input": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
   "el-kind:slot": { untracked: { reason: "named slot lowers to the same unnamed content on SwiftUI and Compose (PR C finding); pending the slot contract work", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
-  "el-kind:icon": { untracked: { reason: "pending D4 (register trait or split it, no output change): icon", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "el-kind:icon": { trait: "icon" }
   "el-kind:conditional": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
   "element.field:el": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
   "element.field:role": { trait: "role=*" }
@@ -45,7 +46,7 @@ constructs:
   "element.field:src": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
   "element.field:alt": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
   "element.field:href": { trait: "link-href" }
-  "element.field:icon": { untracked: { reason: "pending D4 (register trait or split it, no output change): icon", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "element.field:icon": { trait: "icon" }
   "element.field:label": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
   "element.field:variant": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
   "element.field:input": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
@@ -70,7 +71,7 @@ constructs:
   "numberFormat.field:currency": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
   "numberFormat.field:locale": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
   "numberFormat.field:grouping": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
-  "numberFormat.field:rounding": { untracked: { reason: "pending D4 (register trait or split it, no output change): rounding", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "numberFormat.field:rounding": { trait: "number-format" }
   "numberFormat.field:precision": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
   "numberFormat.value:style=decimal": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
   "numberFormat.value:style=currency": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
@@ -85,7 +86,7 @@ constructs:
   "dateTimeFormat.value:timeStyle=medium": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
   "dateTimeFormat.value:timeStyle=long": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
   "a11y.field:label": { trait: "a11y.label" }
-  "a11y.field:labelledBy": { untracked: { reason: "declared trait with no adapter handling on any of the 6; needs a decision: implement, diverge or remove (PR C finding)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "a11y.field:labelledBy": { trait: "a11y.labelledBy" }
   "a11y.field:describedBy": { trait: "a11y.describedBy" }
   "a11y.field:invalid": { trait: "a11y.invalid" }
   "a11y.field:live": { trait: "a11y.live=*" }
@@ -94,7 +95,7 @@ constructs:
   "a11y.value:live=assertive": { trait: "a11y.live=*" }
   "variant.field:prop": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
   "variant.field:intent": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
-  "variant.field:cases": { untracked: { reason: "pending D4 (register trait or split it, no output change): cases", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "variant.field:cases": { untracked: { reason: "waits for D6 (Compose drops container color, padding and radius cases and the SwiftUI variant fallback is untested; D6 makes them express for real)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
   "variant.value:intent=status": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
   "variant.value:intent=emphasis": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
   "input.field:valueProp": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
@@ -115,15 +116,15 @@ constructs:
   "input.state.value:kind=boolean": { trait: "state=*" }
   "input.state.value:kind=selected-value": { trait: "state=*" }
   "input.state.value:kind=numeric-range": { trait: "state=*" }
-  "style-slot:background": { untracked: { reason: "pending D4 (register trait or split it, no output change): background", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "style-slot:background": { trait: "style=background" }
   "style-slot:border": { untracked: { reason: "pending D6 (native style lowering, border refuse): border", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
   "style-slot:color": { untracked: { reason: "pending D6 (native style lowering, border refuse): color", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
   "style-slot:font": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
   "style-slot:fontSize": { untracked: { reason: "not yet triaged (D1 seed)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
   "style-slot:gap": { untracked: { reason: "pending D6 (native style lowering, border refuse): gap", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
   "style-slot:height": { untracked: { reason: "pending D6: silently ignored on SwiftUI and Compose; web and RN lower them (PR C finding)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
-  "style-slot:icon": { untracked: { reason: "pending D4 (register trait or split it, no output change): icon", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "style-slot:icon": { trait: "icon" }
   "style-slot:margin": { untracked: { reason: "pending D6: silently ignored on SwiftUI and Compose; web and RN lower them (PR C finding)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
-  "style-slot:padding": { untracked: { reason: "pending D4 (register trait or split it, no output change): padding", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
-  "style-slot:radius": { untracked: { reason: "pending D4 (register trait or split it, no output change): radius", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "style-slot:padding": { untracked: { reason: "Compose drops static padding on input controls in 12 corpus specs (finding F-30; the control-state branches of visitInput never call modifierArg); fix planned in D6", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }
+  "style-slot:radius": { trait: "style=radius" }
   "style-slot:width": { untracked: { reason: "pending D6: silently ignored on SwiftUI and Compose; web and RN lower them (PR C finding)", approver: "Ssuppanut (design-system a11y owner)", expires: "2027-03-31" } }

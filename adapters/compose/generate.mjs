@@ -88,9 +88,10 @@ class ComposeRenderer extends RendererBase {
     if (node.style) {
       for (const [slot, token] of Object.entries(node.style)) {
         const t = mapToken(token);
-        if (slot === 'background') chain.push(`.background(${t})`);
+        // D4a: per-slot static style traits (variant cases are not counted; padding is not a ledger trait, F-30).
+        if (slot === 'background') { chain.push(`.background(${t})`); this.express('style=background', { mechanism: '.background (static style)' }); }
         else if (slot === 'padding') chain.push(`.padding(${t})`);
-        else if (slot === 'radius') chain.push(`.clip(RoundedCornerShape(${t}))`);
+        else if (slot === 'radius') { chain.push(`.clip(RoundedCornerShape(${t}))`); this.express('style=radius', { mechanism: '.clip(RoundedCornerShape) (static style)' }); }
       }
     }
     // F-7 size slot: a dimension TOKEN drives .size() (never a literal `.dp`).
@@ -137,6 +138,12 @@ class ComposeRenderer extends RendererBase {
       props.push(`contentDescription = ${l.kind === 'literal' ? JSON.stringify(String(l.value)) : l.value}`);
       this.express('a11y.label', { mechanism: 'contentDescription' });
     }
+    // D4a: labelledBy needs a target element id and ids are not plumbed to referenced elements yet, so the
+    // native equivalent could point to nothing. Emit nothing; time-boxed waiver until id plumbing exists (see docs/audits).
+    if (node.a11y?.labelledBy) {
+      this.diverge('a11y.labelledBy', { reason: 'the Compose label relationship needs the referenced element and ids are not plumbed to referenced elements yet', fallback: 'nothing emitted until id plumbing exists', waiver: 'a11y-labelledby-compose' });
+      this.warnings.push('a11y: labelledBy is not emitted (no id plumbing to the referenced element yet; documented divergence)');
+    }
     if (node.role) {
       const r = this.composeRole(node.role);
       if (r) { props.push(`role = ${r}`); this.express(`role=${node.role}`, { mechanism: `semantics { role = ${r} }` }); }
@@ -166,6 +173,7 @@ class ComposeRenderer extends RendererBase {
   variantIcon(node) {
     const v = this.variantData(node);
     if (!v || !Object.keys(v.iconCases).length) return '';
+    this.express('icon', { mechanism: 'variant icon cases (Icon(when …))' });
     const entries = Object.entries(v.iconCases).map(([val, tok]) => [val, this.icon(tok)]);
     const arms = entries.map(([val, sym]) => `${JSON.stringify(val)} -> Icons.Default.${sym}`).join('; ');
     const fallback = `Icons.Default.${entries[0][1]}`;
@@ -206,6 +214,7 @@ class ComposeRenderer extends RendererBase {
   }
   visitAction(node) {
     const onClick = node.onEvent ? node.onEvent : '{}';
+    if (node.icon) this.express('icon', { mechanism: 'action icon (Icon)' });
     const inner = node.icon
       ? `Icon(Icons.Default.${this.icon(node.icon)}, contentDescription = null)\n  Text(${this.strExpr(node.label)})`
       : `Text(${this.strExpr(node.label)})`;
@@ -225,6 +234,7 @@ class ComposeRenderer extends RendererBase {
   }
   visitIcon(node) {
     const sym = this.icon(node.icon);
+    this.express('icon', { mechanism: 'Icon(Icons.Default)' });
     if (node.a11y?.label) {
       const l = node.a11y.label;
       const v = l.kind === 'literal' ? JSON.stringify(String(l.value)) : l.value;
@@ -252,6 +262,7 @@ class ComposeRenderer extends RendererBase {
     const role = node.role;
     if (node.a11y?.label) this.express('a11y.label', { mechanism: 'contentDescription (label)' });
     if (node.a11y?.describedBy) this.diverge('a11y.describedBy', { reason: 'Compose has no aria-describedby', fallback: 'adjacent Text / stateDescription', waiver: 'a11y-describedby-native' });
+    if (node.a11y?.labelledBy) this.diverge('a11y.labelledBy', { reason: 'the Compose label relationship needs the referenced element and ids are not plumbed to referenced elements yet', fallback: 'nothing emitted until id plumbing exists', waiver: 'a11y-labelledby-compose' });
     if (node.a11y?.invalid) this.diverge('a11y.invalid', { reason: 'Compose control has no isError in this position', fallback: 'adjacent error Text conveys the invalid state', waiver: 'a11y-invalid-compose' });
     // A visible label (Compose controls have no label param) is rendered as an
     // adjacent Text inside a Column, so the label prop is honored, not dropped.
@@ -312,6 +323,7 @@ class ComposeRenderer extends RendererBase {
     if (cs) return this.renderControlState(node, cs);
     const role = node.role;
     if (node.a11y?.describedBy) this.diverge('a11y.describedBy', { reason: 'Compose has no aria-describedby', fallback: 'adjacent Text / stateDescription', waiver: 'a11y-describedby-native' });
+    if (node.a11y?.labelledBy) this.diverge('a11y.labelledBy', { reason: 'the Compose label relationship needs the referenced element and ids are not plumbed to referenced elements yet', fallback: 'nothing emitted until id plumbing exists', waiver: 'a11y-labelledby-compose' });
     // The accessible name for a bare Compose control (which has no text-label param)
     // rides an explicit contentDescription in the semantics block.
     const label = this.plain(node.label ?? node.a11y?.label);

@@ -43,11 +43,13 @@
  *
  * ── TRAIT IDS ────────────────────────────────────────────────────────────────
  *   Declared traits are enumerated by a static scan of RendererBase.declaredTraits
- *   (`t.push(...)` calls); handled traits by a static scan of every adapter's
- *   `express(` / `diverge(` first argument. Both are NORMALIZED so a value-encoded
- *   id compares as one trait: everything after the first `=` becomes `*`, and a
- *   template interpolation `${...}` becomes `*` (role=${node.role} -> role=*,
- *   a11y.live=${a} -> a11y.live=*, state=boolean -> state=*).
+ *   (`t.push(...)` calls); handled traits by the CODE-ONLY scan of every adapter's
+ *   `express(` / `diverge(` first argument (codeTraitCalls). Both are NORMALIZED so a
+ *   value-encoded id compares as one trait: everything after the first `=` becomes
+ *   `*`, and a template interpolation `${...}` becomes `*` (role=${node.role} ->
+ *   role=*, a11y.live=${a} -> a11y.live=*, state=boolean -> state=*). The one
+ *   exception is the `style=` prefix (D4a): `style=background` and `style=radius`
+ *   are DISTINCT traits, so R7 checks each slot separately for every adapter.
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -205,9 +207,11 @@ export function exercisedConstructs(specDoc, schemaPath = SCHEMA_PATH) {
 
 // ── trait enumeration ────────────────────────────────────────────────────────
 
-/** Normalize a trait id: `${...}` -> `*`, and everything after the first `=` -> `*`. */
+/** Normalize a trait id: `${...}` -> `*`, and everything after the first `=` -> `*` (except the `style=` prefix, D4a). */
 export function normalizeTraitId(raw) {
   let id = String(raw).replace(/\$\{[^}]*\}/g, '*');
+  // D4a: per-slot style traits (style=background, style=radius) are separate traits, not one value-encoded family.
+  if (id.startsWith('style=')) return id;
   const eq = id.indexOf('=');
   if (eq !== -1) id = `${id.slice(0, eq)}=*`;
   return id;
@@ -222,29 +226,17 @@ function firstLiteralArgs(src, callRe) {
 }
 
 /** Declared ledger traits: static scan of RendererBase.declaredTraits `t.push(...)`. */
-export function declaredTraitIds() {
-  const src = readFileSync(resolve(ROOT, 'adapters/_shared/renderer-base.mjs'), 'utf8');
-  const start = src.indexOf('declaredTraits(node)');
-  const end = src.indexOf('\n  hasOptionIcons(node) {', start); // the method DEFINITION, not the call inside declaredTraits
-  if (start === -1 || end === -1) throw new Error('schema-constructs: declaredTraits() not found in renderer-base.mjs');
+export const DECLARED_START_ANCHOR = 'declaredTraits(node)';
+export const DECLARED_END_ANCHOR = '\n  hasOptionIcons(node) {';
+export function declaredTraitIds(src = readFileSync(resolve(ROOT, 'adapters/_shared/renderer-base.mjs'), 'utf8')) {
+  const start = src.indexOf(DECLARED_START_ANCHOR);
+  // The end anchor is the method DEFINITION, not the call inside declaredTraits.
+  const end = start === -1 ? -1 : src.indexOf(DECLARED_END_ANCHOR, start);
+  if (start === -1 || end === -1) {
+    throw new Error(`schema-constructs: declaredTraits() not found in renderer-base.mjs (anchors ${JSON.stringify(DECLARED_START_ANCHOR)} and ${JSON.stringify(DECLARED_END_ANCHOR)} must both appear in order; the scan is regex-anchored on that text, so a reformat must update the anchors)`);
+  }
   const body = src.slice(start, end);
   return [...new Set(firstLiteralArgs(body, 't\\.push').map(normalizeTraitId))].sort();
-}
-
-/**
- * Handled traits: first argument of every `express(` / `diverge(` call in the
- * adapters, per adapter. A trait that is declared but absent from this set is a
- * silent drop on every adapter (ledger-unaccounted for any spec using it).
- * @returns {Record<string, string[]>} adapter -> sorted normalized trait ids
- */
-export function handledTraitIdsByAdapter() {
-  const by = {};
-  for (const a of ADAPTERS) {
-    const src = readFileSync(resolve(ROOT, `adapters/${a}/generate.mjs`), 'utf8');
-    const ids = [...firstLiteralArgs(src, '(?:this\\.)?express'), ...firstLiteralArgs(src, '(?:this\\.)?diverge')];
-    by[a] = [...new Set(ids.map(normalizeTraitId))].sort();
-  }
-  return by;
 }
 
 /**
@@ -348,10 +340,6 @@ export function codeHandledTraitIdsByAdapter(read = (a) => readFileSync(resolve(
   return by;
 }
 
-export function handledTraitIds() {
-  return [...new Set(Object.values(handledTraitIdsByAdapter()).flat())].sort();
-}
-
 // ── registry ─────────────────────────────────────────────────────────────────
 
 /**
@@ -407,5 +395,6 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   console.log(`derived constructs: ${constructs.length}`);
   for (const c of constructs) console.log(`  ${c}`);
   console.log(`declared traits (${declaredTraitIds().length}): ${declaredTraitIds().join(', ')}`);
-  console.log(`handled traits  (${handledTraitIds().length}): ${handledTraitIds().join(', ')}`);
+  const handled = [...new Set(Object.values(codeHandledTraitIdsByAdapter()).flat())].sort();
+  console.log(`handled traits  (${handled.length}): ${handled.join(', ')}`);
 }

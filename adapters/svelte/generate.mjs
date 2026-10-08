@@ -33,6 +33,9 @@ class SvelteRenderer extends RendererBase {
     const v = this.variantData(node);
     // F-7 size slot: a dimension TOKEN drives width/height (never a raw px).
     if (node.size) this.express('size', { mechanism: 'width/height (dimension token)' });
+    // D4a: per-slot static style traits (variant cases are not counted; padding is not a ledger trait, F-30).
+    if (node.style?.background) this.express('style=background', { mechanism: 'background-color (static style)' });
+    if (node.style?.radius) this.express('style=radius', { mechanism: 'border-radius (static style)' });
     // F-4 orientation (PR A2): an oriented container WITH children gets a real
     // layout axis — display:flex + flex-direction (keywords, not tokens).
     const oriented = node.orientation && node.children?.length;
@@ -59,6 +62,12 @@ class SvelteRenderer extends RendererBase {
     const out = [];
     if (node.role) { out.push(` role="${node.role}"`); this.express(`role=${node.role}`, { mechanism: `role="${node.role}"` }); }
     if (node.a11y?.label) { out.push(this.bind('aria-label', node.a11y.label)); this.express('a11y.label', { mechanism: 'aria-label' }); }
+    // D4a: labelledBy needs a target element id and ids are not plumbed to referenced elements yet, so aria-labelledby
+    // could point to nothing. Emit nothing; time-boxed waiver until id plumbing exists (see docs/audits).
+    if (node.a11y?.labelledBy) {
+      this.diverge('a11y.labelledBy', { reason: 'aria-labelledby needs a target element id and ids are not plumbed to referenced elements yet', fallback: 'nothing emitted until id plumbing exists', waiver: 'a11y-labelledby-svelte' });
+      this.warnings.push('a11y: labelledBy is not emitted (no id plumbing to the referenced element yet; documented divergence)');
+    }
     if (node.a11y?.live) { out.push(` aria-live="${node.a11y.live}"`); this.express(`a11y.live=${node.a11y.live}`, { mechanism: 'aria-live' }); }
     return out.join('');
   }
@@ -81,6 +90,7 @@ class SvelteRenderer extends RendererBase {
   variantIcon(node) {
     const v = this.variantData(node);
     if (!v || !Object.keys(v.iconCases).length) return '';
+    this.express('icon', { mechanism: 'variant icon cases (aria-hidden dynamic component)' });
     const cases = Object.entries(v.iconCases)
       .map(([val, tok]) => `${JSON.stringify(val)}: ${this.icon(tok)}`)
       .join(', ');
@@ -105,10 +115,12 @@ class SvelteRenderer extends RendererBase {
   visitAction(node) {
     const handler = node.onEvent ? ` on:click={${node.onEvent}}` : '';
     const icon = node.icon ? `<svelte:component this={${this.icon(node.icon)}} aria-hidden="true" />` : '';
+    if (node.icon) this.express('icon', { mechanism: 'action icon (aria-hidden icon component)' });
     return `<button type="button"${handler}${this.disabledAttr(node)}${this.a11y(node)}${this.styleAttr(node)}>${icon}${node.label ? this.interp(node.label) : ''}</button>`;
   }
   visitIcon(node) {
     const sym = this.icon(node.icon);
+    this.express('icon', { mechanism: 'icon component' });
     return node.a11y?.label
       ? `<svelte:component this={${sym}} role="img"${this.bind('aria-label', node.a11y.label)}${this.styleAttr(node)} />`
       : `<svelte:component this={${sym}} aria-hidden="true"${this.styleAttr(node)} />`;

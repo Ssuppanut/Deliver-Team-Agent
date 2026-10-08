@@ -47,6 +47,9 @@ class ReactRenderer extends RendererBase {
       ...flex,
       ...(node.style ? Object.entries(node.style).map(([slot, token]) => `${STYLE_PROP[slot] ?? slot}: '${mapToken(token)}'`) : []),
     ];
+    // D4a: per-slot static style traits (variant cases are not counted; padding is not a ledger trait, F-30).
+    if (node.style?.background) this.express('style=background', { mechanism: 'backgroundColor (static style)' });
+    if (node.style?.radius) this.express('style=radius', { mechanism: 'borderRadius (static style)' });
     // F-7 size slot: a dimension TOKEN drives width/height (never a raw px).
     if (node.size) {
       base.push(`width: '${mapToken(node.size)}'`, `height: '${mapToken(node.size)}'`);
@@ -90,6 +93,12 @@ class ReactRenderer extends RendererBase {
     const out = [];
     if (node.role) { out.push(` role="${node.role}"`); this.express(`role=${node.role}`, { mechanism: `role="${node.role}"` }); }
     if (node.a11y?.label) { out.push(` aria-label=${this.attr(node.a11y.label)}`); this.express('a11y.label', { mechanism: 'aria-label' }); }
+    // D4a: labelledBy needs a target element id and ids are not plumbed to referenced elements yet, so aria-labelledby
+    // could point to nothing. Emit nothing; time-boxed waiver until id plumbing exists (see docs/audits).
+    if (node.a11y?.labelledBy) {
+      this.diverge('a11y.labelledBy', { reason: 'aria-labelledby needs a target element id and ids are not plumbed to referenced elements yet', fallback: 'nothing emitted until id plumbing exists', waiver: 'a11y-labelledby-react' });
+      this.warnings.push('a11y: labelledBy is not emitted (no id plumbing to the referenced element yet; documented divergence)');
+    }
     if (node.a11y?.live) { out.push(` aria-live="${node.a11y.live}"`); this.express(`a11y.live=${node.a11y.live}`, { mechanism: 'aria-live' }); }
     return out.join('');
   }
@@ -97,6 +106,7 @@ class ReactRenderer extends RendererBase {
   variantIcon(node) {
     const v = this.variantData(node);
     if (!v || !Object.keys(v.iconCases).length) return '';
+    this.express('icon', { mechanism: 'variant icon cases (aria-hidden icon component)' });
     const cases = Object.entries(v.iconCases)
       .map(([val, tok]) => `${JSON.stringify(val)}: <${this.icon(tok)} aria-hidden="true" />`)
       .join(', ');
@@ -129,11 +139,13 @@ class ReactRenderer extends RendererBase {
     const handler = node.onEvent ? ` onClick={${node.onEvent}}` : '';
     const label = node.label ? this.interp(node.label) : '';
     const icon = node.icon ? `<${this.icon(node.icon)} aria-hidden="true" />` : '';
+    if (node.icon) this.express('icon', { mechanism: 'action icon (aria-hidden icon component)' });
     return `<button type="button"${handler}${this.disabledAttr(node)}${this.a11yAttrs(node)}${this.styleAttr(node)}>${icon}${label}</button>`;
   }
 
   visitIcon(node) {
     const sym = this.icon(node.icon);
+    this.express('icon', { mechanism: 'icon component' });
     return node.a11y?.label
       ? `<${sym} role="img" aria-label=${this.attr(node.a11y.label)}${this.styleAttr(node)} />`
       : `<${sym} aria-hidden="true"${this.styleAttr(node)} />`;

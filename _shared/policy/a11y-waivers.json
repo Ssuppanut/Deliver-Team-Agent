@@ -1,14 +1,14 @@
 {
   "policy": "A divergence (a trait a platform genuinely cannot express) is only allowed with an explicit expiry date and an approver. No open-ended waivers. See .claude/skills/_guards/a11y-guard/SKILL.md.",
-  "note": "Each entry authorizes the Lowering Ledger (_shared/scripts/ledger-gate.mjs) to accept a `diverged` trait. A ledger entry whose waiver id is absent, expired, or missing approver/expires FAILS the gate. Adding a trait a platform CAN express never belongs here — express it instead.",
+  "note": "Each entry authorizes the Lowering Ledger (_shared/scripts/ledger-gate.mjs) to accept a `diverged` trait. A ledger entry whose waiver id is absent, expired, or missing approver/expires FAILS the gate. Adding a trait a platform CAN express never belongs here — express it instead. Exception: a time-boxed waiver is allowed when its reason names a missing prerequisite (for example the a11y-labelledby-* waivers: id plumbing to the referenced element does not exist yet).",
   "waivers": {
     "a11y-role-status": {
-      "reason": "role=status has no dedicated accessibilityRole (RN), accessibility trait (SwiftUI), or Compose Role. Conveyed via the accompanying live region (aria-live -> accessibilityLiveRegion / liveRegion), which carries the polite-announce semantics status implies. On SwiftUI no live trait is emitted (updatesFrequently does not announce, device-confirmed), so the role is conveyed by nothing until an imperative announcement capability exists; see docs/audits/F-28-value-lowering-audit.md.",
+      "reason": "role=status has no dedicated accessibilityRole (RN), accessibility trait (SwiftUI), or Compose Role. Conveyed via the accompanying live region (aria-live -> liveRegion), which carries the polite-announce semantics status implies. On SwiftUI no live trait is emitted (updatesFrequently does not announce, device-confirmed), so the role is conveyed by nothing until an imperative announcement capability exists; see docs/audits/F-28-value-lowering-audit.md. On React Native the live region (accessibilityLiveRegion) works on Android only (source-verified, not device-tested) and is inert on iOS (device-confirmed), so on iOS the role is conveyed by nothing until an imperative announcement capability exists.",
       "approver": "Ssuppanut (design-system a11y owner)",
       "expires": "2027-06-30"
     },
     "a11y-role-alert": {
-      "reason": "role=alert has no SwiftUI trait or Compose Role. RN maps it to accessibilityRole=\"alert\"; on Compose it is conveyed via the assertive/polite live region on the same node. On SwiftUI no live trait is emitted (updatesFrequently does not announce, device-confirmed), so the role is conveyed by nothing until an imperative announcement capability exists; see docs/audits/F-28-value-lowering-audit.md.",
+      "reason": "role=alert has no SwiftUI trait or Compose Role. RN maps it to accessibilityRole=\"alert\"; on Compose it is conveyed via the assertive/polite live region on the same node. On SwiftUI no live trait is emitted (updatesFrequently does not announce, device-confirmed), so the role is conveyed by nothing until an imperative announcement capability exists; see docs/audits/F-28-value-lowering-audit.md. On React Native the live region (accessibilityLiveRegion) works on Android only (source-verified, not device-tested) and is inert on iOS (device-confirmed), so on iOS the role is conveyed by nothing until an imperative announcement capability exists.",
       "approver": "Ssuppanut (design-system a11y owner)",
       "expires": "2027-06-30"
     },
@@ -64,6 +64,36 @@
     },
     "a11y-live-assertive-react-native": {
       "reason": "a11y.live=assertive on React Native: accessibilityLiveRegion is tagged @platform android and has no iOS consumer (source-verified in react-native 0.87.1; device-confirmed inert on a real iPhone with VoiceOver). Android behaviour is source-verified only: TalkBack was NOT device-tested. The prop is emitted and is effective on Android only; an imperative AccessibilityInfo.announceForAccessibility call for iOS is future work, not implemented. See docs/audits/F-28-value-lowering-audit.md.",
+      "approver": "Ssuppanut (design-system a11y owner)",
+      "expires": "2027-03-31"
+    },
+    "a11y-labelledby-react": {
+      "reason": "a11y.labelledBy on React: it needs a target element id, and the IR and adapters do not yet plumb ids to referenced elements, so emitting aria-labelledby now could point to nothing. Nothing is emitted until id plumbing exists. This is a time-boxed waiver for a missing prerequisite, not a platform limit; see docs/audits/F-28-value-lowering-audit.md.",
+      "approver": "Ssuppanut (design-system a11y owner)",
+      "expires": "2027-03-31"
+    },
+    "a11y-labelledby-vue": {
+      "reason": "a11y.labelledBy on Vue: it needs a target element id, and the IR and adapters do not yet plumb ids to referenced elements, so emitting aria-labelledby now could point to nothing. Nothing is emitted until id plumbing exists. This is a time-boxed waiver for a missing prerequisite, not a platform limit; see docs/audits/F-28-value-lowering-audit.md.",
+      "approver": "Ssuppanut (design-system a11y owner)",
+      "expires": "2027-03-31"
+    },
+    "a11y-labelledby-svelte": {
+      "reason": "a11y.labelledBy on Svelte: it needs a target element id, and the IR and adapters do not yet plumb ids to referenced elements, so emitting aria-labelledby now could point to nothing. Nothing is emitted until id plumbing exists. This is a time-boxed waiver for a missing prerequisite, not a platform limit; see docs/audits/F-28-value-lowering-audit.md.",
+      "approver": "Ssuppanut (design-system a11y owner)",
+      "expires": "2027-03-31"
+    },
+    "a11y-labelledby-react-native": {
+      "reason": "a11y.labelledBy on React Native: it needs a target element id, and the IR and adapters do not yet plumb ids to referenced elements, so emitting accessibilityLabelledBy (Android, matched by nativeID) now could point to nothing. Nothing is emitted until id plumbing exists. This is a time-boxed waiver for a missing prerequisite, not a platform limit; see docs/audits/F-28-value-lowering-audit.md.",
+      "approver": "Ssuppanut (design-system a11y owner)",
+      "expires": "2027-03-31"
+    },
+    "a11y-labelledby-swiftui": {
+      "reason": "a11y.labelledBy on SwiftUI: it needs a target element id, and the IR and adapters do not yet plumb ids to referenced elements, so emitting the native label relationship now could point to nothing. Nothing is emitted until id plumbing exists. This is a time-boxed waiver for a missing prerequisite, not a platform limit; see docs/audits/F-28-value-lowering-audit.md.",
+      "approver": "Ssuppanut (design-system a11y owner)",
+      "expires": "2027-03-31"
+    },
+    "a11y-labelledby-compose": {
+      "reason": "a11y.labelledBy on Compose: it needs a target element id, and the IR and adapters do not yet plumb ids to referenced elements, so emitting the native label relationship now could point to nothing. Nothing is emitted until id plumbing exists. This is a time-boxed waiver for a missing prerequisite, not a platform limit; see docs/audits/F-28-value-lowering-audit.md.",
       "approver": "Ssuppanut (design-system a11y owner)",
       "expires": "2027-03-31"
     }

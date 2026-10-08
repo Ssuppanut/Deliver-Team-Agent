@@ -33,6 +33,9 @@ class RNRenderer extends RendererBase {
     const base = node.style
       ? Object.entries(node.style).map(([slot, token]) => `${STYLE_PROP[slot] ?? slot}: ${mapToken(token)}`)
       : [];
+    // D4a: per-slot static style traits (variant cases are not counted; padding is not a ledger trait, F-30).
+    if (node.style?.background) this.express('style=background', { mechanism: 'backgroundColor (static style)' });
+    if (node.style?.radius) this.express('style=radius', { mechanism: 'borderRadius (static style)' });
     // F-7 size slot: a dimension TOKEN drives width/height (never a raw number).
     if (node.size) {
       base.push(`width: ${mapToken(node.size)}`, `height: ${mapToken(node.size)}`);
@@ -60,6 +63,7 @@ class RNRenderer extends RendererBase {
   variantIcon(node) {
     const v = this.variantData(node);
     if (!v || !Object.keys(v.iconCases).length) return '';
+    this.express('icon', { mechanism: 'variant icon cases (icon component)' });
     const cases = Object.entries(v.iconCases)
       .map(([val, tok]) => `${JSON.stringify(val)}: <${this.icon(tok)} />`)
       .join(', ');
@@ -73,6 +77,12 @@ class RNRenderer extends RendererBase {
   a11yProps(node) {
     const out = [];
     if (node.a11y?.label) { out.push(` accessibilityLabel={${this.attr(node.a11y.label)}}`); this.express('a11y.label', { mechanism: 'accessibilityLabel' }); }
+    // D4a: labelledBy needs a target element id and ids are not plumbed to referenced elements yet, so the
+    // native equivalent could point to nothing. Emit nothing; time-boxed waiver until id plumbing exists (see docs/audits).
+    if (node.a11y?.labelledBy) {
+      this.diverge('a11y.labelledBy', { reason: 'accessibilityLabelledBy needs the nativeID of the referenced element and ids are not plumbed yet', fallback: 'nothing emitted until id plumbing exists', waiver: 'a11y-labelledby-react-native' });
+      this.warnings.push('a11y: labelledBy is not emitted (no nativeID plumbing to the referenced element yet; documented divergence)');
+    }
     if (node.role) {
       const r = this.rnRole(node.role);
       if (r) { out.push(` accessibilityRole="${r}"`); this.express(`role=${node.role}`, { mechanism: `accessibilityRole="${r}"` }); }
@@ -122,6 +132,7 @@ class RNRenderer extends RendererBase {
   visitAction(node) {
     const press = node.onEvent ? ` onPress={${node.onEvent}}` : '';
     const icon = node.icon ? `<${this.icon(node.icon)} />` : '';
+    if (node.icon) this.express('icon', { mechanism: 'action icon (icon component)' });
     // a11yProps accounts for an explicit accessibilityLabel / live on the button
     // (role is already fixed to "button" here). Without this the IR's a11y.label
     // was silently dropped — caught by the Lowering Ledger.
@@ -129,6 +140,7 @@ class RNRenderer extends RendererBase {
   }
   visitIcon(node) {
     const sym = this.icon(node.icon);
+    this.express('icon', { mechanism: 'icon component' });
     return node.a11y?.label
       ? `<${sym} accessibilityRole="image" accessibilityLabel={${this.attr(node.a11y.label)}}${this.style(node)} />`
       : `<${sym} accessible={false}${this.style(node)} />`;
@@ -156,6 +168,7 @@ class RNRenderer extends RendererBase {
     const a11yLabel = node.a11y?.label ? ` accessibilityLabel={${this.attr(node.a11y.label)}}` : '';
     if (node.a11y?.label) this.express('a11y.label', { mechanism: 'accessibilityLabel' });
     if (node.a11y?.describedBy) this.diverge('a11y.describedBy', { reason: 'React Native has no aria-describedby', fallback: 'adjacent live-region Text / accessibilityHint', waiver: 'a11y-describedby-native' });
+    if (node.a11y?.labelledBy) this.diverge('a11y.labelledBy', { reason: 'accessibilityLabelledBy needs the nativeID of the referenced element and ids are not plumbed yet', fallback: 'nothing emitted until id plumbing exists', waiver: 'a11y-labelledby-react-native' });
     const invalidAttr = node.a11y?.invalid ? ` aria-invalid={!!${node.a11y.invalid}}` : '';
     if (node.a11y?.invalid) this.express('a11y.invalid', { mechanism: 'aria-invalid' });
     const style = this.style(node);
@@ -210,6 +223,7 @@ class RNRenderer extends RendererBase {
     const a11yLabel = labelSource ? ` accessibilityLabel={${this.attr(labelSource)}}` : '';
     if (node.a11y?.label) this.express('a11y.label', { mechanism: 'accessibilityLabel' });
     if (node.a11y?.describedBy) this.diverge('a11y.describedBy', { reason: 'React Native has no aria-describedby', fallback: 'adjacent live-region Text / accessibilityHint', waiver: 'a11y-describedby-native' });
+    if (node.a11y?.labelledBy) this.diverge('a11y.labelledBy', { reason: 'accessibilityLabelledBy needs the nativeID of the referenced element and ids are not plumbed yet', fallback: 'nothing emitted until id plumbing exists', waiver: 'a11y-labelledby-react-native' });
     const invalidAttr = node.a11y?.invalid ? ` aria-invalid={!!${node.a11y.invalid}}` : '';
     if (node.a11y?.invalid) this.express('a11y.invalid', { mechanism: 'aria-invalid' });
 
