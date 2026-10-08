@@ -29,12 +29,17 @@
  * Determinism: the corpus is discovered and sorted; every operator selects its
  * sites deterministically; re-runs are identical.
  *
- * Exit code: 0 when the baseline is clean AND every surviving mutant is in the
- * KNOWN_SURVIVORS allowlist (logged findings). Non-zero on a dirty baseline, on
- * a NEW survivor class (a fresh blind spot), or on an operator whose known-
- * defect mutants stopped being killed (a gate regression). Survivors that are
- * already-logged findings do NOT fail the run — they are triage data, per the
- * Layer-3 brief.
+ * Exit code: 0 when the baseline is clean AND checkSurvivors() passes: every surviving
+ * mutant is matched by a scoped, approved, unexpired entry of
+ * _shared/policy/mutation-known-survivors.yaml (rules M0 to M4, see
+ * mutation-known-survivors.mjs), and no entry is stale. Non-zero on a dirty baseline,
+ * on a NEW survivor (M1), or on a stale / over-broad / malformed entry. Survivors that
+ * are already-logged findings do NOT fail the run: they are triage data, burned down by
+ * the cluster fix PRs.
+ *
+ * Scope note (D4b): the harness mutates generated OUTPUT text, ledger and IR clones. It
+ * never edits adapter source, so an adapter regression is only seen by gates that run
+ * on their own (for example check-live-lowering), not by a mutant.
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -56,6 +61,8 @@ import { checkParity } from './e2e-multi.mjs';
 import { checkNativeExprLeak, checkDeclaredDropped } from './output-guards.mjs';
 import { checkLedger } from './ledger-gate.mjs';
 import { checkTimeZones } from './validate-schema.mjs';
+import { checkLiveLowering, schemaLiveValues } from './check-live-lowering.mjs';
+import { checkSurvivors, formatSurvivorReport } from './mutation-known-survivors.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '../..');
@@ -99,8 +106,13 @@ export function buildBaseline(feature, specPath) {
   const results = {};
   for (const [adapter, gen] of Object.entries(GENERATORS)) results[adapter] = gen(specPath, feature);
   const ledger = Object.values(results).flatMap((r) => r.ledger ?? []);
-  return { feature, ir, results, ledger };
+  return { feature, specPath, ir, results, ledger };
 }
+
+// The live-lowering gate needs the live enum values; deriving them re-walks the schema (~27 ms), so
+// compute them once per process, never per mutant.
+let LIVE_VALUES = null;
+const liveValues = () => (LIVE_VALUES ??= schemaLiveValues());
 
 // -------------------------------------------------------------------------
 // The gate battery — identical wiring to e2e-multi.mjs. Returns which gates
@@ -121,6 +133,13 @@ export function runGates(bundle) {
     // F-27 (follow-up): the validate-schema literal-timezone gate, run on the IR
     // so a bad literal timeZone injected into a datetime value is caught here.
     'timezone-schema': (() => { const e = checkTimeZones(ir.root); return { ok: e.length === 0, issues: e.map((x) => ({ severity: 'serious', msg: x.message })) }; })(),
+    // D4b: the F-28 live-lowering gate, run on the MUTANT's generated code (its `generate` parameter) and
+    // the feature's own spec. The gate is wrapped, not edited: its issues carry no severity, so the wrapper
+    // adds one to pass the message filter below (RED already counted on `ok`).
+    'live-lowering': (() => {
+      const r = checkLiveLowering({ specPaths: [bundle.specPath], values: liveValues(), generate: (a) => results[a].code });
+      return { ok: r.ok, issues: r.issues.map((i) => ({ severity: 'serious', msg: i.msg })) };
+    })(),
   };
   // perf-guard runs but is advisory-only (returns ok:true); kept for parity of
   // execution, never counted as a killer.
@@ -138,6 +157,7 @@ export function runGates(bundle) {
 }
 
 const clone = (b) => structuredClone(b);
+const ADAPTER_IDS = Object.keys(GENERATORS);
 
 // -------------------------------------------------------------------------
 // Mutation operators. Each `sites(bundle)` returns a deterministic list of
@@ -575,7 +595,233 @@ const OPERATORS = [
       return out;
     },
   },
+
+  // ===== D4b: value-substitution operators ====================================================
+  // Output-text edits in the style of link-empty-body / layout-axis-*: the ledger is NOT touched, so
+  // only a gate that looks at the emitted VALUE can kill them. Sites are found from the IR (never from
+  // the ledger) and a site only exists when the baseline output really contains the text to edit.
+
+  // O14 - an `off` live region is lowered as polite (the F-28 defect). check-live-lowering must kill it.
+  {
+    id: 'live-off-as-polite',
+    klass: 'live-lowering',
+    expect: 'live-lowering (L1: an off live region emitted as polite)',
+    sites(bundle) {
+      if (!irNodes(bundle.ir).some((n) => n.a11y?.live === 'off')) return [];
+      return [
+        textSite(bundle, 'react-native', 'off', rx('accessibilityLiveRegion="none"', 'accessibilityLiveRegion="polite"')),
+        textSite(bundle, 'compose', 'off', rx('Column() {', 'Column(modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }) {')),
+      ].filter(Boolean);
+    },
+  },
+
+  // O15 - a web live value collapses to polite (assertive -> polite, off -> polite).
+  {
+    id: 'live-value-collapse',
+    klass: 'live-lowering',
+    expect: 'live-lowering (L1: a web aria-live value replaced by another valid value)',
+    sites(bundle) {
+      const values = [...new Set(irNodes(bundle.ir).map((n) => n.a11y?.live).filter((v) => v === 'assertive' || v === 'off'))].sort();
+      return values.flatMap((v) => WEB.map((a) => textSite(bundle, a, v, rx(`aria-live="${v}"`, 'aria-live="polite"')))).filter(Boolean);
+    },
+  },
+
+  // O16 - a NON-enforced role is replaced by another valid role (web group -> list, RN button -> link).
+  {
+    id: 'role-value-swap',
+    klass: 'a11y (role value)',
+    expect: 'none today: a11y-guard enforces the output role only for status, alert, img and separator',
+    sites(bundle) {
+      const nodes = irNodes(bundle.ir);
+      const out = [];
+      if (nodes.some((n) => n.role === 'group')) for (const a of WEB) out.push(textSite(bundle, a, 'group', rx('role="group"', 'role="list"')));
+      if (nodes.some((n) => n.kind === 'action')) out.push(textSite(bundle, 'react-native', 'button', rx('accessibilityRole="button"', 'accessibilityRole="link"')));
+      return out.filter(Boolean);
+    },
+  },
+
+  // O17 - an ENFORCED role (img) is replaced by button on every adapter that emits it. a11y-guard's output
+  // tier must kill it (this is the contrast case for role-value-swap).
+  {
+    id: 'enforced-role-swap',
+    klass: 'a11y (role value)',
+    expect: 'a11y (output tier: IR declares role="img" but the output has no img trait)',
+    sites(bundle) {
+      if (!irNodes(bundle.ir).some((n) => n.role === 'img')) return [];
+      return [
+        ...WEB.map((a) => textSite(bundle, a, 'img', rx('role="img"', 'role="button"'))),
+        textSite(bundle, 'react-native', 'img', rx('accessibilityRole="image"', 'accessibilityRole="button"')),
+        textSite(bundle, 'swiftui', 'img', rx('.isImage', '.isButton')),
+        textSite(bundle, 'compose', 'img', rx('Role.Image', 'Role.Button')),
+      ].filter(Boolean);
+    },
+  },
+
+  // O18 - the heading LEVEL is lost: web <hN> -> <h1>; SwiftUI font of level N -> font of level N-1.
+  {
+    id: 'heading-level-collapse',
+    klass: 'heading (level)',
+    expect: 'none today: no gate compares the emitted heading level with the IR level',
+    sites(bundle) {
+      const levels = [...new Set(irNodes(bundle.ir).filter((n) => n.kind === 'heading' && (n.level ?? 3) >= 2).map((n) => n.level ?? 3))].sort();
+      return levels.flatMap((L) => [
+        ...WEB.map((a) => textSite(bundle, a, `h${L}`, (c) => {
+          const o = c.replace(new RegExp(`<h${L}(?=[\\s>])`), '<h1');
+          return o === c ? null : o.replace(`</h${L}>`, '</h1>');
+        })),
+        textSite(bundle, 'swiftui', `h${L}`, rx(`.font(${SWIFT_HEADING_FONT[L]})`, `.font(${SWIFT_HEADING_FONT[L - 1]})`)),
+      ]).filter(Boolean);
+    },
+  },
+
+  // O19 - heading SEMANTICS are lost: web <hN> -> <div>; React Native drops accessibilityRole="header".
+  {
+    id: 'heading-semantic-drop',
+    klass: 'heading (semantics)',
+    expect: 'none today: no gate checks that an IR heading keeps a heading element or role',
+    sites(bundle) {
+      const levels = [...new Set(irNodes(bundle.ir).filter((n) => n.kind === 'heading').map((n) => n.level ?? 3))].sort();
+      if (!levels.length) return [];
+      return [
+        ...levels.flatMap((L) => WEB.map((a) => textSite(bundle, a, `h${L}`, (c) => {
+          const o = c.replace(new RegExp(`<h${L}(?=[\\s>])`), '<div');
+          return o === c ? null : o.replace(`</h${L}>`, '</div>');
+        }))),
+        textSite(bundle, 'react-native', 'header', rx('accessibilityRole="header" ', '')),
+      ].filter(Boolean);
+    },
+  },
+
+  // O20 - the number rounding mode is flipped (floor <-> ceil) on every adapter that emits it.
+  {
+    id: 'rounding-mode-swap',
+    klass: 'number format (rounding)',
+    expect: 'none today: the ledger records number-format as expressed whatever the rounding mode',
+    sites(bundle) {
+      const modes = [...new Set(irNodes(bundle.ir).flatMap((n) => ['text', 'label'].map((f) => n[f]?.kind === 'format' ? n[f].format?.rounding : undefined)).filter((m) => m === 'floor' || m === 'ceil'))].sort();
+      return modes.flatMap((m) => {
+        const to = m === 'floor' ? 'ceil' : 'floor';
+        const JS = (v) => `roundingMode: "${v}"`;
+        const SW = (v) => `f.roundingMode = .${v === 'floor' ? 'floor' : 'ceiling'}`;
+        const KT = (v) => `RoundingMode.${v === 'floor' ? 'FLOOR' : 'CEILING'}`;
+        return [
+          ...[...WEB, 'react-native'].map((a) => textSite(bundle, a, m, rx(JS(m), JS(to)))),
+          textSite(bundle, 'swiftui', m, rx(SW(m), SW(to))),
+          textSite(bundle, 'compose', m, rx(KT(m), KT(to))),
+        ];
+      }).filter(Boolean);
+    },
+  },
+
+  // O21 - the date style is changed (short/medium -> long, long -> short).
+  {
+    id: 'date-style-swap',
+    klass: 'date format (style)',
+    expect: 'none today: the ledger records date-format as expressed whatever the dateStyle',
+    sites(bundle) {
+      const styles = [...new Set(irNodes(bundle.ir).flatMap((n) => ['text', 'label'].map((f) => n[f]?.kind === 'datetime' ? n[f].dateFormat?.dateStyle : undefined)).filter((v) => ['short', 'medium', 'long'].includes(v)))].sort();
+      return styles.flatMap((v) => {
+        const to = v === 'long' ? 'short' : 'long';
+        return [
+          ...[...WEB, 'react-native'].map((a) => textSite(bundle, a, v, rx(`dateStyle: "${v}"`, `dateStyle: "${to}"`))),
+          textSite(bundle, 'swiftui', v, rx(`f.dateStyle = .${v}`, `f.dateStyle = .${to}`)),
+          textSite(bundle, 'compose', v, rx(`java.text.DateFormat.${v.toUpperCase()}`, `java.text.DateFormat.${to.toUpperCase()}`)),
+        ];
+      }).filter(Boolean);
+    },
+  },
+
+  // O22 - a numeric input loses its numeric type (web type="number" -> "text"; RN drops keyboardType).
+  {
+    id: 'inputtype-drop',
+    klass: 'input (type)',
+    expect: 'none today: nothing compares the emitted input type with the IR inputType',
+    sites(bundle) {
+      if (!irNodes(bundle.ir).some((n) => n.kind === 'input' && n.input?.inputType === 'number')) return [];
+      return [
+        ...WEB.map((a) => textSite(bundle, a, 'number', rx('type="number"', 'type="text"'))),
+        textSite(bundle, 'react-native', 'number', rx('keyboardType="numeric" ', '')),
+      ].filter(Boolean);
+    },
+  },
+
+  // O23 - one emitted STATIC style slot (padding, background, radius) is removed per adapter output.
+  {
+    id: 'style-slot-drop',
+    klass: 'style (static slot)',
+    expect: 'none today: style=background/radius are recorded as expressed whatever the output, padding has no trait',
+    sites(bundle) {
+      const slots = ['padding', 'background', 'radius'].filter((sl) => irNodes(bundle.ir).some((n) => n.style?.[sl]));
+      return slots.flatMap((sl) => Object.keys(STYLE_DROP).map((a) => textSite(bundle, a, sl, STYLE_DROP[a][sl]))).filter(Boolean);
+    },
+  },
+
+  // O24 - an image loses its alternative text (web alt attribute, React Native image accessibilityLabel, Compose AsyncImage contentDescription).
+  {
+    id: 'alt-drop',
+    klass: 'media (alt)',
+    expect: 'none today: a11y-guard img-alt checks the IR, not the emitted alt',
+    sites(bundle) {
+      if (!irNodes(bundle.ir).some((n) => n.kind === 'media' && n.alt)) return [];
+      return [
+        textSite(bundle, 'react', 'alt', (c) => rmFirst(c, / alt=(\{[^}]*\}|"[^"]*")/)),
+        textSite(bundle, 'vue', 'alt', (c) => rmFirst(c, / :?alt=("[^"]*")/)),
+        textSite(bundle, 'svelte', 'alt', (c) => rmFirst(c, / alt=(\{[^}]*\}|"[^"]*")/)),
+        textSite(bundle, 'react-native', 'alt', (c) => { const o = c.replace(/(<Image\b[^>]*?) accessibilityLabel=(\{[^}]*\}|"[^"]*")/, '$1'); return o === c ? null : o; }),
+        // Compose: the AsyncImage contentDescription (taken from the alt text) becomes null.
+        textSite(bundle, 'compose', 'alt', (c) => { const o = c.replace(/(AsyncImage\(model = [^,]+, contentDescription = )[^,)]+/, '$1null'); return o === c ? null : o; }),
+      ].filter(Boolean);
+    },
+  },
 ];
+
+// ---- helpers for the D4b operators ----------------------------------------------------------
+const SWIFT_HEADING_FONT = ['', '.largeTitle', '.title', '.title2', '.title3', '.headline', '.subheadline'];
+/** A first-occurrence string replacement edit: code -> new code, or null when the text is absent. */
+function rx(from, to) { return (code) => (code.includes(from) ? code.replace(from, to) : null); }
+function rmFirst(code, re) { const o = code.replace(re, ''); return o === code ? null : o; }
+/** One mutant site: `edit` is applied to the CLONE's code. Skipped when the baseline output lacks the target text. */
+function textSite(bundle, adapter, detail, edit) {
+  const code = bundle.results[adapter]?.code;
+  if (!code || edit(code) == null) return null;
+  return {
+    key: `${bundle.feature}:${adapter}:${detail}`,
+    apply(c) { const next = edit(c.results[adapter].code); if (next != null) c.results[adapter].code = next; },
+  };
+}
+/** Removal of ONE emitted static style slot, per adapter (first occurrence in the generated source). */
+const STYLE_DROP = {
+  react: {
+    padding: (c) => rmFirst(c, /padding: '[^']*', |, padding: '[^']*'/),
+    background: (c) => rmFirst(c, /backgroundColor: '[^']*', |, backgroundColor: '[^']*'/),
+    radius: (c) => rmFirst(c, /borderRadius: '[^']*', |, borderRadius: '[^']*'/),
+  },
+  vue: {
+    padding: (c) => rmFirst(c, /'padding': '[^']*', |, 'padding': '[^']*'|padding: [^;"]*; |; padding: [^;"]*/),
+    background: (c) => rmFirst(c, /'background-color': '[^']*', |, 'background-color': '[^']*'|background-color: [^;"]*; |; background-color: [^;"]*/),
+    radius: (c) => rmFirst(c, /'border-radius': '[^']*', |, 'border-radius': '[^']*'|border-radius: [^;"]*; |; border-radius: [^;"]*/),
+  },
+  svelte: {
+    padding: (c) => rmFirst(c, /padding: [^;"]*; |; padding: [^;"]*/),
+    background: (c) => rmFirst(c, /background-color: [^;"]*; |; background-color: [^;"]*/),
+    radius: (c) => rmFirst(c, /border-radius: [^;"]*; |; border-radius: [^;"]*/),
+  },
+  'react-native': {
+    padding: (c) => rmFirst(c, /padding: tokens[^,}]*, |, padding: tokens[^,}]*/),
+    background: (c) => rmFirst(c, /backgroundColor: tokens[^,}]*, |, backgroundColor: tokens[^,}]*/),
+    radius: (c) => rmFirst(c, /borderRadius: tokens[^,}]*, |, borderRadius: tokens[^,}]*/),
+  },
+  swiftui: {
+    padding: (c) => rmFirst(c, /\n\s*\.padding\([^)]*\)/),
+    background: (c) => rmFirst(c, /\n\s*\.background\([^)]*\)/),
+    radius: (c) => rmFirst(c, /\n\s*\.cornerRadius\([^)]*\)/),
+  },
+  compose: {
+    padding: (c) => rmFirst(c, /\.padding\([^)]*\)/),
+    background: (c) => rmFirst(c, /\.background\([^)]*\)/),
+    radius: (c) => rmFirst(c, /\.clip\(RoundedCornerShape\([^)]*\)\)/),
+  },
+};
 
 /** Prop names consumed as a {kind:'ref'} value somewhere in the IR (mirrors e2e-multi). */
 function refUsedProps(ir) {
@@ -617,35 +863,52 @@ function stripTrait(res, traitId) {
   res.code = code;
 }
 
-// Known, already-logged survivors (blind spots). A survivor here is triage data,
-// not a run failure. A survivor OUTSIDE this set is a fresh blind spot and fails
-// the run so it cannot ship unnoticed.
-// F-21 (hardcode-token-native) was removed once token-guard gained native
-// coverage. F-22 (state-by-color-only) was removed once the state-by-color-only
-// contract became a BLOCKING a11y-guard rule — it must now be KILLED, so a future
-// survival is a regression, not a known blind spot. The set is now empty: every
-// operator must kill every mutant it injects.
-const KNOWN_SURVIVORS = new Set([]);
+// Known, already-logged survivors live in _shared/policy/mutation-known-survivors.yaml and are checked by
+// checkSurvivors() (rules M0 to M4, mutation-known-survivors.mjs). There is no allowlist in this file.
 
-export function runMutationTesting() {
-  const corpus = discoverCorpus();
+/**
+ * Mutant identity: `<operator>|<feature>|<adapter>|<site>`. The adapter and site are read from the site key,
+ * which every operator builds as `<feature>[:<adapter>[:<detail>]]`; `*` stands for "not adapter specific".
+ */
+export function mutantIdentity(operator, feature, siteKey) {
+  const rest = siteKey.startsWith(`${feature}:`) ? siteKey.slice(feature.length + 1) : (siteKey === feature ? '' : siteKey);
+  const parts = rest.split(':');
+  const adapter = ADAPTER_IDS.includes(parts[0]) ? parts[0] : '*';
+  const site = adapter === '*' ? rest : parts.slice(1).join(':');
+  return { id: `${operator}|${feature}|${adapter}|${site}`, adapter, site };
+}
+
+/** The corpus baseline bundles (generates all 6 adapters per feature; the slow part of a run). */
+export function buildBundles() {
+  return discoverCorpus().map(([feature, specPath]) => buildBaseline(feature, specPath));
+}
+
+/** @param {object[]} [bundles] prebuilt baselines (default: build them); lets a caller run the mutants twice cheaply */
+export function runMutationTesting(bundles = buildBundles()) {
+  const corpus = bundles.map((b) => [b.feature]);
   const baselineFailures = [];
-  const bundles = [];
-  for (const [feature, specPath] of corpus) {
-    const b = buildBaseline(feature, specPath);
+  for (const b of bundles) {
     const { red } = runGates(b);
-    if (red.length) baselineFailures.push({ feature, red });
-    bundles.push(b);
+    if (red.length) baselineFailures.push({ feature: b.feature, red });
   }
 
   const mutants = [];
+  const seenIds = new Map();
   for (const op of OPERATORS) {
     for (const b of bundles) {
       for (const site of op.sites(b)) {
         const c = clone(b);
         site.apply(c);
         const { red, messages } = runGates(c);
-        mutants.push({ operator: op.id, klass: op.klass, expect: op.expect, key: site.key, red, messages, killed: red.length > 0 });
+        const base = mutantIdentity(op.id, b.feature, site.key);
+        // Two sites with the same key (for example the same ledger trait on two nodes) get a deterministic
+        // ordinal: the first keeps the bare id, later ones are suffixed #2, #3, ... in site order.
+        const n = (seenIds.get(base.id) ?? 0) + 1;
+        seenIds.set(base.id, n);
+        const id = n === 1 ? base.id : `${base.id}#${n}`;
+        const adapter = base.adapter;
+        const siteDetail = n === 1 ? base.site : `${base.site}#${n}`;
+        mutants.push({ id, operator: op.id, feature: b.feature, adapter, site: siteDetail, klass: op.klass, expect: op.expect, key: site.key, red, messages, killed: red.length > 0 });
       }
     }
   }
@@ -700,28 +963,16 @@ function main() {
     if (surv) console.log(`     sample SURVIVED: ${surv.key}  (all gates GREEN)`);
   }
 
-  // Survivors — the deliverable of this phase.
-  console.log('\n## surviving mutants (blind spots)');
-  if (!survived.length) {
-    console.log('  none — every mutant was killed by at least one gate.');
-  } else {
-    const bySurvOp = new Map();
-    for (const m of survived) {
-      if (!bySurvOp.has(m.operator)) bySurvOp.set(m.operator, []);
-      bySurvOp.get(m.operator).push(m);
-    }
-    for (const [op, ms] of bySurvOp) {
-      const known = KNOWN_SURVIVORS.has(op) ? 'KNOWN (logged finding)' : 'NEW BLIND SPOT';
-      console.log(`  [${op}] ${ms.length} survivor(s) — ${known}`);
-      console.log(`     e.g. ${ms[0].key} — all gates GREEN`);
-    }
-  }
+  // Survivors: every one must be matched by a scoped, approved entry; every entry must still match one.
+  const known = checkSurvivors({ mutants });
+  console.log('\n## surviving mutants (blind spots) vs _shared/policy/mutation-known-survivors.yaml');
+  if (!survived.length) console.log('  none: every mutant was killed by at least one gate.');
+  console.log(formatSurvivorReport(known).split('\n').map((l) => `  ${l}`).join('\n'));
 
-  // Exit policy: green while blind spots are known/logged; red on a surprise.
-  const unexpectedSurvivors = survived.filter((m) => !KNOWN_SURVIVORS.has(m.operator));
-  const ok = baselineFailures.length === 0 && unexpectedSurvivors.length === 0;
+  // Exit policy: green while blind spots are known/logged; red on a surprise or a stale entry.
+  const ok = baselineFailures.length === 0 && known.ok;
   console.log(`\n${ok ? 'MUTATION-TESTING PASS' : 'MUTATION-TESTING FAIL'}` +
-    (unexpectedSurvivors.length ? ` (${unexpectedSurvivors.length} unexpected survivor(s) — new blind spot)` : '') +
+    (known.ok ? '' : ` (${known.issues.length} known-survivors issue(s))`) +
     (baselineFailures.length ? ` (baseline not clean)` : ''));
   process.exit(ok ? 0 : 1);
 }

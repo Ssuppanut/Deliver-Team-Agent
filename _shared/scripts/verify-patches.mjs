@@ -33,7 +33,8 @@ import { skillRegistryDrift } from './skill-registry.mjs';
 import { checkParity } from './e2e-multi.mjs';
 import { checkNativeExprLeak, checkDeclaredDropped } from './output-guards.mjs';
 import { checkLedger, loadWaivers } from './ledger-gate.mjs';
-import { runMutationTesting } from './mutate-gates.mjs';
+import { runMutationTesting, buildBundles, runGates as mutGates, buildBaseline as mutBaseline, discoverCorpus as mutCorpus, mutantIdentity } from './mutate-gates.mjs';
+import { checkSurvivors, loadKnownSurvivors, formatSurvivorReport, KNOWN_SURVIVORS_PATH, CLUSTERS as MUT_CLUSTERS } from './mutation-known-survivors.mjs';
 import { RendererBase } from '../../adapters/_shared/renderer-base.mjs';
 import { readFileSync, existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -666,10 +667,15 @@ check('P43', 'ledger: a divergence needs a matching, non-expired, approved waive
   assert(problems.length === 0, `registry must have no open-ended/expired waivers: ${problems.join('; ')}`);
 });
 
+// D4b: one baseline build and one mutation run are shared by every pin in this process (the run is the slow part).
+let _mutBundles = null; let _mutResult = null;
+const mutationBundles = () => (_mutBundles ??= buildBundles());
+const mutationResult = () => (_mutResult ??= runMutationTesting(mutationBundles()));
+
 // --- P44: Layer 3 — gate mutation testing runs, baseline clean, known-defect
 //         mutants killed per operator, only the one remaining blind spot survives.
-check('P44', 'mutation testing: baseline all-green; each killer operator kills its mutants; zero survivors', () => {
-  const { baselineFailures, mutants, survived } = runMutationTesting();
+check('P44', 'mutation testing: baseline all-green; each killer operator kills its mutants; every surviving mutant is matched by a scoped, approved entry of mutation-known-survivors.yaml and no entry is stale', () => {
+  const { baselineFailures, mutants, survived } = mutationResult();
   assert(baselineFailures.length === 0, `mutation baseline must be all-green, got RED: ${baselineFailures.map((f) => f.feature).join(', ')}`);
   assert(mutants.length > 0, 'the harness must generate mutants');
 
@@ -683,7 +689,9 @@ check('P44', 'mutation testing: baseline all-green; each killer operator kills i
     // PR A: an emptied link navigation body must be killed by the parity lint.
     'link-empty-body',
     // PR A2: a dropped or flipped layout axis must be killed by the parity lint.
-    'layout-axis-drop-web', 'layout-axis-flip'];
+    'layout-axis-drop-web', 'layout-axis-flip',
+    // D4b: the live-lowering gate is enrolled; enforced-role swaps are killed by the a11y output tier.
+    'live-off-as-polite', 'live-value-collapse', 'enforced-role-swap'];
   for (const op of KILLERS) {
     const ms = mutants.filter((m) => m.operator === op);
     assert(ms.length > 0, `operator ${op} produced no mutants`);
@@ -713,13 +721,16 @@ check('P44', 'mutation testing: baseline all-green; each killer operator kills i
   // PR A2: dropped / flipped layout-axis mutants are killed by the parity axis lint.
   killerGate('layout-axis-drop-web', 'parity');
   killerGate('layout-axis-flip', 'parity');
+  // D4b: live value mutants are killed by the enrolled live-lowering gate; enforced role swaps by a11y.
+  killerGate('live-off-as-polite', 'live-lowering');
+  killerGate('live-value-collapse', 'live-lowering');
+  killerGate('enforced-role-swap', 'a11y');
 
-  // Every survivor must be a KNOWN blind spot (logged finding). A new survivor
-  // class is a fresh blind spot and must fail here so it cannot ship silently.
-  // There are no known blind spots any more: every mutant must be killed.
-  const KNOWN = new Set([]);
-  const unexpected = survived.filter((m) => !KNOWN.has(m.operator));
-  assert(unexpected.length === 0, `unexpected surviving mutant (new blind spot): ${unexpected.map((m) => m.key).join(', ')}`);
+  // Every survivor must be matched by a scoped, approved, unexpired entry of the known-survivors policy file,
+  // and every entry must still match a survivor (rules M0 to M4). The SAME checker as the CLI; the clock is
+  // pinned so this pin never depends on a real expiry date.
+  const ks = checkSurvivors({ mutants, now: new Date('2026-10-06T00:00:00Z') });
+  assert(ks.ok, `known-survivors check failed:\n${formatSurvivorReport(ks)}`);
   // F-21 must no longer survive (token-guard now covers native).
   assert(!survived.some((m) => m.operator === 'hardcode-token-native'), 'F-21 must be resolved: native token hardcode must NOT survive');
   // F-22 must no longer survive (state-by-color-only is now a blocking a11y contract).
@@ -2148,6 +2159,186 @@ check('P121', 'D4a F-30 doc: docs/BREADTH-MATRIX.md records finding F-30 with th
   assert(doc.includes('# D4a') && /F-30/.test(sec), 'a D4a section recording F-30 must exist');
   for (const spec of ['checkbox', 'checkbox-control', 'checkbox-error', 'native-select', 'number-input', 'slider', 'slider-control', 'state-boolean', 'state-range', 'state-select', 'switch-control', 'switch-toggle']) assert(sec.includes(`\`${spec}\``), `F-30 must list ${spec}`);
   assert(/visitInput/.test(sec) && /modifierArg/.test(sec) && /D6/.test(sec), 'F-30 must name the cause and the D6 plan');
+});
+
+// --- D4b: mutation harness hardening (structured known survivors M0..M4, live-lowering enrolment, value-substitution operators) ---
+// Fixture pins use synthetic mutant lists and temp policy text with the pinned clock D3_NOW; the real-data pins share the single
+// mutation run of this process (mutationResult). None depends on a real expiry date.
+const mutM = (operator, feature, adapter, killed, site = 'x') => ({ id: `${operator}|${feature}|${adapter}|${site}`, operator, feature, adapter, killed });
+const q = (v) => JSON.stringify(v);
+function ksEntry(o = {}) {
+  const f = { operator: 'op-a', feature: '*', adapter: 'react', cluster: 'CL-02', reason: 'a specific reason', approver: D3_APPROVER, expires: d3Day(120), ...o };
+  return `  - { ${Object.entries(f).filter(([, v]) => v !== null).map(([k, v]) => `${k}: ${q(v)}`).join(', ')} }`;
+}
+const ksText = (...entries) => `survivors:\n${entries.join('\n')}\n`;
+const ksCheck = (mutants, text) => checkSurvivors({ mutants, text, now: D3_NOW });
+const ksRules = (r) => [...new Set(r.issues.map((i) => i.rule))];
+const ksOnly = (r, rule, why, needle) => {
+  assert(!r.ok, `${why}: the check must FAIL`);
+  assert(JSON.stringify(ksRules(r)) === JSON.stringify([rule]), `${why}: only ${rule} may fire, got ${JSON.stringify(r.issues.map((i) => [i.rule, i.msg.slice(0, 80)]))}`);
+  if (needle) assert(r.issues.some((i) => i.msg.includes(needle)), `${why}: the message must contain ${JSON.stringify(needle)}, got ${r.issues.map((i) => i.msg).join(' | ')}`);
+};
+
+check('P122', 'known survivors M0-load: a missing or invalid file, no `survivors` list, an unknown or missing field, or a non-mapping entry FAILS', () => {
+  const m = [mutM('op-a', 'f1', 'react', false)];
+  const missing = checkSurvivors({ mutants: m, path: join(tmpdir(), 'no-such-known-survivors.yaml'), now: D3_NOW });
+  assert(!missing.ok && missing.issues.some((i) => i.rule === 'M0-load' && /not found/.test(i.msg)), 'a missing file must be M0');
+  for (const [why, text] of [['invalid YAML', 'survivors: [unclosed'], ['no survivors key', 'version: 1\n'], ['survivors not a list', 'survivors: nope\n']]) {
+    assert(ksCheck(m, text).issues.some((i) => i.rule === 'M0-load'), `${why} must be M0`);
+  }
+  const extra = ksCheck(m, ksText(ksEntry({ extra: 'x' })));
+  assert(extra.issues.some((i) => i.rule === 'M0-load' && /unknown field/.test(i.msg) && /extra/.test(i.msg)), 'an unknown field must be M0 naming it');
+  for (const field of ['operator', 'feature', 'adapter', 'cluster', 'reason', 'approver', 'expires']) {
+    const r = ksCheck(m, ksText(ksEntry({ [field]: null })));
+    assert(r.issues.some((i) => i.rule === 'M0-load' && /missing field/.test(i.msg) && i.msg.includes(field)), `a missing ${field} must be M0 naming it`);
+  }
+  assert(ksCheck(m, 'survivors:\n  - just a string\n').issues.some((i) => i.rule === 'M0-load' && /must be a mapping/.test(i.msg)), 'a non-mapping entry must be M0');
+  assert(ksCheck([], 'survivors: []\n').ok, 'an empty list is the valid goal state');
+});
+
+check('P123', 'known survivors M1-new-survivor: a surviving mutant that matches no entry FAILS naming the mutant; a scoped entry resolves it; deleting one REAL entry makes the real run fail naming a mutant', () => {
+  const m = [mutM('op-a', 'f1', 'react', false), mutM('op-a', 'f2', 'vue', false)];
+  const one = ksCheck(m, ksText(ksEntry({ adapter: 'react' })));
+  ksOnly(one, 'M1-new-survivor', 'vue survivor has no entry', 'op-a|f2|vue|x');
+  assert(ksCheck(m, ksText(ksEntry({ adapter: 'react' }), ksEntry({ adapter: 'vue' }))).ok, 'two scoped entries resolve both survivors');
+  assert(ksCheck([mutM('op-a', 'f1', 'react', true)], 'survivors: []\n').ok, 'a killed mutant needs no entry');
+  const real = readFileSync(KNOWN_SURVIVORS_PATH, 'utf8').split('\n');
+  const idx = real.findIndex((l) => l.includes('operator: rounding-mode-swap') && l.includes('adapter: swiftui'));
+  assert(idx !== -1, 'precondition: the real file has a rounding-mode-swap swiftui entry');
+  const without = [...real.slice(0, idx), ...real.slice(idx + 1)].join('\n');
+  const r = checkSurvivors({ mutants: mutationResult().mutants, text: without, now: D3_NOW });
+  assert(!r.ok && JSON.stringify(ksRules(r)) === JSON.stringify(['M1-new-survivor']) && r.issues.length === 2 && r.issues.every((i) => i.subject.startsWith('rounding-mode-swap|') && i.subject.includes('|swiftui|')), `deleting the real entry must fire M1 for exactly the 2 swiftui rounding mutants, got ${JSON.stringify(r.issues.map((i) => i.subject))}`);
+});
+
+check('P124', 'known survivors M2-stale-entry: an entry matching no mutant, or whose mutants are all killed now, FAILS saying "delete this entry"; a redundant wildcard is stale; adding a fake entry to the REAL file fails', () => {
+  const surv = [mutM('op-a', 'f1', 'react', false)];
+  ksOnly(ksCheck([mutM('op-b', 'f1', 'react', false)], ksText(ksEntry({ operator: 'op-b' }), ksEntry({ operator: 'op-a' }))), 'M2-stale-entry', 'entry for an operator with no mutants', 'delete this entry');
+  const killedNow = ksCheck([mutM('op-a', 'f1', 'react', true)], ksText(ksEntry()));
+  ksOnly(killedNow, 'M2-stale-entry', 'a survivor became killed', 'delete this entry');
+  assert(/all 1 mutant\(s\) it matches are now killed/.test(killedNow.issues[0].msg), 'the message must say its mutants are now killed');
+  assert(ksCheck(surv, ksText(ksEntry())).ok, 'the same entry is fine while the mutant survives');
+  // The most specific entry takes the credit, so a redundant wildcard shows up as stale.
+  const redundant = ksCheck(surv, ksText(ksEntry({ feature: 'f1' }), ksEntry({ feature: '*' })));
+  ksOnly(redundant, 'M2-stale-entry', 'redundant wildcard', 'feature=* adapter=react');
+  const fake = readFileSync(KNOWN_SURVIVORS_PATH, 'utf8').trimEnd() + '\n' + ksEntry({ operator: 'zz-fake-operator', adapter: 'react' }) + '\n';
+  const r = checkSurvivors({ mutants: mutationResult().mutants, text: fake, now: D3_NOW });
+  assert(!r.ok && JSON.stringify(ksRules(r)) === JSON.stringify(['M2-stale-entry']) && /zz-fake-operator/.test(r.issues[0].msg) && /delete this entry/.test(r.issues[0].msg), 'a fake entry in the real file must fire M2 naming it');
+});
+
+check('P125', 'known survivors M3-entry-quality: empty reason, wrong or case-differing approver, missing/invalid/past expiry (the expiry day is not inclusive), invalid cluster, duplicate scope FAIL', () => {
+  const m = [mutM('op-a', 'f1', 'react', false)];
+  const one = (o, why, needle) => ksOnly(ksCheck(m, ksText(ksEntry(o))), 'M3-entry-quality', why, needle);
+  one({ reason: '' }, 'empty reason', 'empty reason');
+  one({ reason: '   ' }, 'blank reason', 'empty reason');
+  one({ approver: 'Someone Else' }, 'wrong approver', 'approver');
+  one({ approver: 'ssuppanut (design-system a11y owner)' }, 'approver differs only by case', 'approver');
+  one({ expires: 'not-a-date' }, 'invalid expiry', 'unparseable expiry');
+  one({ expires: d3Day(-1) }, 'past expiry', 'expired');
+  // Not inclusive: an entry is already past during its own expiry day (a clock later that day), like the waivers.
+  ksOnly(checkSurvivors({ mutants: m, text: ksText(ksEntry({ expires: d3Day(0) })), now: new Date(D3_NOW.getTime() + 12 * 3600000) }), 'M3-entry-quality', 'expiry day itself (not inclusive)', 'expired');
+  one({ cluster: 'CL-99' }, 'invalid cluster', 'cluster');
+  one({ cluster: 'none' }, 'invalid cluster alias', 'cluster');
+  assert(ksCheck(m, ksText(ksEntry({ expires: d3Day(1) }))).ok, 'the day before expiry passes');
+  assert(ksCheck(m, ksText(ksEntry({ cluster: 'none-gate-gap' }))).ok, 'none-gate-gap is a valid cluster');
+  // A duplicate scope fires M3 and, because the first copy takes all the credit, the second copy is also stale (M2).
+  const dup = ksCheck(m, ksText(ksEntry(), ksEntry()));
+  assert(!dup.ok && dup.issues.some((i) => i.rule === 'M3-entry-quality' && /duplicates entry 1/.test(i.msg)) && JSON.stringify(ksRules(dup)) === JSON.stringify(['M2-stale-entry', 'M3-entry-quality']), `a duplicate scope must fire M3 (and the redundant copy M2), got ${JSON.stringify(ksRules(dup))}`);
+  for (const c of ['CL-01', 'CL-10']) assert(MUT_CLUSTERS.includes(c), `${c} must be a valid cluster`);
+});
+
+check('P126', 'known survivors M4-over-broad: an entry whose scope also matches KILLED mutants of its operator FAILS; a wildcard is legal only where every mutant of the operator survives; the real file uses no operator-wide */* entry', () => {
+  const mixed = [mutM('op-a', 'f1', 'react', false), mutM('op-a', 'f2', 'react', true)];
+  ksOnly(ksCheck(mixed, ksText(ksEntry({ feature: '*' }))), 'M4-over-broad', 'wildcard feature also covers a killed mutant', 'narrow the feature/adapter scope');
+  assert(ksCheck(mixed, ksText(ksEntry({ feature: 'f1' }))).ok, 'narrowing the scope to the surviving feature passes');
+  const allSurvive = [mutM('op-a', 'f1', 'react', false), mutM('op-a', 'f2', 'vue', false)];
+  assert(ksCheck(allSurvive, ksText(ksEntry({ feature: '*', adapter: '*' }))).ok, 'a */* entry is legal when every mutant of the operator survives');
+  ksOnly(ksCheck([...allSurvive, mutM('op-a', 'f3', 'compose', true)], ksText(ksEntry({ feature: '*', adapter: '*' }))), 'M4-over-broad', '*/* once a killed mutant exists', 'KILLED');
+  const real = loadKnownSurvivors().entries;
+  assert(real.length > 0 && !real.some((e) => e.feature === '*' && e.adapter === '*'), 'the real file must not use an operator-wide */* entry (owner approval needed)');
+});
+
+check('P127', 'D4b A2/A4: the old KNOWN_SURVIVORS Set and the duplicate KNOWN Set in P44 are gone; the CLI and P44 call the same checkSurvivors(); the real run passes at a pinned clock and every real entry is well formed', () => {
+  const harness = readFileSync(resolve(ROOT, '_shared/scripts/mutate-gates.mjs'), 'utf8');
+  assert(!/const KNOWN_SURVIVORS\s*=/.test(harness) && !/KNOWN_SURVIVORS\.has/.test(harness), 'mutate-gates.mjs must not keep the old KNOWN_SURVIVORS Set');
+  assert(/checkSurvivors\(\{ mutants \}\)/.test(harness), 'the CLI must call checkSurvivors');
+  const self = readFileSync(resolve(ROOT, '_shared/scripts/verify-patches.mjs'), 'utf8');
+  const p44 = self.slice(self.indexOf("check('P44'"), self.indexOf("check('P45'"));
+  assert(!/const KNOWN\s*=\s*new Set/.test(p44) && /checkSurvivors\(\{ mutants/.test(p44), 'P44 must read the structured file through checkSurvivors, with no duplicate Set');
+  const r = checkSurvivors({ mutants: mutationResult().mutants, now: D3_NOW });
+  assert(r.ok, `the real run must pass the known-survivors check at the pinned clock:\n${formatSurvivorReport(r)}`);
+  for (const e of loadKnownSurvivors().entries) {
+    assert(e.approver === D3_APPROVER && MUT_CLUSTERS.includes(e.cluster) && typeof e.expires === 'string' && !Number.isNaN(new Date(e.expires).getTime()) && e.reason.trim().length >= 40, `real entry ${e.operator}/${e.adapter} must be well formed with a specific reason`);
+  }
+  const expired = checkSurvivors({ mutants: mutationResult().mutants, now: new Date('2099-01-01T00:00:00Z') });
+  assert(!expired.ok && ksRules(expired).includes('M3-entry-quality'), 'at a far-future clock every entry must be reported expired (M3)');
+  assert(formatSurvivorReport(r) === formatSurvivorReport(checkSurvivors({ mutants: mutationResult().mutants, now: D3_NOW })), 'the report must be deterministic');
+});
+
+check('P128', 'D4b B: check-live-lowering is enrolled in the per-mutant battery on the mutant code and the feature spec; the E1a mutant (RN live-region-off none -> polite) is killed by the live-lowering gate and by nothing else', () => {
+  const b = mutationBundles().find((x) => x.feature === 'live-region-off');
+  assert(b && b.specPath, 'the bundle must carry the spec path');
+  const base = mutGates(b);
+  assert(base.red.length === 0, `the unmutated live-region-off bundle must be GREEN on every gate, got [${base.red}]`);
+  const c = structuredClone(b);
+  assert(c.results['react-native'].code.includes('accessibilityLiveRegion="none"'), 'precondition: RN emits none for off');
+  c.results['react-native'].code = c.results['react-native'].code.replace('accessibilityLiveRegion="none"', 'accessibilityLiveRegion="polite"');
+  const r = mutGates(c);
+  assert(JSON.stringify(r.red) === JSON.stringify(['live-lowering']), `E1a must be killed by live-lowering only, got [${r.red}]`);
+  assert(/react-native lowers live=off/.test((r.messages['live-lowering'] ?? [])[0] ?? ''), 'the wrapped message must name the adapter and value');
+  // Without enrolment the other gates are blind to it: the same mutant with the gate result removed is GREEN elsewhere.
+  assert(!r.red.some((g) => g !== 'live-lowering'), 'no other gate may see the E1a mutant');
+});
+
+check('P129', 'D4b C: every new operator produces mutants; the live and enforced-role operators are killed by the expected gate; every other new operator survives on every mutant and each survivor is matched by an entry of its own cluster', () => {
+  const { mutants } = mutationResult();
+  const NEW = ['live-off-as-polite', 'live-value-collapse', 'role-value-swap', 'enforced-role-swap', 'heading-level-collapse', 'heading-semantic-drop', 'rounding-mode-swap', 'date-style-swap', 'inputtype-drop', 'style-slot-drop', 'alt-drop'];
+  for (const op of NEW) assert(mutants.some((m) => m.operator === op), `operator ${op} must produce at least one mutant`);
+  const killedBy = { 'live-off-as-polite': 'live-lowering', 'live-value-collapse': 'live-lowering', 'enforced-role-swap': 'a11y' };
+  for (const [op, gate] of Object.entries(killedBy)) {
+    const ms = mutants.filter((m) => m.operator === op);
+    assert(ms.every((m) => m.killed && m.red.includes(gate)), `every ${op} mutant must be killed by ${gate}`);
+  }
+  const cluster = { 'role-value-swap': 'CL-03', 'heading-level-collapse': 'CL-02', 'heading-semantic-drop': 'CL-02', 'rounding-mode-swap': 'CL-06', 'date-style-swap': 'none-gate-gap', 'inputtype-drop': 'CL-05', 'style-slot-drop': 'CL-07', 'alt-drop': 'none-gate-gap' };
+  const entries = loadKnownSurvivors().entries;
+  for (const [op, cl] of Object.entries(cluster)) {
+    const ms = mutants.filter((m) => m.operator === op);
+    assert(ms.every((m) => !m.killed), `every ${op} mutant is expected to survive today (a killed one means a gate now covers it: delete the entry)`);
+    assert(ms.every((m) => entries.some((e) => e.operator === op && e.cluster === cl && (e.adapter === '*' || e.adapter === m.adapter))), `every ${op} survivor must be matched by a ${cl} entry`);
+  }
+  // alt-drop covers Compose too (the AsyncImage contentDescription set to null) and every such mutant survives.
+  const composeAlt = mutants.filter((m) => m.operator === 'alt-drop' && m.adapter === 'compose');
+  assert(composeAlt.length >= 1 && composeAlt.every((m) => !m.killed), 'alt-drop must have Compose sites and they must survive today');
+  assert(entries.some((e) => e.operator === 'alt-drop' && e.adapter === 'compose' && e.feature === '*' && e.cluster === 'none-gate-gap'), 'a Compose alt-drop entry must exist');
+  // Mutants are applied to clones only: the shared baseline bundles are untouched.
+  assert(mutationBundles().every((b) => !/accessibilityLiveRegion="polite"/.test(b.results['react-native'].code) || b.feature !== 'live-region-off'), 'baseline bundles must not carry a mutation');
+});
+
+check('P130', 'D4b A3: mutant identity is <operator>|<feature>|<adapter>|<site>, derived from the site key; it is unique and deterministic across two runs of the same bundles; collisions get an ordinal', () => {
+  assert(JSON.stringify(mutantIdentity('op', 'f', 'f:react:x:y')) === JSON.stringify({ id: 'op|f|react|x:y', adapter: 'react', site: 'x:y' }), 'adapter and site come from the key');
+  assert(JSON.stringify(mutantIdentity('op', 'f', 'f')) === JSON.stringify({ id: 'op|f|*|', adapter: '*', site: '' }), 'a bare feature key is not adapter specific');
+  assert(JSON.stringify(mutantIdentity('op', 'f', 'f:prop')) === JSON.stringify({ id: 'op|f|*|prop', adapter: '*', site: 'prop' }), 'a non-adapter second segment is the site');
+  const first = mutationResult().mutants;
+  const second = runMutationTesting(mutationBundles()).mutants;
+  const ids = (ms) => ms.map((m) => m.id);
+  assert(JSON.stringify(ids(first)) === JSON.stringify(ids(second)), 'two runs must produce the same ids in the same order');
+  assert(JSON.stringify(first.map((m) => m.killed)) === JSON.stringify(second.map((m) => m.killed)), 'two runs must kill the same mutants');
+  assert(new Set(ids(first)).size === first.length, 'ids must be unique');
+  assert(first.every((m) => m.id.split('|').length === 4 && m.id.startsWith(`${m.operator}|${m.feature}|${m.adapter}|`)), 'every id has the four parts and matches its fields');
+  const bare = new Set(ids(first));
+  assert(first.filter((m) => /#\d+$/.test(m.id)).every((m) => bare.has(m.id.replace(/#\d+$/, ''))), 'every ordinal id follows a bare first id');
+});
+
+check('P131', 'D4b docs: docs/BREADTH-MATRIX.md has a D4b section with the rules M0 to M4, the 11 new operators, the adapter-source limit and how to add or delete an entry', () => {
+  const doc = readFileSync(resolve(ROOT, 'docs/BREADTH-MATRIX.md'), 'utf8');
+  const sec = doc.slice(doc.indexOf('# D4b'));
+  assert(doc.includes('# D4b - mutation harness hardening'), 'a D4b section must exist');
+  for (const r of ['M0', 'M1', 'M2', 'M3', 'M4']) assert(new RegExp(`\`${r}\``).test(sec), `the section must describe ${r}`);
+  for (const op of ['live-off-as-polite', 'live-value-collapse', 'role-value-swap', 'enforced-role-swap', 'heading-level-collapse', 'heading-semantic-drop', 'rounding-mode-swap', 'date-style-swap', 'inputtype-drop', 'style-slot-drop', 'alt-drop']) assert(sec.includes(`\`${op}\``), `the section must list ${op}`);
+  assert(/never edits adapter source/.test(sec) && /mutation-known-survivors\.yaml/.test(sec), 'the section must state the adapter-source limit and name the policy file');
+  const DELETE_SENTENCE = '**Delete** an entry in the PR that adds the gate check which kills its mutants: the harness then fails with M2\n  "delete this entry" until the line is removed.';
+  assert(sec.includes(DELETE_SENTENCE), 'the section must contain the exact sentence on how to delete an entry');
+  assert(/An entry is removed only when a gate checks the emitted value for that construct and kills the mutant\./.test(sec) && /does not kill a mutant; it only makes a correct expected value possible/.test(sec) && /value-lowering gate/.test(sec), 'the section must state the burn-down rule');
+  assert(!/burn down in the cluster fix PRs/.test(sec), 'the old cluster-fix burn-down claim must be gone');
 });
 
 console.log('\n=== verify-patches ===');
