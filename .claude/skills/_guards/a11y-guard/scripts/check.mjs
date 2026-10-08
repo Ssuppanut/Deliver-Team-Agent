@@ -82,9 +82,10 @@ export function checkA11y(ir, results) {
     if (node.kind === 'action' && !node.label && node.icon) {
       issues.push({ severity: 'moderate', rule: 'icon-button-name', at, msg: 'icon-only action should carry an aria-label' });
     }
-    // An input is labeled by any of: a visible associated label, an aria-label,
-    // or an aria-labelledby reference.
-    if (node.kind === 'input' && !node.label && !node.a11y?.label && !node.a11y?.labelledBy) {
+    // An input is labeled by a visible associated label or an aria-label. a11y.labelledBy is NOT a name
+    // source: no adapter emits it yet (diverged under a11y-labelledby-* waivers until id plumbing exists),
+    // so counting it would let an unnamed input pass.
+    if (node.kind === 'input' && !node.label && !node.a11y?.label) {
       issues.push({ severity: 'serious', rule: 'label', at, msg: 'input has no accessible label' });
     }
     if (node.kind === 'heading' && !node.level) {

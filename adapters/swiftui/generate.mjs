@@ -86,6 +86,9 @@ class SwiftUIRenderer extends RendererBase {
     if (node.style) {
       for (const [slot, token] of Object.entries(node.style)) {
         if (MODIFIER[slot]) out.push(`\n  ${MODIFIER[slot](mapToken(token))}`);
+        // D4a: per-slot static style traits (variant cases are not counted; padding is not a ledger trait, F-30).
+        if (slot === 'background') this.express('style=background', { mechanism: '.background (static style)' });
+        if (slot === 'radius') this.express('style=radius', { mechanism: '.cornerRadius (static style)' });
       }
     }
     // F-7 size slot: a dimension TOKEN drives .frame(width:height:) (never a literal).
@@ -120,6 +123,12 @@ class SwiftUIRenderer extends RendererBase {
       out.push(`\n  .accessibilityLabel(${v})`);
       this.express('a11y.label', { mechanism: '.accessibilityLabel' });
     }
+    // D4a: labelledBy needs a target element id and ids are not plumbed to referenced elements yet, so the
+    // native equivalent could point to nothing. Emit nothing; time-boxed waiver until id plumbing exists (see docs/audits).
+    if (node.a11y?.labelledBy) {
+      this.diverge('a11y.labelledBy', { reason: 'the SwiftUI label relationship needs the referenced element and ids are not plumbed to referenced elements yet', fallback: 'nothing emitted until id plumbing exists', waiver: 'a11y-labelledby-swiftui' });
+      this.warnings.push('a11y: labelledBy is not emitted (no id plumbing to the referenced element yet; documented divergence)');
+    }
     // Map ARIA-style role + live to SwiftUI accessibility traits — never a silent drop.
     const TRAIT = { img: '.isImage', button: '.isButton', header: '.isHeader', link: '.isLink' };
     if (node.role && TRAIT[node.role]) {
@@ -148,6 +157,7 @@ class SwiftUIRenderer extends RendererBase {
   variantIcon(node) {
     const v = this.variantData(node);
     if (!v || !Object.keys(v.iconCases).length) return '';
+    this.express('icon', { mechanism: 'variant icon cases (Image(systemName:))' });
     const dict = Object.entries(v.iconCases)
       .map(([val, tok]) => `${JSON.stringify(val)}: ${JSON.stringify(this.icon(tok))}`)
       .join(', ');
@@ -184,6 +194,7 @@ class SwiftUIRenderer extends RendererBase {
   }
   visitAction(node) {
     const action = node.onEvent ? safe(node.onEvent) : '{}';
+    if (node.icon) this.express('icon', { mechanism: 'action icon (Label systemImage)' });
     const label = node.icon
       ? `Label(${this.plain(node.label)}, systemImage: "${this.icon(node.icon)}")`
       : this.textExpr(node.label);
@@ -191,6 +202,7 @@ class SwiftUIRenderer extends RendererBase {
   }
   visitIcon(node) {
     const sym = this.icon(node.icon);
+    this.express('icon', { mechanism: 'Image(systemName:)' });
     if (node.a11y?.label) {
       const l = node.a11y.label;
       const v = l.kind === 'literal' ? JSON.stringify(String(l.value)) : safe(l.value);
@@ -219,6 +231,7 @@ class SwiftUIRenderer extends RendererBase {
     const title = this.plain(node.label ?? node.a11y?.label);
     if (node.a11y?.label) this.express('a11y.label', { mechanism: 'label (accessible name)' });
     if (node.a11y?.describedBy) this.diverge('a11y.describedBy', { reason: 'SwiftUI has no aria-describedby', fallback: '.accessibilityHint / adjacent Text', waiver: 'a11y-describedby-native' });
+    if (node.a11y?.labelledBy) this.diverge('a11y.labelledBy', { reason: 'the SwiftUI label relationship needs the referenced element and ids are not plumbed to referenced elements yet', fallback: 'nothing emitted until id plumbing exists', waiver: 'a11y-labelledby-swiftui' });
     if (node.a11y?.invalid) this.diverge('a11y.invalid', { reason: 'SwiftUI has no direct aria-invalid trait', fallback: 'label / adjacent error Text conveys the invalid state', waiver: 'a11y-invalid-swiftui' });
     const num = (v) => (typeof v === 'number' ? String(v) : safe(String(v)));
     const bind = `Binding(get: { ${safe(cs.value)} }, set: { ${safe(cs.change)}($0) })`;
@@ -267,6 +280,7 @@ class SwiftUIRenderer extends RendererBase {
     const role = node.role;
     const title = this.plain(node.label ?? node.a11y?.label);
     if (node.a11y?.describedBy) this.diverge('a11y.describedBy', { reason: 'SwiftUI has no aria-describedby', fallback: '.accessibilityHint / adjacent Text', waiver: 'a11y-describedby-native' });
+    if (node.a11y?.labelledBy) this.diverge('a11y.labelledBy', { reason: 'the SwiftUI label relationship needs the referenced element and ids are not plumbed to referenced elements yet', fallback: 'nothing emitted until id plumbing exists', waiver: 'a11y-labelledby-swiftui' });
     if (node.a11y?.invalid) this.diverge('a11y.invalid', { reason: 'SwiftUI has no direct aria-invalid trait', fallback: 'label / adjacent error Text conveys the invalid state', waiver: 'a11y-invalid-swiftui' });
 
     // Real form controls for the toggle / adjustable roles — never a bare TextField.

@@ -80,6 +80,14 @@ export class RendererBase {
     // adapter must express via its native formatter's timezone (or the ledger flags
     // it). Omitted timeZone -> no trait -> output byte-identical to F-26.
     for (const f of ['text', 'label']) if (node[f]?.kind === 'datetime' && node[f]?.dateFormat?.timeZone != null) t.push('date-timezone');
+    // D4a icon: a node that carries an icon (el: icon, an action icon) or a variant icon
+    // case is a trait every adapter must render, or the ledger flags a silent drop.
+    if (node.icon || Object.keys(this.variantData(node)?.iconCases ?? {}).length) t.push('icon');
+    // D4a per-slot STATIC style traits (node.style only, never variant cases). Declared
+    // one literal id per slot so R7 checks each slot separately per adapter. padding is
+    // deliberately NOT declared (finding F-30: Compose drops static padding on input controls).
+    if (node.style?.background) t.push('style=background');
+    if (node.style?.radius) t.push('style=radius');
     return t;
   }
 

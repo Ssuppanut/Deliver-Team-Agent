@@ -2559,3 +2559,79 @@ same semantics as every other waiver) and cites the audit:
 
 Pins: `verify-patches` P101 to P106 (one per adapter, 3 values each), P107 (L0), P108 (L2),
 P109 (L3), P110 (a11y-guard), P111 (wiring and waivers), P112 (determinism).
+
+---
+
+# D4a - retire the regex handled scan, register traits, labelledBy divergence
+
+No generated code changes: every generated code file is byte-identical to main. Only the report JSONs
+of 14 specs change, and only in their ledger entries.
+
+## What changed
+
+- **Old regex handled-trait scan removed.** `handledTraitIdsByAdapter` and `handledTraitIds` are gone. The
+  trait registry gate (R7) and the `schema-constructs` CLI use the code-only scanner (`codeTraitCalls`).
+  P84 now uses the union of that scan. The D1 pure checker `checkTraitRegistry` is kept, because P84 still
+  asserts the walker output and the corrupted-registry cases through it. `declaredTraitIds` stays regex
+  anchored on the literal text of `renderer-base.mjs`; its anchors are now named constants and a missing or
+  reformatted anchor throws an error that names them (pin P114).
+- **Registered with no output change (6 of the 8 entries marked "pending D4"):**
+  - `el-kind:icon`, `element.field:icon`, `style-slot:icon` map to a new declared trait `icon`, expressed by
+    all 6 adapters at the real emit sites (`visitIcon`, `variantIcon`, the action icon path).
+  - `numberFormat.field:rounding` maps to the existing `number-format` trait.
+  - `style-slot:background` and `style-slot:radius` map to two new per-slot traits `style=background` and
+    `style=radius`, declared only for STATIC style slots and expressed at the static-slot emit sites of all 6
+    adapters. The normalizer no longer collapses the `style=` prefix, so R7 checks each slot separately per
+    adapter. `a11y.live=*`, `role=*`, `orientation=*` and `state=*` normalize exactly as before.
+- **Still untracked, reasons updated:** `variant.field:cases` (waits for D6) and `style-slot:padding`
+  (finding F-30 below). `style=padding` is deliberately NOT a ledger trait.
+- **`a11y.labelledBy` is diverged on all 6 adapters** under the time-boxed waivers `a11y-labelledby-react`,
+  `-vue`, `-svelte`, `-react-native`, `-swiftui`, `-compose` (approver `Ssuppanut (design-system a11y owner)`,
+  expiry 2027-03-31). Reason: labelledBy needs a target element id, and the IR and adapters do not yet plumb ids
+  to referenced elements, so emitting `aria-labelledby` (or the native equivalent) now could point to nothing.
+  The registry entry `a11y.field:labelledBy` maps to the trait. The waiver file's note records the exception
+  to its "never waive what a platform can express" rule: a time-boxed waiver is allowed when its reason names a
+  missing prerequisite.
+- **a11y-guard no longer counts `a11y.labelledBy` as an accessible-name source**: an input with only
+  `labelledBy` fails the `label` rule. No corpus spec uses `labelledBy`, so nothing relied on it.
+- **Waiver wording:** `a11y-role-status` and `a11y-role-alert` no longer imply conveyance through the React
+  Native live region. On React Native the live region works on Android only (source-verified, not
+  device-tested) and is inert on iOS (device-confirmed), so on iOS those roles are conveyed by nothing until an
+  imperative announcement capability exists.
+
+Pins P113 to P121.
+
+## F-30 - Compose drops static padding on input controls (found, not fixed)
+
+Found while registering `style-slot:padding`. A static `padding` style slot on an input node is not emitted by
+Compose in these 12 corpus specs: `checkbox`, `checkbox-control`, `checkbox-error`, `native-select`,
+`number-input`, `slider`, `slider-control`, `state-boolean`, `state-range`, `state-select`, `switch-control`,
+`switch-toggle`.
+
+- **Cause:** the control-state branches of `visitInput` in `adapters/compose/generate.mjs` build their own
+  `Modifier.semantics { ... }` and never call `modifierArg(node)`. Only the plain text-field path
+  (`compose/generate.mjs` line 348) does.
+- **Other adapters:** React Native and SwiftUI emit the padding for the same nodes. Example (`checkbox`):
+  Compose `Checkbox(checked = checked, onCheckedChange = onChange, modifier = Modifier.semantics { role =
+  Role.Checkbox; contentDescription = label })`; React Native `... style={{ padding: tokens.space.inset.sm }}`;
+  SwiftUI `.padding(DesignTokens.SpaceInsetSm)`.
+- **No gate caught it:** padding is not a ledger trait, and no output check compares style slots.
+- **Consequence for registration:** `style=padding` cannot be declared without either a waiver or an output
+  change, so `style-slot:padding` stays untracked until D6 makes Compose express it.
+- **Audit correction:** the F-28 audit rows that marked static padding CORRECT for Compose are wrong for input
+  controls. The audit addendum will carry the correction.
+
+## Notes that are NOT fixed here
+
+- **Compose `product-card` modifier order.** The generated chain is `Modifier.background(...).padding(...)
+  .clip(RoundedCornerShape(...))`. The order (background before clip) is shown by the output; whether the
+  background then keeps square corners is a Compose modifier-order semantics question that the generated code
+  alone cannot settle. NOT ESTABLISHED.
+- **SwiftUI variant fallback.** For a variant case on `padding` or `radius`, SwiftUI emits
+  `.padding((["a": DesignTokens.SpaceInsetSm, ...][tone] ?? Color.clear))`. The dictionary values are
+  `CGFloat` tokens (`public static let SpaceInsetSm: CGFloat`) while the fallback is a `Color`, so the two sides
+  of `??` have different types in the text. Whether Swift rejects it is NOT ESTABLISHED (no Swift compiler
+  here). No corpus spec uses padding or radius in variant cases, so nothing exercises it.
+- **`labelledBy` on node kinds whose adapters never run an a11y handler** (link, heading, icon, media on most
+  adapters) stays `unaccounted`, and the ledger fails loudly. `a11y.label` behaves the same on those kinds
+  today, so this is an existing gap, not a new one.

@@ -6,7 +6,7 @@
  */
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { specToIrFromFile } from './spec-to-ir.mjs';
+import { specToIrFromFile, specToIr } from './spec-to-ir.mjs';
 import { generateReact } from '../../adapters/react/generate.mjs';
 import { generateSwiftUI } from '../../adapters/swiftui/generate.mjs';
 import { generateCompose } from '../../adapters/compose/generate.mjs';
@@ -25,7 +25,8 @@ import { checkTraitRegistryGate, formatReport } from './check-trait-registry.mjs
 import { checkCorpusCoverage, formatCoverageReport, ALLOWLIST_PATH } from './check-corpus-coverage.mjs';
 import { checkLiveLowering, formatLiveReport, EXPECTATIONS_PATH as LIVE_EXPECTATIONS_PATH, RULES as RULES_L } from './check-live-lowering.mjs';
 import { parse as parseYaml } from 'yaml';
-import { ADAPTERS as D3_ADAPTERS, codeHandledTraitIdsByAdapter, exercisedConstructs, deriveConstructs, deriveSchemaConstructs, adapterStyleSlots, corpusStyleSlots, declaredTraitIds, handledTraitIds, loadTraitRegistry, checkTraitRegistry } from './schema-constructs.mjs';
+import * as SCALL from './schema-constructs.mjs';
+import { ADAPTERS as D3_ADAPTERS, codeHandledTraitIdsByAdapter, exercisedConstructs, deriveConstructs, deriveSchemaConstructs, adapterStyleSlots, corpusStyleSlots, declaredTraitIds, loadTraitRegistry, checkTraitRegistry, normalizeTraitId, DECLARED_START_ANCHOR, DECLARED_END_ANCHOR } from './schema-constructs.mjs';
 import { route, loadContext } from '../../.ai/router/route.mjs';
 import { loadWorkflow, evaluateWorkflow, runScenarios, lintWorkflow } from './workflow-eval.mjs';
 import { skillRegistryDrift } from './skill-registry.mjs';
@@ -1522,12 +1523,12 @@ check('P83', 'brief schema (PR B): every brief + template validates; a corrupted
   assert(V({ ...base, interaction: ['static'] }), 'interaction [static] alone must validate');
 });
 
-check('P84', 'trait registry scaffold (D1): the schema walker derives the schema constructs plus the style slots (count derived, not hard-coded), every one has a registry entry, none is orphaned, trait mappings only point at declared+handled traits (a11y.labelledBy is never covered); corrupted registries are caught', () => {
+check('P84', 'trait registry scaffold (D1): the schema walker derives the schema constructs plus the style slots (count derived, not hard-coded), every one has a registry entry, none is orphaned, trait mappings only point at declared+handled traits (a declared-but-unhandled trait is never covered); corrupted registries are caught', () => {
   const constructs = deriveConstructs();
   // D3: the expected count is derived from the schema walk + the style-slot union, not a literal.
   const DERIVED_COUNT = deriveSchemaConstructs().length + new Set([...adapterStyleSlots(), ...corpusStyleSlots()]).size;
   const declared = declaredTraitIds();
-  const handled = handledTraitIds();
+  const handled = [...new Set(Object.values(codeHandledTraitIdsByAdapter()).flat())].sort(); // A2: the code-only scan (comments and strings never count)
   const registry = loadTraitRegistry();
   assert(constructs.length === DERIVED_COUNT && DERIVED_COUNT > 0, `walker must derive the schema constructs plus the style slots (${DERIVED_COUNT}), got ${constructs.length}`);
   assert(new Set(constructs).size === constructs.length, 'derived construct ids must be unique');
@@ -1535,15 +1536,16 @@ check('P84', 'trait registry scaffold (D1): the schema walker derives the schema
   const base = { constructs, registry, declared, handled };
   const real = checkTraitRegistry(base);
   assert(real.ok, `the seeded registry must be consistent: ${real.issues.slice(0, 3).join('; ')}`);
-  // The known declared-but-never-handled trait is detected (and must stay uncovered).
+  // D4a: no declared trait is unhandled any more (a11y.labelledBy is diverged on all 6 adapters under waivers).
   const unhandled = declared.filter((t) => !handled.includes(t));
-  assert(JSON.stringify(unhandled) === JSON.stringify(['a11y.labelledBy']), `declared-but-unhandled traits must be exactly [a11y.labelledBy], got [${unhandled}]`);
-  assert(registry.entries.get('a11y.field:labelledBy')?.untracked, 'a11y.field:labelledBy must be untracked, not mapped to a trait');
+  assert(unhandled.length === 0, `no declared trait may be unhandled by every adapter, got [${unhandled}]`);
+  assert(registry.entries.get('a11y.field:labelledBy')?.trait === 'a11y.labelledBy', 'a11y.field:labelledBy must be mapped to the a11y.labelledBy trait');
   // Fired-gate: each corruption must be caught.
   const withEntries = (mut) => { const m = new Map(registry.entries); mut(m); return { ...base, registry: { ...registry, entries: m } }; };
   assert(!checkTraitRegistry(withEntries((m) => m.delete('style-slot:gap'))).ok, 'a derived construct with no entry must FAIL');
   assert(!checkTraitRegistry(withEntries((m) => m.set('element.field:ghost', { trait: 'size' }))).ok, 'an orphaned entry must FAIL');
-  assert(!checkTraitRegistry(withEntries((m) => m.set('a11y.field:labelledBy', { trait: 'a11y.labelledBy' }))).ok, 'mapping a declared-but-unhandled trait must FAIL');
+  // A synthetic trait (declared, handled by no adapter) stands in for the old labelledBy case.
+  assert(!checkTraitRegistry({ ...withEntries((m) => m.set('a11y.field:labelledBy', { trait: 'zz-synthetic-unhandled' })), declared: [...declared, 'zz-synthetic-unhandled'] }).ok, 'mapping a declared-but-unhandled trait must FAIL');
   assert(!checkTraitRegistry(withEntries((m) => m.set('style-slot:gap', { trait: 'no-such-trait' }))).ok, 'mapping an undeclared trait must FAIL');
   assert(!checkTraitRegistry({ ...base, registry: { ...registry, problems: ['"x" untracked is missing reason, approver and/or expires'] } }).ok, 'a malformed untracked entry must FAIL');
   assert(!checkTraitRegistry({ ...base, constructs: [...constructs, constructs[0]] }).ok, 'a duplicate derived id must FAIL');
@@ -1637,7 +1639,7 @@ check('P91', 'trait-registry gate wiring: ci.mjs runs it as a blocking step, out
   const real = checkTraitRegistryGate({ now: D2_NOW });
   assert(real.ok, `the real registry must pass: ${real.issues.slice(0, 2).map((i) => i.msg).join('; ')}`);
   assert(formatReport(real) === formatReport(checkTraitRegistryGate({ now: D2_NOW })), 'two runs must produce byte-identical output');
-  assert(real.advisory.unreferencedTraits.includes('a11y.labelledBy'), 'advisory must list the unreferenced a11y.labelledBy trait');
+  assert(!real.advisory.unreferencedTraits.includes('a11y.labelledBy'), 'a11y.labelledBy is mapped now, so the advisory must not list it as unreferenced');
   // Advisory expiring-soon must never fail the gate. Proven on a temp fixture copy whose
   // style-slot:gap entry expires 40 days after the pinned clock (inside the 90-day window),
   // so this does not depend on any real-registry date.
@@ -1972,6 +1974,180 @@ check('P112', 'live lowering gate is deterministic: two runs on the real corpus 
   const order = one.issues.map((i) => [i.rule, i.adapter, i.value, i.spec]);
   assert(JSON.stringify(order) === JSON.stringify([...order].sort((x, y) => RULES_L.indexOf(x[0]) - RULES_L.indexOf(y[0]) || (x[1] < y[1] ? -1 : x[1] > y[1] ? 1 : 0) || (x[2] < y[2] ? -1 : x[2] > y[2] ? 1 : 0) || (x[3] < y[3] ? -1 : x[3] > y[3] ? 1 : 0))), 'issues must be sorted by rule, adapter, value, spec');
   assert(one.issues.length === 4, `2 specs x 2 broken adapters must give 4 L1 issues, got ${one.issues.length}`);
+});
+
+// --- D4a: retire the regex handled scan; icon + per-slot style traits; labelledBy divergence; waiver wording --------
+// Every pin runs on TEMPORARY specs / registry text with a pinned clock (D3_NOW); generated code goes to the existing
+// out/<adapter>/_verify folders. None depends on a real waiver or registry date.
+const D4_REGISTRY = () => loadTraitRegistry();
+function d4Gen(specText) {
+  const f = join(tmpdir(), `d4a-${process.pid}-${Math.random().toString(36).slice(2)}.yaml`);
+  writeFileSync(f, specText);
+  try { return Object.fromEntries(Object.entries(F28_GEN).map(([a, g]) => [a, g(f, '_verify')])); } finally { rmSync(f, { force: true }); }
+}
+const d4Ledger = (res, traitId) => Object.entries(res).flatMap(([a, r]) => r.ledger.filter((e) => e.traitId === traitId).map((e) => ({ ...e, adapter: a })));
+const D4_ICON_ACTION = 'component: IconAction\ncategory: input\nroot:\n  el: action\n  icon: icon.check\n  label: { kind: literal, value: go }\n';
+const D4_ICON_EL = 'component: IconEl\ncategory: display\nroot:\n  el: container\n  children:\n    - el: icon\n      icon: icon.check\n';
+const D4_ICON_VARIANT = 'component: IconVariant\ncategory: display\nprops:\n  - { name: status, type: enum, required: true, values: [ok, bad] }\nroot:\n  el: container\n  variant:\n    prop: status\n    intent: status\n    cases:\n      ok: { icon: icon.success }\n      bad: { icon: icon.error }\n  children:\n    - el: text\n      text: { kind: literal, value: hi }\n';
+const D4_STYLE_STATIC = 'component: StyleStatic\ncategory: display\ntokens: [color.bg.muted, radius.control, space.inset.sm]\nroot:\n  el: container\n  style:\n    background: color.bg.muted\n    radius: radius.control\n    padding: space.inset.sm\n  children:\n    - el: text\n      text: { kind: literal, value: hi }\n';
+const D4_STYLE_VARIANT_ONLY = 'component: StyleVariant\ncategory: display\nprops:\n  - { name: tone, type: enum, required: true, values: [a, b] }\ntokens: [color.bg.muted, color.info.bg]\nroot:\n  el: container\n  variant:\n    prop: tone\n    intent: emphasis\n    cases:\n      a: { background: color.bg.muted }\n      b: { background: color.info.bg }\n  children:\n    - el: text\n      text: { kind: literal, value: hi }\n';
+const D4_PADDING_ONLY = 'component: PaddingOnly\ncategory: display\ntokens: [space.inset.sm]\nroot:\n  el: container\n  style:\n    padding: space.inset.sm\n  children:\n    - el: text\n      text: { kind: literal, value: hi }\n';
+
+check('P113', 'D4a A1: the regex handled-trait scan is gone (handledTraitIdsByAdapter / handledTraitIds are not exported, not defined) and the schema-constructs CLI prints the code-only scan', () => {
+  assert(!('handledTraitIdsByAdapter' in SCALL) && !('handledTraitIds' in SCALL), 'the old regex scan functions must not be exported any more');
+  const src = readFileSync(resolve(ROOT, '_shared/scripts/schema-constructs.mjs'), 'utf8');
+  assert(!/function handledTraitIds(ByAdapter)?\s*\(/.test(src), 'the old regex scan must not be defined in schema-constructs.mjs');
+  const union = [...new Set(Object.values(codeHandledTraitIdsByAdapter()).flat())].sort();
+  const cli = execSync('node _shared/scripts/schema-constructs.mjs', { cwd: ROOT, encoding: 'utf8' });
+  assert(cli.includes(`handled traits  (${union.length}): ${union.join(', ')}`), 'the CLI must print the code-only handled scan');
+  // The code-only scan still ignores comments and string-only mentions (P97 pins the gate; this pins the union the CLI prints).
+  const fake = codeHandledTraitIdsByAdapter(() => `// this.express('zz-commented-out');\nconst s = "this.express('zz-in-string')";`);
+  assert(D3_ADAPTERS.every((a) => fake[a].length === 0), 'comments and string mentions must not count as handling');
+});
+
+check('P114', 'D4a A: declaredTraitIds is regex-anchored on the literal text of renderer-base; a missing or reordered anchor FAILS with a message naming the anchors (a reformat cannot silently break it); the real file passes', () => {
+  const real = readFileSync(resolve(ROOT, 'adapters/_shared/renderer-base.mjs'), 'utf8');
+  const a = real.indexOf(DECLARED_START_ANCHOR);
+  assert(a !== -1 && real.indexOf(DECLARED_END_ANCHOR, a) !== -1, 'both anchors must appear in order in the real renderer-base.mjs');
+  const throwsAnchor = (src, why) => {
+    let msg = '';
+    try { declaredTraitIds(src); } catch (e) { msg = String(e.message); }
+    assert(/declaredTraits\(\) not found/.test(msg) && msg.includes(JSON.stringify(DECLARED_START_ANCHOR)) && msg.includes('anchored'), `${why}: expected a clear anchor error, got ${JSON.stringify(msg)}`);
+  };
+  throwsAnchor(real.replace(DECLARED_START_ANCHOR, 'declaredTraitList(node)'), 'start anchor renamed');
+  throwsAnchor(real.replace(DECLARED_END_ANCHOR, '\n  hasIcons(node) {'), 'end anchor renamed');
+  throwsAnchor('', 'empty source');
+  const ids = declaredTraitIds();
+  for (const t of ['icon', 'style=background', 'style=radius', 'a11y.labelledBy', 'a11y.live=*']) assert(ids.includes(t), `declared traits must include ${t}`);
+  assert(!ids.includes('style=padding'), 'style=padding must NOT be declared (finding F-30)');
+});
+
+check('P115', 'D4a B.3/B.4: style=background and style=radius are separate declared traits (the style= prefix is not collapsed, every other prefix still is) and R7 checks each per adapter; padding is not a ledger trait; only STATIC slots declare', () => {
+  assert(normalizeTraitId('style=background') === 'style=background' && normalizeTraitId('style=radius') === 'style=radius', 'style=<slot> must stay distinct');
+  assert(normalizeTraitId('a11y.live=polite') === 'a11y.live=*' && normalizeTraitId('role=${node.role}') === 'role=*' && normalizeTraitId('orientation=horizontal') === 'orientation=*' && normalizeTraitId('state=boolean') === 'state=*', 'the other value-encoded prefixes must still collapse');
+  assert(normalizeTraitId('style=${slot}') === 'style=*', 'a templated style id still normalizes to style=* (and so can never satisfy a per-slot trait)');
+  const handled = codeHandledTraitIdsByAdapter();
+  for (const a of D3_ADAPTERS) {
+    for (const t of ['style=background', 'style=radius', 'icon']) assert(handled[a].includes(t), `${a} must express or diverge ${t}`);
+    assert(!handled[a].includes('style=padding'), `${a} must not claim style=padding (not a ledger trait)`);
+  }
+  // R7 per slot: remove ONE adapter's express of one slot trait; the gate names the adapter and the trait.
+  const without = (adapter, trait) => Object.fromEntries(D3_ADAPTERS.map((a) => [a, a === adapter ? handled[a].filter((t) => t !== trait) : handled[a]]));
+  for (const [adapter, trait, construct] of [['swiftui', 'style=radius', 'style-slot:radius'], ['compose', 'style=background', 'style-slot:background'], ['react-native', 'style=radius', 'style-slot:radius'], ['vue', 'style=background', 'style-slot:background']]) {
+    const r = d2Gate((t) => t, { handledByAdapter: without(adapter, trait) });
+    d2Only(r, 'R7-unhandled-trait', construct, `${adapter} stops handling ${trait}`);
+    assert(r.issues[0].msg.includes(`"${trait}"`) && new RegExp(`adapter: ${adapter}$`).test(r.issues[0].msg), `R7 must name trait ${trait} and only ${adapter}: ${r.issues[0].msg}`);
+  }
+  // A per-slot trait is not satisfied by the other slot: dropping style=radius from compose leaves style-slot:background green.
+  const onlyRadius = d2Gate((t) => t, { handledByAdapter: without('compose', 'style=radius') });
+  assert(onlyRadius.issues.length === 1 && onlyRadius.issues[0].construct === 'style-slot:radius', 'dropping style=radius must not fire for style-slot:background');
+  // Static slots only; padding is never declared.
+  const stat = d4Gen(D4_STYLE_STATIC);
+  for (const a of D3_ADAPTERS) {
+    assert(d4Ledger(stat, 'style=background').filter((e) => e.adapter === a && e.status === 'expressed').length === 1, `${a}: static background must be expressed once`);
+    assert(d4Ledger(stat, 'style=radius').filter((e) => e.adapter === a && e.status === 'expressed').length === 1, `${a}: static radius must be expressed once`);
+  }
+  assert(d4Ledger(stat, 'style=padding').length === 0 && d4Ledger(d4Gen(D4_PADDING_ONLY), 'style=padding').length === 0, 'style=padding must produce no ledger entry (F-30)');
+  const varOnly = d4Gen(D4_STYLE_VARIANT_ONLY);
+  assert(d4Ledger(varOnly, 'style=background').length === 0 && d4Ledger(varOnly, 'style=radius').length === 0, 'variant cases must not declare the static style traits');
+  assert(checkLedger(Object.values(stat).flatMap((r) => r.ledger), { now: D3_NOW }).ok, 'the static-style fixture must pass the ledger on all 6 adapters');
+});
+
+check('P116', 'D4a B.1: the icon trait is declared and expressed by all 6 adapters at the real emit sites (el: icon, action icon, variant icon cases); the three registry entries map to it; dropping one adapter FAILS R7 naming it', () => {
+  const reg = D4_REGISTRY();
+  for (const id of ['el-kind:icon', 'element.field:icon', 'style-slot:icon']) assert(reg.entries.get(id)?.trait === 'icon', `${id} must map to the icon trait`);
+  for (const [name, text] of [['el: icon', D4_ICON_EL], ['action icon', D4_ICON_ACTION], ['variant icon cases', D4_ICON_VARIANT]]) {
+    const res = d4Gen(text);
+    const e = d4Ledger(res, 'icon');
+    for (const a of D3_ADAPTERS) assert(e.filter((x) => x.adapter === a && x.status === 'expressed').length === 1, `${name}: ${a} must express icon exactly once, got ${JSON.stringify(e.filter((x) => x.adapter === a).map((x) => x.status))}`);
+    assert(checkLedger(Object.values(res).flatMap((r) => r.ledger), { now: D3_NOW }).ok, `${name}: the ledger must pass on all 6 adapters`);
+  }
+  const handled = codeHandledTraitIdsByAdapter();
+  const without = Object.fromEntries(D3_ADAPTERS.map((a) => [a, a === 'react-native' ? handled[a].filter((t) => t !== 'icon') : handled[a]]));
+  const r = d2Gate((t) => t, { handledByAdapter: without });
+  assert(!r.ok && JSON.stringify(d2Rules(r)) === JSON.stringify(['R7-unhandled-trait']) && ['el-kind:icon', 'element.field:icon', 'style-slot:icon'].every((c) => d2Fired(r, 'R7-unhandled-trait', c)) && r.issues.every((i) => /adapter: react-native$/.test(i.msg)), 'R7 must fire for all three icon entries naming only react-native');
+  // A spec without any icon declares no icon trait.
+  assert(d4Ledger(d4Gen(D4_STYLE_VARIANT_ONLY), 'icon').length === 0, 'a spec with no icon must not declare the icon trait');
+});
+
+check('P117', 'D4a B.2/B.5: numberFormat.field:rounding maps to the existing number-format trait (handled by all 6); its siblings stay untracked; variant.field:cases and style-slot:padding stay untracked with the owner-approved reasons and unchanged approver/expiry', () => {
+  const reg = D4_REGISTRY();
+  assert(reg.entries.get('numberFormat.field:rounding')?.trait === 'number-format', 'rounding must map to number-format');
+  for (const id of ['style', 'currency', 'locale', 'grouping', 'precision']) assert(reg.entries.get(`numberFormat.field:${id}`)?.untracked, `numberFormat.field:${id} must stay untracked (D4a does not touch the siblings)`);
+  const handled = codeHandledTraitIdsByAdapter();
+  assert(D3_ADAPTERS.every((a) => handled[a].includes('number-format')), 'number-format must be handled by all 6 adapters');
+  const cases = reg.entries.get('variant.field:cases')?.untracked;
+  assert(cases && cases.reason === 'waits for D6 (Compose drops container color, padding and radius cases and the SwiftUI variant fallback is untested; D6 makes them express for real)', 'variant.field:cases reason text');
+  const pad = reg.entries.get('style-slot:padding')?.untracked;
+  assert(pad && pad.reason === 'Compose drops static padding on input controls in 12 corpus specs (finding F-30; the control-state branches of visitInput never call modifierArg); fix planned in D6', 'style-slot:padding reason text');
+  for (const u of [cases, pad]) assert(u.approver === 'Ssuppanut (design-system a11y owner)' && u.expires === '2027-03-31', 'approver and expiry must be unchanged');
+  const mapped = new Map([['el-kind:icon', 'icon'], ['element.field:icon', 'icon'], ['style-slot:icon', 'icon'], ['numberFormat.field:rounding', 'number-format'], ['style-slot:background', 'style=background'], ['style-slot:radius', 'style=radius'], ['a11y.field:labelledBy', 'a11y.labelledBy']]);
+  for (const [id, t] of mapped) assert(reg.entries.get(id)?.trait === t, `${id} must map to ${t}`);
+  assert(![...reg.entries.values()].some((e) => e.untracked && /pending D4/.test(e.untracked.reason)), 'no registry entry may still say "pending D4"');
+  assert(checkTraitRegistryGate({ now: D2_NOW }).ok, 'the real registry must pass the D2 gate (R7 included)');
+});
+
+check('P118', 'D4a C.1: a11y.labelledBy is diverged (never silently dropped) on all 6 adapters for container, text, action and every native input path, under per-adapter waivers; the ledger passes with the waiver and FAILS without it or after expiry', () => {
+  const kinds = {
+    container: 'component: Lbc\ncategory: display\nroot:\n  el: container\n  a11y: { labelledBy: x }\n  children:\n    - el: text\n      text: { kind: literal, value: hi }\n',
+    text: 'component: Lbt\ncategory: display\nroot:\n  el: text\n  text: { kind: literal, value: hi }\n  a11y: { labelledBy: x }\n',
+    action: 'component: Lba\ncategory: input\nroot:\n  el: action\n  label: { kind: literal, value: go }\n  a11y: { labelledBy: x }\n',
+    input: 'component: Lbi\ncategory: input\nprops:\n  - { name: value, type: string, required: true }\n  - { name: onChange, type: function, required: true }\nroot:\n  el: input\n  a11y: { labelledBy: x }\n  input: { valueProp: value, changeProp: onChange, inputType: text }\n',
+  };
+  // Real input paths (checkbox, slider, select, multiline) with labelledBy injected into the input node.
+  for (const f of ['checkbox', 'slider', 'native-select', 'textarea', 'state-select']) {
+    const d = parseYaml(readFileSync(resolve(ROOT, `.claude/artifacts/${f}/design-spec.yaml`), 'utf8'));
+    const find = (n) => (n.el === 'input' ? n : (n.children ?? []).map(find).find(Boolean));
+    const inp = find(d.root); inp.a11y = { ...(inp.a11y ?? {}), labelledBy: 'lbl' };
+    kinds[`corpus-${f}`] = JSON.stringify(d); // YAML is a JSON superset, so a JSON document is a valid spec file
+  }
+  for (const [name, text] of Object.entries(kinds)) {
+    const res = d4Gen(text);
+    for (const a of D3_ADAPTERS) {
+      const e = d4Ledger(res, 'a11y.labelledBy').filter((x) => x.adapter === a);
+      assert(e.length === 1 && e[0].status === 'diverged' && e[0].waiver === `a11y-labelledby-${a}`, `${name}/${a}: labelledBy must be diverged under a11y-labelledby-${a}, got ${JSON.stringify(e)}`);
+    }
+    const ledger = Object.values(res).flatMap((r) => r.ledger);
+    assert(checkLedger(ledger, { now: D3_NOW }).ok, `${name}: the ledger must pass with the waivers at the pinned clock`);
+    const noWaiver = ledger.map((e) => (e.traitId === 'a11y.labelledBy' ? { ...e, waiver: 'a11y-labelledby-nonexistent' } : e));
+    assert(!checkLedger(noWaiver, { now: D3_NOW }).ok, `${name}: an unknown waiver id must FAIL the ledger`);
+    const expired = checkLedger(ledger, { now: new Date('2099-01-01T00:00:00Z') });
+    assert(!expired.ok && expired.issues.some((i) => /a11y-labelledby-/.test(i.msg)), `${name}: after expiry the ledger must FAIL naming the labelledby waivers`);
+  }
+});
+
+check('P119', 'D4a C.4: a11y-guard no longer counts a11y.labelledBy as an accessible-name source (an input with ONLY labelledBy FAILS; with a visible label or an a11y.label it passes)', () => {
+  const ir = (extra) => specToIr(parseYaml(`component: N\ncategory: input\nprops:\n  - { name: value, type: string, required: true }\n  - { name: onChange, type: function, required: true }\nroot:\n  el: input\n${extra}  input: { valueProp: value, changeProp: onChange, inputType: text }\n`));
+  const only = checkA11y(ir('  a11y: { labelledBy: x }\n'));
+  assert(!only.ok && only.issues.some((i) => i.rule === 'label'), 'labelledBy alone must not name an input');
+  assert(checkA11y(ir('  label: { kind: literal, value: Name }\n  a11y: { labelledBy: x }\n')).ok, 'a visible label plus labelledBy passes');
+  assert(checkA11y(ir('  a11y: { labelledBy: x, label: { kind: literal, value: Name } }\n')).ok, 'an a11y.label plus labelledBy passes');
+  assert(!checkA11y(ir('')).ok, 'an unnamed input still fails');
+});
+
+check('P120', 'D4a C.2/C.1/D: the waiver note records the time-boxed prerequisite exception; the six a11y-labelledby-* waivers are approved with parseable expiries and name id plumbing and the audit; the status/alert waivers no longer claim React Native or SwiftUI conveyance via the live region (RN: Android only, inert on iOS) and keep their Compose wording', () => {
+  const file = JSON.parse(readFileSync(resolve(ROOT, '_shared/policy/a11y-waivers.json'), 'utf8'));
+  assert(/Adding a trait a platform CAN express never belongs here/.test(file.note) && /Exception: a time-boxed waiver is allowed when its reason names a missing prerequisite/.test(file.note), 'the note must keep the rule and record the exception');
+  for (const a of D3_ADAPTERS) {
+    const w = file.waivers[`a11y-labelledby-${a}`];
+    assert(w && w.approver === 'Ssuppanut (design-system a11y owner)' && !Number.isNaN(new Date(w.expires).getTime()) && /id plumbing/.test(w.reason) && /F-28-value-lowering-audit\.md/.test(w.reason), `waiver a11y-labelledby-${a} must exist, be approved, have a parseable expiry and name id plumbing and the audit`);
+  }
+  for (const id of ['a11y-role-status', 'a11y-role-alert']) {
+    const r = file.waivers[id].reason;
+    assert(!/updatesFrequently\)?\s*\/|\.updatesFrequently/.test(r), `${id}: must not claim .updatesFrequently conveys the role`);
+    assert(!/accessibilityLiveRegion \/ liveRegion/.test(r), `${id}: must not list accessibilityLiveRegion as a conveyance path`);
+    assert(/On React Native the live region \(accessibilityLiveRegion\) works on Android only \(source-verified, not device-tested\) and is inert on iOS \(device-confirmed\)/.test(r) && /imperative announcement capability/.test(r) && /F-28-value-lowering-audit\.md/.test(r), `${id}: must state the React Native Android-only / iOS-inert limit and cite the audit`);
+    assert(/Compose/.test(r) && /liveRegion|live region/.test(r), `${id}: the Compose wording must remain`);
+    assert(file.waivers[id].approver === 'Ssuppanut (design-system a11y owner)', `${id}: approver unchanged`);
+  }
+});
+
+check('P121', 'D4a F-30 doc: docs/BREADTH-MATRIX.md records finding F-30 with the 12 specs, the cause (control-state branches of visitInput do not call modifierArg) and the D6 plan', () => {
+  const doc = readFileSync(resolve(ROOT, 'docs/BREADTH-MATRIX.md'), 'utf8');
+  const sec = doc.slice(doc.indexOf('# D4a'));
+  assert(doc.includes('# D4a') && /F-30/.test(sec), 'a D4a section recording F-30 must exist');
+  for (const spec of ['checkbox', 'checkbox-control', 'checkbox-error', 'native-select', 'number-input', 'slider', 'slider-control', 'state-boolean', 'state-range', 'state-select', 'switch-control', 'switch-toggle']) assert(sec.includes(`\`${spec}\``), `F-30 must list ${spec}`);
+  assert(/visitInput/.test(sec) && /modifierArg/.test(sec) && /D6/.test(sec), 'F-30 must name the cause and the D6 plan');
 });
 
 console.log('\n=== verify-patches ===');
