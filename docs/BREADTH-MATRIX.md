@@ -2635,3 +2635,77 @@ Compose in these 12 corpus specs: `checkbox`, `checkbox-control`, `checkbox-erro
 - **`labelledBy` on node kinds whose adapters never run an a11y handler** (link, heading, icon, media on most
   adapters) stays `unaccounted`, and the ledger fails loudly. `a11y.label` behaves the same on those kinds
   today, so this is an existing gap, not a new one.
+
+---
+
+# D4b - mutation harness hardening
+
+## What changed
+
+- **Known survivors are a policy file.** `_shared/policy/mutation-known-survivors.yaml` replaces the old
+  `KNOWN_SURVIVORS` Set (and the duplicate Set in P44). One entry per scope, each with `operator`, `feature`
+  (exact or `*`), `adapter` (exact or `*`), `cluster` (the audit cluster CL-01 to CL-10 the construct belongs to,
+  recorded as context only, or `none-gate-gap` when no audit defect is behind the blind spot), `reason`,
+  `approver` (exactly `Ssuppanut (design-system a11y owner)`) and `expires` (not inclusive, like the waivers).
+  The loader and checker live in `_shared/scripts/mutation-known-survivors.mjs`; both the harness CLI and P44
+  call `checkSurvivors()`.
+- **Rules:** `M0` load (missing or unparseable file, unknown or missing field), `M1` new survivor (a
+  surviving mutant matches no entry), `M2` stale entry (the entry is the best match of no surviving mutant,
+  including when all its mutants are now killed: the message says "delete this entry"), `M3` entry quality
+  (empty reason, wrong approver, bad or past expiry, invalid cluster, duplicate scope), `M4` over-broad (the
+  scope also matches KILLED mutants of its operator, so it could hide a regression there). An entry is credited
+  to the most specific matching survivor set, so a redundant wildcard shows up as stale.
+- **Mutant identity** is `<operator>|<feature>|<adapter>|<site>`, built from the operator's site key
+  (`<feature>:<adapter>:<detail>`); `*` means not adapter specific. Two sites with the same key get a
+  deterministic ordinal suffix (`#2`, `#3`), which is how the new `icon` ledger traits (several per feature) stay
+  unique.
+- **check-live-lowering is enrolled** in the per-mutant battery as `live-lowering`. The bundle carries the spec
+  path, the live enum values are computed once per process (deriving them costs about 27 ms), and the gate runs
+  on the MUTANT's code through its `generate` parameter. The gate is wrapped, not edited: the wrapper adds a
+  severity to its issues so they pass the harness message filter.
+- **check-corpus-coverage and check-trait-registry are deliberately not enrolled.** They read the corpus and
+  configuration, not a per-spec output.
+
+## How to add or delete an entry
+
+- **Add** an entry only for a survivor that is a known, clustered gate gap, scoped as narrowly as the real
+  survivors allow. An operator-wide `*` / `*` pair needs owner approval and is rejected by pin P126.
+- **Delete** an entry in the PR that adds the gate check which kills its mutants: the harness then fails with M2
+  "delete this entry" until the line is removed.
+
+## New operators (value substitution, output-text edits on clones)
+
+| Operator | Edit | Expected result | Cluster |
+|---|---|---|---|
+| `live-off-as-polite` | RN `accessibilityLiveRegion="none"` -> `"polite"`; Compose adds `liveRegion = LiveRegionMode.Polite` | killed by `live-lowering` | none |
+| `live-value-collapse` | web `aria-live` assertive/off -> polite | killed by `live-lowering` | none |
+| `enforced-role-swap` | `img` role -> button on all 6 adapters | killed by a11y output tier | none |
+| `role-value-swap` | web `role="group"` -> `list`; RN button -> link | survives | CL-03 |
+| `heading-level-collapse` | web `<hN>` -> `<h1>`; SwiftUI heading font one level up | survives | CL-02 |
+| `heading-semantic-drop` | web `<hN>` -> `<div>`; RN drops `accessibilityRole="header"` | survives | CL-02 |
+| `rounding-mode-swap` | floor <-> ceil on all 6 adapters | survives | CL-06 |
+| `date-style-swap` | dateStyle short/medium -> long, long -> short on all 6 adapters | survives | none-gate-gap |
+| `inputtype-drop` | web `type="number"` -> `"text"`; RN drops `keyboardType` | survives | CL-05 |
+| `style-slot-drop` | one static padding, background or radius removed per adapter | survives | CL-07 (Compose input padding is F-30) |
+| `alt-drop` | web `alt` removed; RN image `accessibilityLabel` removed; Compose `AsyncImage` contentDescription set to null | survives | none-gate-gap |
+
+Site finders read the IR (never the ledger) and a site only exists when the baseline output contains the text
+to edit. Entries are scoped per adapter. The cluster column is context only.
+
+## Burn-down
+
+An entry is removed only when a gate checks the emitted value for that construct and kills the mutant. Fixing
+the underlying defect alone does not kill a mutant; it only makes a correct expected value possible. The planned
+way to burn entries down is a value-lowering gate (a generalization of `check-live-lowering` with a documented
+expected-value table), with cluster fixes adding rows to it.
+
+## Limits
+
+- **The harness never edits adapter source.** An adapter regression (for example the RN live region lowered as
+  polite for `off`) leaves the harness green, because mutants are applied to generated output. Such regressions
+  are seen only by gates that run on their own, such as `check-live-lowering` in `ci.mjs`.
+- **The second full mutation run stays.** `verify-patches` P44 runs the harness once per process (all D4b pins
+  share that run) and the `ci.mjs` mutation step runs it again in its own process. Dropping one of them would
+  save about 9 seconds per CI run; this change keeps both.
+
+Pins P122 to P131.
