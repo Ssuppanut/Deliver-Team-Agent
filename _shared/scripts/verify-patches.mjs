@@ -38,7 +38,8 @@ import { checkSurvivors, loadKnownSurvivors, formatSurvivorReport, KNOWN_SURVIVO
 import { checkTokenOutputs, RULES as RULES_T, OUTPUT_FILES as TOKEN_FILES } from './check-token-outputs.mjs';
 import { buildOutputs as buildTokenOutputs, resolveAliases as resolveTokenAliases } from '../../design-system/tokens-dtcg/scripts/build.mjs';
 import { RendererBase } from '../../adapters/_shared/renderer-base.mjs';
-import { readFileSync, existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { checkSwiftTypecheck, formatReport as formatSwiftReport, SKIP_MESSAGE as SWIFT_SKIP, RULES as RULES_S, typecheckArgs as swiftArgs, spawnRunner as swiftSpawn } from './check-swift-typecheck.mjs';
+import { readFileSync, existsSync, mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { execSync } from 'node:child_process';
 
@@ -57,7 +58,7 @@ const AVATAR = resolve(ROOT, '.claude/artifacts/avatar/design-spec.yaml');
 const CONDSHOW = EX('cond-show.spec.yaml');
 const CONDLIST = EX('cond-list.spec.yaml');
 
-let pass = 0, fail = 0;
+let pass = 0, fail = 0, skipped = 0;
 const results = [];
 function check(id, desc, fn) {
   try {
@@ -70,6 +71,23 @@ function check(id, desc, fn) {
   }
 }
 const assert = (cond, msg) => { if (!cond) throw new Error(msg); };
+// An async pin (the F-31 gate drives a compiler runner).
+async function checkAsync(id, desc, fn) {
+  try {
+    await fn();
+    results.push(`  PASS  ${id}  ${desc}`);
+    pass++;
+  } catch (e) {
+    results.push(`  FAIL  ${id}  ${desc}\n          ${e.message}`);
+    fail++;
+  }
+}
+// A pin that cannot run on this machine. It is reported as SKIP, is never counted as passed, and does not
+// fail the run (the exit code follows `fail` only).
+function skipPin(id, desc, reason) {
+  results.push(`  SKIP  ${id}  ${desc}\n          skipped: ${reason}`);
+  skipped++;
+}
 
 // --- P1: SwiftUI Identifiable must not synthesize a recursive `id` ----------
 check('P1', 'swiftui: no stored/computed id collision when itemShape has id', () => {
@@ -818,7 +836,7 @@ check('P46', 'control-state: a boolean binding renders as a native two-way bindi
     vue: /type="checkbox" :checked="enabled" @change="onEnabledChange\(/,
     svelte: /type="checkbox" checked=\{enabled\} on:change=\{\(e\) => onEnabledChange\(e\.currentTarget\.checked\)\}/,
     'react-native': /<Switch value=\{enabled\} onValueChange=\{onEnabledChange\}/,
-    swiftui: /Toggle\([^)]*isOn: Binding\(get: \{ enabled \}, set: \{ onEnabledChange\(\$0\) \}\)\)/,
+    swiftui: /SwiftUI\.Toggle\([^)]*isOn: SwiftUI\.Binding\(get: \{ enabled \}, set: \{ onEnabledChange\(\$0\) \}\)\)/,
     compose: /Checkbox\(checked = enabled, onCheckedChange = onEnabledChange\)/,
   };
   for (const [ad, re] of Object.entries(pat)) assert(re.test(out[ad].code), `${ad}: boolean two-way binding not found`);
@@ -833,7 +851,7 @@ check('P47', 'control-state: a selected-value binding renders as a native one-of
     vue: /<select [^>]*:value="choice" @change="onChoiceChange\(/,
     svelte: /<select [^>]*value=\{choice\} on:change=\{\(e\) => onChoiceChange\(e\.currentTarget\.value\)\}/,
     'react-native': /<Picker selectedValue=\{choice\} onValueChange=\{onChoiceChange\}/,
-    swiftui: /Picker\([^)]*selection: Binding\(get: \{ choice \}, set: \{ onChoiceChange\(\$0\) \}\)\)/,
+    swiftui: /SwiftUI\.Picker\([^)]*selection: SwiftUI\.Binding\(get: \{ choice \}, set: \{ onChoiceChange\(\$0\) \}\)\)/,
     compose: /val selectedValue = choice[\s\S]*val onSelectedChange = onChoiceChange/,
   };
   for (const [ad, re] of Object.entries(pat)) assert(re.test(out[ad].code), `${ad}: selected-value binding not found`);
@@ -850,7 +868,7 @@ check('P48', 'control-state: a numeric-range binding renders value + min/max/ste
     vue: /type="range" :value="volume" @input="onVolumeChange\(Number\([^"]*\)\)" :min="0" :max="100" :step="5"/,
     svelte: /type="range" value=\{volume\} on:input=\{\(e\) => onVolumeChange\(Number\(e\.currentTarget\.value\)\)\} min=\{0\} max=\{100\} step=\{5\}/,
     'react-native': /<Slider value=\{volume\} onValueChange=\{onVolumeChange\}[^/]*minimumValue=\{0\} maximumValue=\{100\} step=\{5\}/,
-    swiftui: /Slider\(value: Binding\(get: \{ volume \}, set: \{ onVolumeChange\(\$0\) \}\), in: 0\.\.\.100, step: 5\)/,
+    swiftui: /SwiftUI\.Slider\(value: SwiftUI\.Binding\(get: \{ volume \}, set: \{ onVolumeChange\(\$0\) \}\), in: 0\.\.\.100, step: 5\)/,
     compose: /Slider\(value = volume, onValueChange = onVolumeChange, valueRange = 0f\.\.100f, steps = 19\)/,
   };
   for (const [ad, re] of Object.entries(pat)) assert(re.test(out[ad].code), `${ad}: numeric-range binding not found`);
@@ -889,7 +907,7 @@ check('P50', 'option-children: native Select renders <option>/items inside the v
     vue: /<select [^>]*:value="choice"[\s\S]*<option v-for="opt in options" :key="opt\.value" :value="opt\.value">\{\{ opt\.label \}\}<\/option>[\s\S]*<\/select>/,
     svelte: /<select [^>]*value=\{choice\}[\s\S]*\{#each options as opt \(opt\.value\)\}[\s\S]*<option value=\{opt\.value\}>\{opt\.label\}<\/option>/,
     'react-native': /<Picker selectedValue=\{choice\}[\s\S]*options\.map\(\(opt\) =>[\s\S]*<Picker\.Item key=\{opt\.value\} label=\{opt\.label\} value=\{opt\.value\} \/>/,
-    swiftui: /Picker\([^)]*selection: Binding[\s\S]*ForEach\(options, id: \\\.value\) \{ opt in[\s\S]*Text\(opt\.label\)\.tag\(opt\.value\)/,
+    swiftui: /SwiftUI\.Picker\([^)]*selection: SwiftUI\.Binding[\s\S]*SwiftUI\.ForEach\(options, id: \\\.value\) \{ opt in[\s\S]*SwiftUI\.Text\(opt\.label\)\.tag\(opt\.value\)/,
     compose: /Column\(modifier = Modifier\.selectableGroup\(\)\) \{[\s\S]*options\.forEach \{ opt ->[\s\S]*RadioButton\(selected = choice == opt\.value, onClick = \{ onChoiceChange\(opt\.value\) \}\)/,
   };
   for (const [ad, re] of Object.entries(pat)) assert(re.test(out[ad].code), `${ad}: Select must render option children in the bound control`);
@@ -909,7 +927,7 @@ check('P51', 'option-children: RadioGroup renders role=radiogroup + per-option r
     vue: /role="radiogroup"[\s\S]*<input type="radio" name="[^"]*" :value="opt\.value" :checked="choice === opt\.value" @change="onChoiceChange\(opt\.value\)"/,
     svelte: /role="radiogroup"[\s\S]*<input type="radio" name="[^"]*" value=\{opt\.value\} checked=\{choice === opt\.value\} on:change=\{\(\) => onChoiceChange\(opt\.value\)\}/,
     'react-native': /<View accessibilityRole="radiogroup"[\s\S]*<Pressable key=\{opt\.value\} accessibilityRole="radio" accessibilityState=\{\{ selected: choice === opt\.value \}\} onPress=\{\(\) => onChoiceChange\(opt\.value\)\}/,
-    swiftui: /Picker\([^)]*selection: Binding[\s\S]*ForEach\(options, id: \\\.value\) \{ opt in/,
+    swiftui: /SwiftUI\.Picker\([^)]*selection: SwiftUI\.Binding[\s\S]*SwiftUI\.ForEach\(options, id: \\\.value\) \{ opt in/,
     compose: /RadioButton\(selected = choice == opt\.value, onClick = \{ onChoiceChange\(opt\.value\) \}\)/,
   };
   for (const [ad, re] of Object.entries(pat)) assert(re.test(out[ad].code), `${ad}: RadioGroup must render radiogroup + per-option selection`);
@@ -1022,7 +1040,7 @@ check('P57', 'textarea (F-19): a multiline text input renders the textarea varia
     vue: /<textarea id="[^"]*" :value="value" @input=[^>]*><\/textarea>/,
     svelte: /<textarea id="[^"]*" value=\{value\} on:input=\{[\s\S]*?\}><\/textarea>/,
     'react-native': /<TextInput multiline value=\{value\} onChangeText=\{onChange\}/,
-    swiftui: /TextField\(label, text: Binding\(get: \{ value \}, set: \{ onChange\(\$0\) \}\), axis: \.vertical\)/,
+    swiftui: /SwiftUI\.TextField\(label, text: SwiftUI\.Binding\(get: \{ value \}, set: \{ onChange\(\$0\) \}\), axis: \.vertical\)/,
     compose: /TextField\(value = value, onValueChange = onChange, label = \{ Text\(label\) \}, singleLine = false\)/,
   };
   for (const [ad, re] of Object.entries(pat)) assert(re.test(out[ad].code), `${ad}: textarea variant not rendered as expected`);
@@ -2394,7 +2412,7 @@ function f32Bug(files = F32_GOOD) {
   const lineSwap = (txt, re, to) => txt.split('\n').map((l) => (re.test(l) ? to(l) : l)).join('\n');
   o['tokens.css'] = lineSwap(o['tokens.css'], new RegExp(`^  --(${[...f32Alias, ...f32AliasDim].map((n) => n.replace(/\./g, '-')).join('|')}):`), (l) => l.replace(/:.*;$/, ': [object Object];'));
   const ids = (xs) => xs.map((n) => n.replace(/(^|\.)([a-z0-9])/g, (_, __, c) => c.toUpperCase()));
-  o['DesignTokens.swift'] = lineSwap(lineSwap(o['DesignTokens.swift'], new RegExp(`let (${ids(f32Alias).join('|')}) =`), (l) => l.replace(/Color\(hex: "[^"]*"\)/, 'Color(hex: "[object Object]")')), new RegExp(`let (${ids(f32AliasDim).join('|')}):`), (l) => l.replace(/= .*$/, '= 0'));
+  o['DesignTokens.swift'] = lineSwap(lineSwap(o['DesignTokens.swift'], new RegExp(`let (${ids(f32Alias).join('|')}) =`), (l) => l.replace(/Color\(\.sRGB[^)]*\)/, 'Color(hex: "[object Object]")')), new RegExp(`let (${ids(f32AliasDim).join('|')}):`), (l) => l.replace(/= .*$/, '= 0'));
   o['DesignTokens.kt'] = lineSwap(lineSwap(o['DesignTokens.kt'], new RegExp(`val (${ids(f32Alias).join('|')}) =`), (l) => l.replace(/Color\(0x[0-9A-F]+\)/, 'Color(0xFF[OBJECT OBJECT])')), new RegExp(`val (${ids(f32AliasDim).join('|')}) =`), (l) => l.replace(/= .*$/, '= 0.dp'));
   const rn = JSON.parse(o['tokens-rn.ts'].replace(/^[\s\S]*?export const tokens = /, '').replace(/ as const;\s*$/, ''));
   for (const n of f32Alias) { const [a, b, c] = n.split('.'); rn[a][b][c] = { value: reg[n].value.value, type: 'color', ext: null }; }
@@ -2415,7 +2433,7 @@ check('P132', 'F-32 build: an alias resolves to its VALUE (chains of any depth),
   assert(reg['color.bg.base'].value === '#ffffff' && reg['color.bg.surface'].value === '#ffffff' && reg['color.bg.card'].value === '#ffffff', 'a depth-1, depth-2 and depth-3 colour alias must all resolve to #ffffff');
   assert(reg['space.inset.md'].value === '8px' && reg['font.body'].value === 'Inter, sans-serif' && reg['font.strong'].value === 700 && reg['icon.done'].value === 'check', 'dimension, fontFamily, fontWeight and icon aliases must resolve to their values');
   assert(/--color-bg-card: #ffffff;/.test(files['tokens.css']) && /--space-inset-md: 8px;/.test(files['tokens.css']), 'tokens.css must carry the resolved values');
-  assert(/ColorBgCard = Color\(hex: "ffffff"\)/.test(files['DesignTokens.swift']) && /SpaceInsetMd: CGFloat = 8$/m.test(files['DesignTokens.swift']), 'DesignTokens.swift must carry the real hex and the real dimension');
+  assert(/ColorBgCard = Color\(\.sRGB, red: 255 \/ 255, green: 255 \/ 255, blue: 255 \/ 255, opacity: 1\)/.test(files['DesignTokens.swift']) && /SpaceInsetMd: CGFloat = 8$/m.test(files['DesignTokens.swift']), 'DesignTokens.swift must carry the real hex and the real dimension');
   assert(/ColorBgCard = Color\(0xFFFFFFFF\)/.test(files['DesignTokens.kt']) && /SpaceInsetMd = 8\.dp/.test(files['DesignTokens.kt']), 'DesignTokens.kt must carry 0xFFRRGGBB and the real dimension');
   assert(/"card": "#ffffff"/.test(files['tokens-rn.ts']) && /"md": 8/.test(files['tokens-rn.ts']), 'tokens-rn.ts must carry plain values');
   // resolveAliases directly: the value, not the record, for a deep chain
@@ -2503,7 +2521,7 @@ check('P136', 'F-32 gate T1: the exact original bug output (record objects, [obj
     ['tokens.css', '--space-4: 16px;', '--space-4: ;', 'space-4'],
     ['tokens.css', '--font-weight-bold: 700;', '--font-weight-bold: null;', 'font-weight-bold'],
     ['DesignTokens.swift', 'SpaceInsetSm: CGFloat = 8', 'SpaceInsetSm: CGFloat = NaN', 'SpaceInsetSm'],
-    ['DesignTokens.swift', 'Color(hex: "0a0a0a")', 'Color(hex: "undefined")', 'ColorInk'],
+    ['DesignTokens.swift', 'Color(.sRGB, red: 10 / 255, green: 10 / 255, blue: 10 / 255, opacity: 1)', 'Color(.sRGB, red: undefined / 255, green: 10 / 255, blue: 10 / 255, opacity: 1)', 'ColorInk'],
     ['DesignTokens.kt', 'SpaceInsetSm = 8.dp', 'SpaceInsetSm = null', 'SpaceInsetSm'],
     ['DesignTokens.kt', 'Color(0xFF0A0A0A)', 'Color(0xFF[object object])', 'ColorInk'],
     ['tokens-rn.ts', '"sm": 8', '"sm": undefined', 'space.inset.sm'],
@@ -2545,15 +2563,15 @@ check('P137', 'F-32 gate T1: comments that mention [object Object] and names or 
   assert(!f32Has(f32Gate(u), 'T1-broken-value'), 'a value with // inside a string is not a comment and not broken');
 });
 
-check('P138', 'F-32 gate T2: a colour that is not #RRGGBB/#RRGGBBAA (registry.json, tokens.css, tokens-rn.ts) or whose Swift/Kotlin literal is not 6/8 hex digits / 0xAARRGGBB is refused', () => {
+check('P138', 'F-32 gate T2: a colour that is not #RRGGBB/#RRGGBBAA (registry.json, tokens.css, tokens-rn.ts) or whose Swift channel is over 255 / Kotlin literal is not 0xAARRGGBB is refused', () => {
   const cases = [
     ['registry.json', '"value": "#ffffff"', '"value": "#fff"', 'color.white'],
     ['registry.json', '"value": "#ffffff"', '"value": "white"', 'color.white'],
     ['registry.json', '"value": "#0a0a0a"', '"value": "#0a0a0g"', 'color.ink'],
     ['tokens.css', '--color-ink: #0a0a0a;', '--color-ink: #0a0a0;', 'color.ink'],
     ['tokens.css', '--color-ink: #0a0a0a;', '--color-ink: rgb(10, 10, 10);', 'color.ink'],
-    ['DesignTokens.swift', 'Color(hex: "0a0a0a")', 'Color(hex: "0a0a")', 'color.ink'],
-    ['DesignTokens.swift', 'Color(hex: "0a0a0a")', 'Color(hex: "#0a0a0a")', 'color.ink'],
+    ['DesignTokens.swift', 'Color(.sRGB, red: 10 / 255, green: 10 / 255, blue: 10 / 255, opacity: 1)', 'Color(.sRGB, red: 300 / 255, green: 10 / 255, blue: 10 / 255, opacity: 1)', 'color.ink'],
+    ['DesignTokens.swift', 'Color(.sRGB, red: 10 / 255, green: 10 / 255, blue: 10 / 255, opacity: 1)', 'Color(.sRGB, red: 10 / 255, green: 10 / 255, blue: 256 / 255, opacity: 1)', 'color.ink'],
     ['DesignTokens.kt', 'Color(0xFF0A0A0A)', 'Color(0xFF0A0A)', 'color.ink'],
     ['DesignTokens.kt', 'Color(0xFF0A0A0A)', 'Color(0xZZ0A0A0A)', 'color.ink'],
     ['tokens-rn.ts', '"ink": "#0a0a0a"', '"ink": "#0a0a0"', 'color.ink'],
@@ -2578,7 +2596,13 @@ check('P139', 'F-32 gate T3: a value that differs from registry.json after conve
     ['tokens.css', '--color-ink: #0a0a0a;', '--color-ink: #0a0a0b;', 'tokens.css', 'color.ink'],
     ['tokens.css', '--space-2: 8px;', '--space-2: 9px;', 'tokens.css', 'space.2'],
     ['tokens.css', '--font-weight-bold: 700;', '--font-weight-bold: 600;', 'tokens.css', 'font.weight.bold'],
-    ['DesignTokens.swift', 'Color(hex: "0a0a0a")', 'Color(hex: "0a0a0b")', 'DesignTokens.swift', 'color.ink'],
+    ['DesignTokens.swift', 'Color(.sRGB, red: 10 / 255, green: 10 / 255, blue: 10 / 255, opacity: 1)', 'Color(.sRGB, red: 11 / 255, green: 10 / 255, blue: 10 / 255, opacity: 1)', 'DesignTokens.swift', 'color.ink'],
+    ['DesignTokens.swift', 'Color(.sRGB, red: 10 / 255, green: 10 / 255, blue: 10 / 255, opacity: 1)', 'Color(.sRGB, red: 10 / 255, green: 11 / 255, blue: 10 / 255, opacity: 1)', 'DesignTokens.swift', 'color.ink'],
+    ['DesignTokens.swift', 'Color(.sRGB, red: 10 / 255, green: 10 / 255, blue: 10 / 255, opacity: 1)', 'Color(.sRGB, red: 10 / 255, green: 10 / 255, blue: 11 / 255, opacity: 1)', 'DesignTokens.swift', 'color.ink'],
+    ['DesignTokens.swift', 'Color(.sRGB, red: 10 / 255, green: 10 / 255, blue: 10 / 255, opacity: 1)', 'Color(.sRGB, red: 9 / 255, green: 10 / 255, blue: 10 / 255, opacity: 1)', 'DesignTokens.swift', 'color.ink'],
+    ['DesignTokens.swift', 'opacity: 68 / 255)', 'opacity: 69 / 255)', 'DesignTokens.swift', 'color.translucent'],
+    ['DesignTokens.swift', 'opacity: 68 / 255)', 'opacity: 1)', 'DesignTokens.swift', 'color.translucent'],
+    ['DesignTokens.swift', 'Color(.sRGB, red: 10 / 255, green: 10 / 255, blue: 10 / 255, opacity: 1)', 'Color(hex: "0a0a0a")', 'DesignTokens.swift', 'color.ink'],
     ['DesignTokens.swift', 'Space2: CGFloat = 8', 'Space2: CGFloat = 0', 'DesignTokens.swift', 'space.2'],
     ['DesignTokens.kt', 'Color(0xFF0A0A0A)', 'Color(0xFF0A0A0B)', 'DesignTokens.kt', 'color.ink'],
     ['DesignTokens.kt', 'Color(0x44112233)', 'Color(0xFF112233)', 'DesignTokens.kt', 'color.translucent'],
@@ -2611,7 +2635,7 @@ check('P139', 'F-32 gate T3: a value that differs from registry.json after conve
   const chain = f32Edit('tokens.css', '--color-bg-surface: #ffffff;', '--color-bg-surface: var(--color-bg-base);');
   assert(checkTokenOutputs({ outputs: chain, fresh: chain }).ok, 'a var() chain that ends at the registry value must pass');
   // 8 digit colour: kt is AARRGGBB, swift keeps the digits, rn keeps #RRGGBBAA
-  assert(/Color\(0x44112233\)/.test(F32_GOOD['DesignTokens.kt']) && /Color\(hex: "11223344"\)/.test(F32_GOOD['DesignTokens.swift']) && /"translucent": "#11223344"/.test(F32_GOOD['tokens-rn.ts']), 'the 8 digit colour conversions must hold in the fixture');
+  assert(/Color\(0x44112233\)/.test(F32_GOOD['DesignTokens.kt']) && /Color\(\.sRGB, red: 17 \/ 255, green: 34 \/ 255, blue: 51 \/ 255, opacity: 68 \/ 255\)/.test(F32_GOOD['DesignTokens.swift']) && /"translucent": "#11223344"/.test(F32_GOOD['tokens-rn.ts']), 'the 8 digit colour conversions must hold in the fixture');
 });
 
 check('P140', 'F-32 gate T4: an output that differs from a fresh build is refused naming the first differing line; a still valid but stale value is caught only by T4', () => {
@@ -2659,7 +2683,128 @@ check('P142', 'F-32 docs: docs/BREADTH-MATRIX.md has an F-32 section with the fi
   assert(/names? only/i.test(sec) && /resolveOne/.test(sec) && /Linux/.test(sec) && /before the (token )?build/i.test(sec), 'the section must say earlier checks verified names only, name resolveOne, say it runs on Linux and before the build');
 });
 
+// --- F-31: SwiftUI compile gate (P143 to P147) --------------------------------------------------------
+const f31Fake = (script = {}) => {
+  const calls = [];
+  const run = async (cmd, args) => {
+    calls.push([cmd, ...args].join(' '));
+    const swifts = args.filter((a) => a.endsWith('.swift')).map((a) => a.split('/').slice(-2).join('/'));
+    const key = args.includes('--show-sdk-path') ? 'sdk' : args.includes('--find') ? 'find' : swifts[swifts.length - 1]; // the tokens file alone, or the feature file compiled with it
+    const r = script[key] ?? { status: 0, stdout: '', stderr: '' };
+    return { stdout: '', stderr: '', ...r };
+  };
+  return { run, calls };
+};
+const f31Fs = (dirs) => ({ exists: (p) => p === '/o' || dirs[p.replace(/^\/o\//, '')] !== undefined, listDir: () => Object.keys(dirs), listSwift: (d) => dirs[d.replace(/^\/o\//, '')] ?? [] });
+const f31Opts = (dirs, fake, extra = {}) => ({ platform: 'darwin', run: fake.run, outDir: '/o', tokensFile: '/t/DesignTokens.swift', features: ['alpha', 'beta'], jobs: 2, ...f31Fs(dirs), ...extra });
+const f31Good = { alpha: ['Alpha.swift'], beta: ['Beta.swift'] };
+
+await checkAsync('P143', 'F-31 gate rules (fake compiler, any OS): S0 env, S1 typecheck names file + first raw error, S2 tokens (no feature compiled), S3 inventory; clean run passes', async () => {
+  const ok = await checkSwiftTypecheck(f31Opts(f31Good, f31Fake()));
+  assert(ok.ok && ok.issues.length === 0 && ok.checked === 3, `a clean run must pass and check tokens + 2 files, got ${JSON.stringify(ok)}`);
+  // S1: the first error is reported raw, with line and column, naming the file; other files are not hidden
+  const raw = "/x/out/swiftui/beta/Beta.swift:9:67: error: cannot convert value of type 'Bool' to expected argument type 'String'";
+  const s1 = await checkSwiftTypecheck(f31Opts(f31Good, f31Fake({ 'beta/Beta.swift': { status: 1, stderr: `note: x\n${raw}\n${raw.replace('9:67', '12:3')}\n` }, 'alpha/Alpha.swift': { status: 1, stderr: '/x/Alpha.swift:2:1: error: first\n' } })));
+  assert(!s1.ok && s1.issues.length === 2 && s1.issues.every((i) => i.rule === 'S1-typecheck'), 'two failing files must give two S1 issues');
+  assert(s1.issues.some((i) => /beta[\\/]Beta\.swift/.test(i.file) && i.msg.includes(raw)), 'S1 must carry the first error raw (line and column) and name the file');
+  assert(!s1.issues.some((i) => i.msg.includes('12:3')), 'only the FIRST error is reported');
+  // S2: tokens alone fail -> S2 only, and no feature file is compiled
+  const f2 = f31Fake({ 't/DesignTokens.swift': { status: 1, stderr: "/t/DesignTokens.swift:5:41: error: extraneous argument label 'hex:' in call\n" } });
+  const s2 = await checkSwiftTypecheck(f31Opts(f31Good, f2));
+  assert(!s2.ok && s2.issues.length === 1 && s2.issues[0].rule === 'S2-tokens' && /DesignTokens\.swift/.test(s2.issues[0].file) && s2.issues[0].msg.includes('5:41'), 'a failing tokens file must be exactly one S2 naming it with the raw error');
+  assert(!f2.calls.some((c) => c.includes('Alpha.swift')), 'no feature file may be compiled once the tokens file fails');
+  // S3: a feature without output, an unexpected directory; pin artefact directories are ignored
+  const s3a = await checkSwiftTypecheck(f31Opts({ alpha: ['Alpha.swift'] }, f31Fake()));
+  assert(s3a.issues.some((i) => i.rule === 'S3-inventory' && /beta/.test(i.file)), 'a corpus feature with no output must be S3 naming it');
+  const s3b = await checkSwiftTypecheck(f31Opts({ ...f31Good, alpha: [] }, f31Fake()));
+  assert(s3b.issues.some((i) => i.rule === 'S3-inventory' && /alpha/.test(i.file)), 'a feature directory with no .swift file must be S3');
+  const s3c = await checkSwiftTypecheck(f31Opts({ ...f31Good, stray: ['Stray.swift'], _verify: ['V.swift'], 'verify-thing': ['V.swift'] }, f31Fake()));
+  assert(s3c.issues.length === 1 && s3c.issues[0].rule === 'S3-inventory' && /stray/.test(s3c.issues[0].file), 'an unexpected directory is S3; _verify and verify-* are pin artefacts and are neither compiled nor reported');
+  const fk = f31Fake();
+  await checkSwiftTypecheck(f31Opts({ ...f31Good, _verify: ['V.swift'], 'verify-thing': ['V.swift'] }, fk));
+  assert(!fk.calls.some((c) => /_verify|verify-thing/.test(c)), 'pin artefact directories must not be compiled');
+  // S0: no SDK, no swiftc, no output dir, empty output dir
+  const s0a = await checkSwiftTypecheck(f31Opts(f31Good, f31Fake({ sdk: { status: 1, stderr: 'xcrun: error: SDK "iphonesimulator" cannot be located' } })));
+  assert(s0a.issues.length === 1 && s0a.issues[0].rule === 'S0-env' && /iphonesimulator/.test(s0a.issues[0].msg), 'a missing SDK must be one S0');
+  const s0b = await checkSwiftTypecheck(f31Opts(f31Good, f31Fake({ find: { status: 1, stderr: 'xcrun: error: unable to find utility "swiftc"' } })));
+  assert(s0b.issues.length === 1 && s0b.issues[0].rule === 'S0-env' && /swiftc/.test(s0b.issues[0].msg), 'a missing swiftc must be one S0');
+  const s0c = await checkSwiftTypecheck({ ...f31Opts(f31Good, f31Fake()), exists: () => false });
+  assert(s0c.issues.length === 1 && s0c.issues[0].rule === 'S0-env' && /does not exist/.test(s0c.issues[0].msg), 'a missing output directory must be one S0');
+  const s0d = await checkSwiftTypecheck(f31Opts({}, f31Fake()));
+  assert(s0d.issues.length === 1 && s0d.issues[0].rule === 'S0-env' && /no feature directory/.test(s0d.issues[0].msg), 'an empty output directory must be one S0');
+  // the deployment target is part of the command
+  const f16 = f31Fake();
+  await checkSwiftTypecheck(f31Opts(f31Good, f16, { ios: 16 }));
+  assert(f16.calls.some((c) => c.includes('-target arm64-apple-ios16.0-simulator')) && !f16.calls.some((c) => c.includes('ios17')), 'ios 16 must change the target of every invocation');
+  assert(swiftArgs(17, ['a.swift']).join(' ') === '--sdk iphonesimulator swiftc -typecheck -target arm64-apple-ios17.0-simulator a.swift', 'the default command must be the documented one');
+});
+
+await checkAsync('P144', 'F-31 gate: any OS other than macOS prints exactly "SKIPPED (not macOS): swiftui typecheck" with ok and no compiler call; output is deterministic and ordered; ci.mjs runs it after generation and before verify-patches', async () => {
+  for (const platform of ['linux', 'win32']) {
+    const fk = f31Fake();
+    const r = await checkSwiftTypecheck({ ...f31Opts(f31Good, fk), platform });
+    assert(r.skipped === true && r.ok === true && fk.calls.length === 0, `${platform}: must skip, be ok and call no compiler`);
+    assert(formatSwiftReport(r) === 'SKIPPED (not macOS): swiftui typecheck' && SWIFT_SKIP === 'SKIPPED (not macOS): swiftui typecheck', 'the skip message must be exact');
+  }
+  const script = { 'beta/Beta.swift': { status: 1, stderr: '/x/Beta.swift:1:1: error: b\n' }, 'alpha/Alpha.swift': { status: 1, stderr: '/x/Alpha.swift:1:1: error: a\n' } };
+  const dirs = { ...f31Good, stray: ['S.swift'] };
+  const a = await checkSwiftTypecheck(f31Opts(dirs, f31Fake(script))), b = await checkSwiftTypecheck(f31Opts(dirs, f31Fake(script), { jobs: 1 }));
+  assert(JSON.stringify(a) === JSON.stringify(b) && formatSwiftReport(a) === formatSwiftReport(b), 'the report must not depend on the parallelism');
+  const order = a.issues.map((i) => RULES_S.indexOf(i.rule));
+  assert(order.every((r, i) => i === 0 || order[i - 1] <= r) && a.issues.length === 3, 'issues are sorted by rule order');
+  const ci = readFileSync(resolve(ROOT, '_shared/scripts/ci.mjs'), 'utf8');
+  const gateAt = ci.indexOf("run('node _shared/scripts/check-swift-typecheck.mjs')"), genAt = ci.indexOf("run(`node _shared/scripts/e2e-multi.mjs"), vpAt = ci.indexOf("run('node _shared/scripts/verify-patches.mjs')");
+  assert(genAt > 0 && gateAt > genAt && gateAt < vpAt, 'ci.mjs must run the gate after the generation steps and before verify-patches');
+  assert(/failures\+\+/.test(ci.slice(gateAt, vpAt)), 'a gate failure must count as a CI failure');
+  const wf = readFileSync(resolve(ROOT, '.github/workflows/ci.yml'), 'utf8');
+  assert(!/macos|swiftc|typecheck/i.test(wf), 'the workflow file must not gain a macOS job or the gate');
+});
+
+if (process.platform === 'darwin') {
+  await checkAsync('P145', 'F-31 gate (macOS only, real compiler): a known-good tiny SwiftUI file passes; a known-bad one is S1 naming the file with the raw error; a bad tokens file is S2', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'f31-'));
+    try {
+      const out = join(dir, 'out'), outGood = join(dir, 'out-good'); mkdirSync(join(out, 'good'), { recursive: true }); mkdirSync(join(out, 'bad'), { recursive: true }); mkdirSync(join(outGood, 'good'), { recursive: true });
+      const tokens = join(dir, 'DesignTokens.swift');
+      writeFileSync(tokens, 'import SwiftUI\npublic enum DesignTokens {\n    public static let ColorInk = Color(.sRGB, red: 10 / 255, green: 10 / 255, blue: 10 / 255, opacity: 1)\n}\n');
+      writeFileSync(join(out, 'good', 'Good.swift'), 'import SwiftUI\nstruct Good: SwiftUI.View {\n  let label: String\n  var body: some SwiftUI.View { SwiftUI.Text(label).foregroundColor(DesignTokens.ColorInk) }\n}\n');
+      const goodSrc = readFileSync(join(out, 'good', 'Good.swift'), 'utf8');
+      writeFileSync(join(outGood, 'good', 'Good.swift'), goodSrc);
+      writeFileSync(join(out, 'bad', 'Bad.swift'), 'import SwiftUI\nstruct Bad: SwiftUI.View {\n  let onChange: (String) -> Void\n  let on: Bool\n  var body: some SwiftUI.View { SwiftUI.Toggle("t", isOn: SwiftUI.Binding(get: { on }, set: { onChange($0) })) }\n}\n');
+      const real = (o) => checkSwiftTypecheck({ outDir: out, tokensFile: tokens, features: ['good', 'bad'], jobs: 2, ...o });
+      const good = await real({ outDir: outGood, features: ['good'] });
+      assert(good.ok && good.checked === 2, `a known-good file must pass, got ${JSON.stringify(good.issues)}`);
+      const bad = await real({});
+      assert(!bad.ok && bad.issues.length === 1 && bad.issues[0].rule === 'S1-typecheck' && /Bad\.swift/.test(bad.issues[0].file) && /Bad\.swift:5:\d+: error: cannot convert value of type 'Bool'/.test(bad.issues[0].msg), `a known-bad file must be one S1 with line, column and the raw error, got ${JSON.stringify(bad.issues)}`);
+      writeFileSync(tokens, 'import SwiftUI\npublic enum DesignTokens {\n    public static let ColorInk = Color(hex: "0a0a0a")\n}\n');
+      const s2 = await real({ outDir: outGood, features: ['good'] });
+      assert(!s2.ok && s2.issues.length === 1 && s2.issues[0].rule === 'S2-tokens' && /extraneous argument label 'hex:'/.test(s2.issues[0].msg), `the old Color(hex:) tokens must be S2, got ${JSON.stringify(s2.issues)}`);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+  await checkAsync('P146', 'F-31 gate (macOS only, real compiler): the CLI exits 0 on the generated corpus SwiftUI and DesignTokens.swift, for the default target', async () => {
+    const r = await swiftSpawn('node', ['_shared/scripts/check-swift-typecheck.mjs']);
+    assert(r.status === 0 && /swiftui typecheck: PASS/.test(r.stdout), `the gate CLI must pass on the committed generator output, got exit ${r.status}: ${r.stdout.split('\n').slice(0, 4).join(' | ')}`);
+  });
+} else {
+  skipPin('P145', 'F-31 gate (macOS only, real compiler): known-good / known-bad / bad-tokens fixtures', `not macOS (${process.platform}); this pin needs xcrun and the iOS simulator SDK`);
+  skipPin('P146', 'F-31 gate (macOS only, real compiler): the CLI passes on the generated corpus SwiftUI', `not macOS (${process.platform}); this pin needs xcrun and the iOS simulator SDK`);
+}
+
+check('P147', 'F-31 docs: docs/BREADTH-MATRIX.md has an F-31 section with the finding, the causes, the rules S0 to S3, the exclusion rule, the colour format and T3 edit, the Linux note and the open follow-ups', () => {
+  const doc = readFileSync(resolve(ROOT, 'docs/BREADTH-MATRIX.md'), 'utf8');
+  const at = doc.indexOf('# F-31 - the generated SwiftUI did not compile');
+  assert(at >= 0, 'an F-31 section must exist');
+  const sec = doc.slice(at);
+  for (const r of ['S0', 'S1', 'S2', 'S3']) assert(new RegExp(`\`${r}\``).test(sec), `the section must describe ${r}`);
+  for (const c of ['E', 'A', 'B', 'C', 'D', 'F']) assert(new RegExp(`\\*\\*${c}\\.`).test(sec), `the section must describe cause ${c}`);
+  assert(/verify-\*/.test(sec) && /_verify/.test(sec) && /pin artefact/i.test(sec), 'the section must state the exclusion rule for verify-* and _verify');
+  assert(/Linux/.test(sec) && /SKIPPED/.test(sec) && /Mac run/i.test(sec), 'the section must say Linux skips the gate and a Mac run is required');
+  assert(/Color\(\.sRGB/.test(sec) && /T3/.test(sec), 'the section must record the colour format and the T3 edit');
+  assert(/\(value: string\) => void/.test(sec) && /unverified/i.test(sec), 'the section must record the React / React Native callback parity risk');
+  assert(/Compose/.test(sec) && /macOS CI job/i.test(sec), 'the section must list the open follow-ups');
+});
+
 console.log('\n=== verify-patches ===');
 console.log(results.join('\n'));
-console.log(`\n${pass} passed, ${fail} failed\n`);
+console.log(`\n${pass} passed, ${fail} failed${skipped ? `, ${skipped} skipped` : ''}\n`);
 process.exit(fail ? 1 : 0);

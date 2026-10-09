@@ -1,0 +1,24 @@
+component: VariantPaddingRadius
+description: Container whose padding and corner radius change with a two-way density variant.
+category: display
+props:
+  - { name: label, type: string, required: true }
+  - { name: density, type: enum, required: true, values: [compact, roomy] }
+tokens:
+  - color.bg.muted
+  - color.fg.default
+  - space.inset.sm
+  - space.inset.md
+  - radius.sm
+  - radius.control
+root:
+  el: container
+  variant:
+    prop: density
+    intent: emphasis
+    cases:
+      compact: { background: color.bg.muted, padding: space.inset.sm, radius: radius.sm }
+      roomy:   { background: color.bg.muted, padding: space.inset.md, radius: radius.control }
+  children:
+    - el: text
+      text: { kind: ref, value: label }

@@ -16,7 +16,7 @@
  *   T1-broken-value     a value position holds `[object Object]` (any case), undefined, NaN, null, an
  *                       empty value, or an object/array where a scalar is expected
  *   T2-color-validity   a colour is not #RRGGBB / #RRGGBBAA (registry.json, tokens.css, tokens-rn.ts)
- *                       or its literal in DesignTokens.swift / DesignTokens.kt is not 6/8 hex digits /
+ *                       or a DesignTokens.swift channel is over 255 / its DesignTokens.kt literal is not
  *                       0xAARRGGBB
  *   T3-agreement        the outputs disagree: a token missing from, or extra in, an output, or a value
  *                       that is not the registry.json value after the format conversion (below)
@@ -33,7 +33,7 @@
  *
  * T3 conversions (registry.json is the reference value):
  *   colour    registry `#RRGGBB`  -> tokens.css `#RRGGBB` (a `var(--x)` is followed to its end value,
- *             cycle-checked) -> DesignTokens.swift `Color(hex: "RRGGBB")` (no `#`) ->
+ *             cycle-checked) -> DesignTokens.swift `Color(.sRGB, red: R / 255, green: G / 255, blue: B / 255, opacity: 1)` (bytes as integers; `A / 255` for #RRGGBBAA) ->
  *             DesignTokens.kt `Color(0xFFRRGGBB)`; `#RRGGBBAA` -> kt `0xAARRGGBB` -> tokens-rn.ts `"#RRGGBB"`;
  *             hex digits compare case-insensitively
  *   dimension registry `8px` -> tokens.css `8px` -> swift `CGFloat = 8` -> kt `8.dp` -> tokens-rn.ts `8`
@@ -68,7 +68,8 @@ export { OUTPUT_FILES };
 export const COMPOSITE_TYPES = ['shadow', 'typography', 'border', 'transition', 'gradient', 'strokeStyle', 'cubicBezier'];
 
 const HEX_ANY = /^#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
-const HEX_DIGITS = /^(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
+/** DesignTokens.swift colour: integer bytes over 255; opacity is `1` (opaque, 6-digit source) or `A / 255` (8-digit). */
+const SWIFT_COLOR = /^Color\(\.sRGB, red: (\d{1,3}) \/ 255, green: (\d{1,3}) \/ 255, blue: (\d{1,3}) \/ 255, opacity: (?:1|(\d{1,3}) \/ 255)\)$/;
 const PX = /^(-?(?:\d+\.?\d*|\.\d+))px$/;
 const NUM = /^-?(?:\d+\.?\d*|\.\d+)$/;
 
@@ -404,10 +405,16 @@ export function checkTokenOutputs({ outputs, expected = OUTPUT_FILES, fresh } = 
           const m = swiftMap.get(id);
           if (!m) add('T3-agreement', 'DesignTokens.swift', t.name, `DesignTokens.swift has no ${id} for colour ${t.name}`);
           else if (!isBad('DesignTokens.swift', id)) {
-            const mm = m.rhs.match(/^Color\(hex:\s*"([^"]*)"\)$/);
-            if (!mm) add('T3-agreement', 'DesignTokens.swift', t.name, `DesignTokens.swift ${id} is \`${m.rhs}\`, expected Color(hex: "RRGGBB")`);
-            else if (!HEX_DIGITS.test(mm[1])) add('T2-color-validity', 'DesignTokens.swift', t.name, `DesignTokens.swift ${id} hex "${mm[1]}" is not 6 or 8 hex digits`);
-            else if (want !== null && mm[1].toLowerCase() !== want) add('T3-agreement', 'DesignTokens.swift', t.name, `DesignTokens.swift ${id} is "${mm[1]}", registry.json has ${t.value}`);
+            const mm = m.rhs.match(SWIFT_COLOR);
+            if (!mm) add('T3-agreement', 'DesignTokens.swift', t.name, `DesignTokens.swift ${id} is \`${m.rhs}\`, expected Color(.sRGB, red: R / 255, green: G / 255, blue: B / 255, opacity: 1 | A / 255)`);
+            else {
+              const bytes = [mm[1], mm[2], mm[3], mm[4]].filter((b) => b !== undefined).map(Number);
+              if (bytes.some((b) => b > 255)) add('T2-color-validity', 'DesignTokens.swift', t.name, `DesignTokens.swift ${id} channel ${bytes.find((b) => b > 255)} is over 255`);
+              else {
+                const got = bytes.map((b) => b.toString(16).padStart(2, '0')).join('');
+                if (want !== null && got !== want) add('T3-agreement', 'DesignTokens.swift', t.name, `DesignTokens.swift ${id} is "${got}", registry.json has ${t.value}`);
+              }
+            }
           }
         }
         // kotlin

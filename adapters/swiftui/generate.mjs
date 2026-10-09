@@ -39,7 +39,7 @@ class SwiftUIRenderer extends RendererBase {
     }
     if (fmt.precision) { const p = intv(fmt.precision); lines.push(`f.minimumFractionDigits = ${p}`, `f.maximumFractionDigits = ${p}`); }
     lines.push(`return f.string(from: NSNumber(value: ${num})) ?? String(${num})`);
-    return `Text({ ${lines.join('; ')} }())`;
+    return `SwiftUI.Text({ ${lines.join('; ')} }())`;
   }
   // F-26 date/time formatting — DateFormatter (dateStyle / timeStyle presets +
   // locale). Mirrors the NumberFormatter approach; presets only, no custom pattern.
@@ -55,11 +55,11 @@ class SwiftUIRenderer extends RendererBase {
     // back to .current (device) — identical device fallback as the other adapters.
     if (fmt.timeZone) lines.push(`f.timeZone = TimeZone(identifier: ${sv(fmt.timeZone)}) ?? .current`);
     lines.push(`return f.string(from: ${src})`);
-    return `Text({ ${lines.join('; ')} }())`;
+    return `SwiftUI.Text({ ${lines.join('; ')} }())`;
   }
   textExpr(vr) {
-    if (!vr) return 'Text("")';
-    if (vr.kind === 'literal') return `Text(${JSON.stringify(String(vr.value))})`;
+    if (!vr) return 'SwiftUI.Text("")';
+    if (vr.kind === 'literal') return `SwiftUI.Text(${JSON.stringify(String(vr.value))})`;
     if (vr.kind === 'format') { this.express('number-format', { mechanism: 'NumberFormatter' }); return this.formatNumber(this.numberFormat(vr)); }
     if (vr.kind === 'datetime') {
       const df = this.dateFormat(vr);
@@ -67,18 +67,18 @@ class SwiftUIRenderer extends RendererBase {
       if (df.timeZone) this.express('date-timezone', { mechanism: 'DateFormatter.timeZone = TimeZone(identifier:) ?? .current' });
       return this.formatDate(df);
     }
-    if (vr.kind === 'ref') return `Text(String(describing: ${safe(vr.value)}))`;
+    if (vr.kind === 'ref') return `SwiftUI.Text(String(describing: ${safe(vr.value)}))`;
     // F-11 (precision-only): `<num>.toFixed(<precision>)` -> a real native decimal
     // formatter with `precision` fraction digits. No locale / grouping / currency
     // / rounding-mode — that is a separate future pass (F-12).
     const fx = String(vr.value).trim().match(/^([A-Za-z_$][\w$]*)\.toFixed\(([A-Za-z_$][\w$]*)\)$/);
     if (fx) {
       const [, num, prec] = fx;
-      return `Text({ let f = NumberFormatter(); f.numberStyle = .decimal; f.usesGroupingSeparator = false; f.minimumFractionDigits = Int(${safe(prec)}); f.maximumFractionDigits = Int(${safe(prec)}); return f.string(from: NSNumber(value: ${safe(num)})) ?? String(${safe(num)}) }())`;
+      return `SwiftUI.Text({ let f = NumberFormatter(); f.numberStyle = .decimal; f.usesGroupingSeparator = false; f.minimumFractionDigits = Int(${safe(prec)}); f.maximumFractionDigits = Int(${safe(prec)}); return f.string(from: NSNumber(value: ${safe(num)})) ?? String(${safe(num)}) }())`;
     }
     const id = firstIdent(vr.value);
     this.warnings.push(`expr simplified to \`${id}\` (native cannot eval "${vr.value}")`);
-    return `Text(String(describing: ${safe(id)}))`;
+    return `SwiftUI.Text(String(describing: ${safe(id)}))`;
   }
   interp(vr) { return this.textExpr(vr); }
   modifiers(node) {
@@ -102,14 +102,15 @@ class SwiftUIRenderer extends RendererBase {
       // color variant is honored natively here.
       const slots = new Set();
       for (const s of Object.values(v.styleCases)) for (const k of Object.keys(s)) slots.add(k);
-      const fallback = { background: 'Color.clear', color: 'Color.primary' };
+      // Per slot kind: colour slots fall back to a Color, padding / radius to a CGFloat 0 (the dictionary values are CGFloat tokens).
+      const fallback = { background: 'SwiftUI.Color.clear', color: 'SwiftUI.Color.primary', padding: '0', radius: '0' };
       for (const slot of slots) {
         if (!MODIFIER[slot]) continue;
         const dict = Object.entries(v.styleCases)
           .filter(([, s]) => s[slot])
           .map(([val, s]) => `${JSON.stringify(val)}: ${mapToken(s[slot])}`)
           .join(', ');
-        const expr = `([${dict}][${safe(v.prop)}] ?? ${fallback[slot] ?? 'Color.clear'})`;
+        const expr = `([${dict}][${safe(v.prop)}] ?? ${fallback[slot]})`;
         out.push(`\n  ${MODIFIER[slot](expr)}`);
       }
     }
@@ -161,7 +162,7 @@ class SwiftUIRenderer extends RendererBase {
     const dict = Object.entries(v.iconCases)
       .map(([val, tok]) => `${JSON.stringify(val)}: ${JSON.stringify(this.icon(tok))}`)
       .join(', ');
-    return `Image(systemName: ([${dict}][${safe(v.prop)}] ?? ""))\n  .accessibilityHidden(true)`;
+    return `SwiftUI.Image(systemName: ([${dict}][${safe(v.prop)}] ?? ""))\n  .accessibilityHidden(true)`;
   }
   // F-4 orientation: the container's main layout axis. horizontal -> HStack,
   // vertical (or unset) -> VStack. Express the trait when the IR declares it.
@@ -171,13 +172,13 @@ class SwiftUIRenderer extends RendererBase {
     const horizontal = node.orientation === 'horizontal';
     if (node.orientation) this.express(`orientation=${node.orientation}`, { mechanism: `${horizontal ? 'HStack' : 'VStack'} layout axis` });
     const stack = horizontal
-      ? `HStack(alignment: .center, spacing: 8)`
-      : `VStack(alignment: .leading, spacing: 8)`;
+      ? `SwiftUI.HStack(alignment: .center, spacing: 8)`
+      : `SwiftUI.VStack(alignment: .leading, spacing: 8)`;
     return `${stack} {\n${indent(inner, 2)}\n}${this.modifiers(node)}${this.a11y(node)}`;
   }
   visitMedia(node) {
     const url = node.src.kind === 'literal' ? JSON.stringify(String(node.src.value)) : safe(node.src.value);
-    return `AsyncImage(url: URL(string: ${url}))${this.modifiers(node)}${this.a11y(node)}`;
+    return `SwiftUI.AsyncImage(url: URL(string: ${url}))${this.modifiers(node)}${this.a11y(node)}`;
   }
   visitHeading(node) {
     const font = ['', '.largeTitle', '.title', '.title2', '.title3', '.headline', '.subheadline'][node.level ?? 3];
@@ -196,9 +197,9 @@ class SwiftUIRenderer extends RendererBase {
     const action = node.onEvent ? safe(node.onEvent) : '{}';
     if (node.icon) this.express('icon', { mechanism: 'action icon (Label systemImage)' });
     const label = node.icon
-      ? `Label(${this.plain(node.label)}, systemImage: "${this.icon(node.icon)}")`
+      ? `SwiftUI.Label(${this.plain(node.label)}, systemImage: "${this.icon(node.icon)}")`
       : this.textExpr(node.label);
-    return `Button(action: ${action}) {\n  ${label}\n}${this.disabledMod(node)}${this.modifiers(node)}${this.a11y(node)}`;
+    return `SwiftUI.Button(action: ${action}) {\n  ${label}\n}${this.disabledMod(node)}${this.modifiers(node)}${this.a11y(node)}`;
   }
   visitIcon(node) {
     const sym = this.icon(node.icon);
@@ -206,9 +207,9 @@ class SwiftUIRenderer extends RendererBase {
     if (node.a11y?.label) {
       const l = node.a11y.label;
       const v = l.kind === 'literal' ? JSON.stringify(String(l.value)) : safe(l.value);
-      return `Image(systemName: "${sym}")\n  .accessibilityLabel(${v})`;
+      return `SwiftUI.Image(systemName: "${sym}")\n  .accessibilityLabel(${v})`;
     }
-    return `Image(systemName: "${sym}")\n  .accessibilityHidden(true)`;
+    return `SwiftUI.Image(systemName: "${sym}")\n  .accessibilityHidden(true)`;
   }
 
   visitLink(node) {
@@ -217,7 +218,30 @@ class SwiftUIRenderer extends RendererBase {
     // A ref label must bind the variable, not emit its own name as a literal
     // (mirrors the url handling above; parity enforces this).
     const label = node.label ? (node.label.kind === 'literal' ? JSON.stringify(String(node.label.value)) : safe(node.label.value)) : '""';
-    return `Link(${label}, destination: URL(string: ${url})!)${this.modifiers(node)}`;
+    return `SwiftUI.Link(${label}, destination: URL(string: ${url})!)${this.modifiers(node)}`;
+  }
+  // Callback arity is declared by the prop NAME (the convention React and React Native share): a name
+  // matching /change/i takes the new value, any other name takes none and is called without arguments.
+  takesValue(name) { return /change/i.test(name); }
+  setter(name) { return this.takesValue(name) ? `{ ${safe(name)}($0) }` : `{ _ in ${safe(name)}() }`; }
+  binding(getName, changeName) { return `SwiftUI.Binding(get: { ${safe(getName)} }, set: ${this.setter(changeName)})`; }
+  // The value a bound control hands its callback, mirroring the branches of visitInput:
+  // boolean state or checkbox / switch role -> Bool, numeric-range state or slider role -> Double,
+  // selected-value state or a plain text field -> String.
+  inputValueType(node) {
+    const cs = this.controlState(node);
+    if (cs) return { boolean: 'Bool', 'numeric-range': 'Double', 'selected-value': 'String' }[cs.kind];
+    if (node.role === 'checkbox' || node.role === 'switch') return 'Bool';
+    if (node.role === 'slider') return 'Double';
+    return 'String';
+  }
+  walkIr(node, fn) { fn(node); for (const c of node.children ?? []) this.walkIr(c, fn); }
+  callbackValueTypes() {
+    const types = new Map();
+    this.walkIr(this.ir.root, (n) => {
+      if (n.kind === 'input' && n.input?.changeProp && !types.has(n.input.changeProp)) types.set(n.input.changeProp, this.inputValueType(n));
+    });
+    return types;
   }
   plain(vr, fallback = '""') {
     if (!vr) return fallback;
@@ -234,12 +258,12 @@ class SwiftUIRenderer extends RendererBase {
     if (node.a11y?.labelledBy) this.diverge('a11y.labelledBy', { reason: 'the SwiftUI label relationship needs the referenced element and ids are not plumbed to referenced elements yet', fallback: 'nothing emitted until id plumbing exists', waiver: 'a11y-labelledby-swiftui' });
     if (node.a11y?.invalid) this.diverge('a11y.invalid', { reason: 'SwiftUI has no direct aria-invalid trait', fallback: 'label / adjacent error Text conveys the invalid state', waiver: 'a11y-invalid-swiftui' });
     const num = (v) => (typeof v === 'number' ? String(v) : safe(String(v)));
-    const bind = `Binding(get: { ${safe(cs.value)} }, set: { ${safe(cs.change)}($0) })`;
+    const bind = this.binding(cs.value, cs.change);
     if (cs.kind === 'boolean') {
       // Toggle is SwiftUI's control for both checkbox and switch; it conveys the role.
       if (role) this.express(`role=${role}`, { mechanism: 'Toggle conveys the on/off role' });
       this.express('state=boolean', { mechanism: 'Toggle(isOn: @Binding get/set from caller)' });
-      return `Toggle(${title}, isOn: ${bind})${this.modifiers(node)}`;
+      return `SwiftUI.Toggle(${title}, isOn: ${bind})${this.modifiers(node)}`;
     }
     if (cs.kind === 'selected-value') {
       if (role === 'radiogroup') this.express('role=radiogroup', { mechanism: 'Picker (single-select group)' });
@@ -250,12 +274,12 @@ class SwiftUIRenderer extends RendererBase {
       const rich = this.hasOptionIcons(node);
       if (rich) { this.usesOptionIcons = true; this.express('option-icon', { mechanism: 'Label(systemImage:) SF Symbol via runtime registry (decorative)' }); }
       const row = rich
-        ? `Label(opt.label, systemImage: Self.optionIconSymbols[opt.icon] ?? "").tag(opt.value)`
-        : `Text(opt.label).tag(opt.value)`;
+        ? `SwiftUI.Label(opt.label, systemImage: Self.optionIconSymbols[opt.icon] ?? "").tag(opt.value)`
+        : `SwiftUI.Text(opt.label).tag(opt.value)`;
       const items = cs.options
-        ? `\n  ForEach(${safe(cs.options)}, id: \\.value) { opt in\n    ${row}\n  }\n`
+        ? `\n  SwiftUI.ForEach(${safe(cs.options)}, id: \\.value) { opt in\n    ${row}\n  }\n`
         : `\n  // options supplied by the component\n`;
-      return `Picker(${title}, selection: ${bind}) {${items}}${this.modifiers(node)}`;
+      return `SwiftUI.Picker(${title}, selection: ${bind}) {${items}}${this.modifiers(node)}`;
     }
     // numeric-range: a Stepper number input (inputType=number, NumberInput) or a Slider.
     const stepArg = cs.step != null ? `, step: ${num(cs.step)}` : '';
@@ -266,11 +290,11 @@ class SwiftUIRenderer extends RendererBase {
       this.express('state=numeric-range', { mechanism: 'Slider(value: @Binding, in: min...max, step:)' });
       // Slider has no title argument, so the visible label rides an explicit modifier.
       const labelMod = node.label ? `\n  .accessibilityLabel(${title})` : '';
-      return `Slider(value: ${bind}, in: ${num(cs.min)}...${num(cs.max)}${stepArg})${labelMod}${this.modifiers(node)}`;
+      return `SwiftUI.Slider(value: ${bind}, in: ${num(cs.min)}...${num(cs.max)}${stepArg})${labelMod}${this.modifiers(node)}`;
     }
     if (role) this.diverge(`role=${role}`, { reason: `no direct SwiftUI trait for role "${role}"`, fallback: 'Stepper conveys the numeric value', waiver: `a11y-role-${role}` });
     this.express('state=numeric-range', { mechanism: 'Stepper(value: @Binding, in: min...max, step:) — no formatting' });
-    return `Stepper(${title}, value: ${bind}, in: ${num(cs.min)}...${num(cs.max)}${stepArg})${this.modifiers(node)}`;
+    return `SwiftUI.Stepper(${title}, value: ${bind}, in: ${num(cs.min)}...${num(cs.max)}${stepArg})${this.modifiers(node)}`;
   }
 
   visitInput(node) {
@@ -286,27 +310,27 @@ class SwiftUIRenderer extends RendererBase {
     // Real form controls for the toggle / adjustable roles — never a bare TextField.
     if (role === 'checkbox' || role === 'switch') {
       const bind = i.changeProp
-        ? `Binding(get: { ${safe(i.valueProp ?? 'checked')} }, set: { ${safe(i.changeProp)}($0) })`
+        ? this.binding(i.valueProp ?? 'checked', i.changeProp)
         : `$${safe(i.valueProp ?? 'checked')}`;
       this.express(`role=${role}`, { mechanism: 'Toggle (isOn binding)' });
       // The Toggle's title label IS its accessible name.
       if (node.a11y?.label) this.express('a11y.label', { mechanism: 'Toggle title label (accessible name)' });
-      return `Toggle(${title}, isOn: ${bind})${this.modifiers(node)}`;
+      return `SwiftUI.Toggle(${title}, isOn: ${bind})${this.modifiers(node)}`;
     }
     if (role === 'slider') {
       const bind = i.changeProp
-        ? `Binding(get: { ${safe(i.valueProp ?? 'value')} }, set: { ${safe(i.changeProp)}($0) })`
+        ? this.binding(i.valueProp ?? 'value', i.changeProp)
         : `$${safe(i.valueProp ?? 'value')}`;
       this.express(`role=${role}`, { mechanism: 'Slider (value binding)' });
       // Slider has no title argument, so the label rides an explicit modifier.
       let labelMod = '';
       if (node.a11y?.label) { labelMod = `\n  .accessibilityLabel(${title})`; this.express('a11y.label', { mechanism: '.accessibilityLabel' }); }
-      return `Slider(value: ${bind})${labelMod}${this.modifiers(node)}`;
+      return `SwiftUI.Slider(value: ${bind})${labelMod}${this.modifiers(node)}`;
     }
 
     // Wire the controlled value+onChange contract through a custom Binding.
     const binding = i.changeProp
-      ? `Binding(get: { ${safe(i.valueProp ?? 'value')} }, set: { ${safe(i.changeProp)}($0) })`
+      ? this.binding(i.valueProp ?? 'value', i.changeProp)
       : `$${safe(i.valueProp ?? 'value')}`;
     if (node.a11y?.label) this.express('a11y.label', { mechanism: 'TextField title label (accessible name)' });
     if (role) {
@@ -316,7 +340,7 @@ class SwiftUIRenderer extends RendererBase {
     // F-19 textarea: a multi-line TextField grows vertically (axis: .vertical).
     let axis = '';
     if (i.multiline) { axis = ', axis: .vertical'; this.express('input.multiline', { mechanism: 'TextField(axis: .vertical)' }); }
-    return `TextField(${title}, text: ${binding}${axis})${this.modifiers(node)}`;
+    return `SwiftUI.TextField(${title}, text: ${binding}${axis})${this.modifiers(node)}`;
   }
   visitSlot() { return 'content'; }
   wrapConditional(node, rendered) {
@@ -349,7 +373,7 @@ class SwiftUIRenderer extends RendererBase {
   }
   wrapIteration(node, rendered) {
     const { items, as, key } = node.each;
-    return `ForEach(${safe(items)}, id: \\.${key}) { ${safe(as)} in\n${indent(rendered, 2)}\n}`;
+    return `SwiftUI.ForEach(${safe(items)}, id: \\.${key}) { ${safe(as)} in\n${indent(rendered, 2)}\n}`;
   }
   swiftType(prop) {
     const opt = prop.required === false;
@@ -358,7 +382,7 @@ class SwiftUIRenderer extends RendererBase {
       case 'boolean': return opt ? 'Bool?' : 'Bool';
       case 'date': return opt ? 'Date?' : 'Date';
       case 'function': {
-        const base = /change/i.test(prop.name) ? '(String) -> Void' : '() -> Void';
+        const base = this.takesValue(prop.name) ? `(${this.cbTypes.get(prop.name) ?? 'String'}) -> Void` : '() -> Void';
         return opt ? `(${base})?` : base;
       }
       case 'enum': return opt ? 'String?' : 'String';
@@ -368,6 +392,9 @@ class SwiftUIRenderer extends RendererBase {
   }
   renderComponent(root) {
     const name = this.ir.component;
+    this.cbTypes = this.callbackValueTypes();
+    let hasSlot = false;
+    this.walkIr(this.ir.root, (n) => { if (n.kind === 'slot') hasSlot = true; });
     const stored = this.ir.props
       .map((p) => (p.type === 'function' ? `  let ${safe(p.name)}: ${this.swiftType(p)}` : `  let ${safe(p.name)}: ${this.swiftType(p)}`))
       .join('\n');
@@ -386,7 +413,19 @@ class SwiftUIRenderer extends RendererBase {
     const optionIcons = this.usesOptionIcons
       ? `  static let optionIconSymbols: [String: String] = [${Object.entries(this.iconMap).map(([t, sym]) => `${JSON.stringify(t)}: ${JSON.stringify(sym)}`).join(', ')}]\n\n`
       : '';
-    return `import SwiftUI\n\n${itemStruct}struct ${name}: View {\n${stored}\n\n${optionIcons}  var body: some View {\n${indent(root, 4)}\n  }\n}\n`;
+    // A slot is a generic content view: one stored `content`, built by an @ViewBuilder closure.
+    // Named slots collapse onto the same content (known limitation, no separate slot contract yet).
+    let slotMembers = '';
+    if (hasSlot) {
+      const params = this.ir.props.map((p) => {
+        const t = this.swiftType(p);
+        return `${safe(p.name)}: ${p.type === 'function' && !t.endsWith('?') ? '@escaping ' : ''}${t}`;
+      });
+      const assigns = this.ir.props.map((p) => `self.${safe(p.name)} = ${safe(p.name)}`);
+      slotMembers = `  let content: Content\n\n  init(${[...params, '@SwiftUI.ViewBuilder content: () -> Content'].join(', ')}) {\n${[...assigns, 'self.content = content()'].map((l) => `    ${l}`).join('\n')}\n  }`;
+    }
+    const generic = hasSlot ? '<Content: SwiftUI.View>' : '';
+    return `import SwiftUI\n\n${itemStruct}struct ${name}${generic}: SwiftUI.View {\n${stored}${slotMembers ? `${stored ? '\n\n' : ''}${slotMembers}` : ''}\n\n${optionIcons}  var body: some SwiftUI.View {\n${indent(root, 4)}\n  }\n}\n`;
   }
 }
 

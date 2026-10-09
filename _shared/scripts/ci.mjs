@@ -6,6 +6,7 @@
  *   2. run e2e for every discovered feature (example specs + artifact specs)
  *      - in-scope features must pass every gate
  *      - refused categories (overlay / data-table) must refuse, not generate
+ *   2b. swiftui typecheck (macOS only: the generated SwiftUI compiles; any other OS prints SKIPPED)
  *   3. run the verify-patches regression harness
  * Exits non-zero on the first real failure.
  */
@@ -94,6 +95,12 @@ function main() {
       failures++;
     }
   }
+
+  // F-31: the only gate that runs the Swift compiler on the generated SwiftUI. macOS only; any other OS
+  // prints SKIPPED and passes (a Mac run is required before merging SwiftUI changes).
+  console.log('\n## 2b. swiftui typecheck (F-31 — every corpus SwiftUI output and DesignTokens.swift type-check with the real compiler)');
+  try { run('node _shared/scripts/check-swift-typecheck.mjs'); }
+  catch { console.error('FAIL: check-swift-typecheck'); failures++; }
 
   console.log('\n## 3. regression harness');
   try { run('node _shared/scripts/verify-patches.mjs'); }
