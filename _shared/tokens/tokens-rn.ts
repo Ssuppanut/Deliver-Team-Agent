@@ -38,115 +38,39 @@ export const tokens = {
       "600": "#dc2626"
     },
     "bg": {
-      "default": {
-        "value": "#ffffff",
-        "type": "color",
-        "ext": null
-      },
-      "subtle": {
-        "value": "#f8fafc",
-        "type": "color",
-        "ext": null
-      },
-      "muted": {
-        "value": "#f1f5f9",
-        "type": "color",
-        "ext": null
-      }
+      "default": "#ffffff",
+      "subtle": "#f8fafc",
+      "muted": "#f1f5f9"
     },
     "fg": {
-      "default": {
-        "value": "#0f172a",
-        "type": "color",
-        "ext": null
-      },
-      "muted": {
-        "value": "#64748b",
-        "type": "color",
-        "ext": null
-      },
-      "onAccent": {
-        "value": "#ffffff",
-        "type": "color",
-        "ext": null
-      }
+      "default": "#0f172a",
+      "muted": "#64748b",
+      "onAccent": "#ffffff"
     },
     "border": {
-      "default": {
-        "value": "#e2e8f0",
-        "type": "color",
-        "ext": null
-      },
-      "strong": {
-        "value": "#cbd5e1",
-        "type": "color",
-        "ext": null
-      }
+      "default": "#e2e8f0",
+      "strong": "#cbd5e1"
     },
     "accent": {
-      "default": {
-        "value": "#2563eb",
-        "type": "color",
-        "ext": null
-      },
-      "hover": {
-        "value": "#1d4ed8",
-        "type": "color",
-        "ext": null
-      },
-      "subtle": {
-        "value": "#eff6ff",
-        "type": "color",
-        "ext": null
-      }
+      "default": "#2563eb",
+      "hover": "#1d4ed8",
+      "subtle": "#eff6ff"
     },
     "success": {
-      "fg": {
-        "value": "#16a34a",
-        "type": "color",
-        "ext": null
-      },
-      "bg": {
-        "value": "#f0fdf4",
-        "type": "color",
-        "ext": null
-      }
+      "fg": "#16a34a",
+      "bg": "#f0fdf4"
     },
     "warning": {
-      "fg": {
-        "value": "#d97706",
-        "type": "color",
-        "ext": null
-      },
-      "bg": {
-        "value": "#fffbeb",
-        "type": "color",
-        "ext": null
-      }
+      "fg": "#d97706",
+      "bg": "#fffbeb"
     },
     "danger": {
-      "fg": {
-        "value": "#dc2626",
-        "type": "color",
-        "ext": null
-      },
-      "bg": {
-        "value": "#fef2f2",
-        "type": "color",
-        "ext": null
-      }
+      "fg": "#dc2626",
+      "bg": "#fef2f2"
     },
     "info": {
-      "fg": {
-        "value": "#2563eb",
-        "type": "color",
-        "ext": null
-      },
-      "bg": {
-        "value": "#eff6ff",
-        "type": "color",
-        "ext": null
-      }
+      "fg": "#2563eb",
+      "bg": "#eff6ff"
     }
   },
   "space": {
@@ -161,13 +85,13 @@ export const tokens = {
     "10": 40,
     "12": 48,
     "inset": {
-      "sm": 0,
-      "md": 0,
-      "lg": 0
+      "sm": 8,
+      "md": 16,
+      "lg": 24
     },
     "stack": {
-      "sm": 0,
-      "md": 0
+      "sm": 8,
+      "md": 16
     }
   },
   "radius": {
@@ -176,8 +100,8 @@ export const tokens = {
     "md": 8,
     "lg": 12,
     "full": 9999,
-    "control": 0,
-    "surface": 0
+    "control": 8,
+    "surface": 12
   },
   "font": {
     "family": {
