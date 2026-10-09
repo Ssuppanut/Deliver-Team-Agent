@@ -71,6 +71,8 @@ domains:
     - { id: design-patterns,     status: implemented, impl: ".claude/skills/knowledge/pattern-library/SKILL.md", purpose: "Reusable design patterns", used_by: [design-system, ux-designer] }
     - { id: figma-sync,          status: implemented, impl: ".claude/skills/design-system/tokens-sync/SKILL.md", purpose: "Figma Variables <-> DTCG", used_by: [design-system] }
     - { id: dtcg,                status: implemented, impl: "_shared/tokens/source/", purpose: "DTCG token sources", used_by: [design-system] }
+    # Status: the "implemented" value below refers to the SKILL.md document only. Storybook authoring is PLANNED, no code or
+    # configuration exists in this repository; see docs/VERIFICATION-LAYERS.md.
     - { id: storybook-authoring, status: implemented, impl: ".claude/skills/design-system/storybook-authoring/SKILL.md", purpose: "CSF/MDX stories for verification", used_by: [design-system, ux-ui-engineer] }
     - { id: design-system-governance, status: planned, purpose: "Consistency governance", used_by: [design-system] }
 
@@ -87,6 +89,8 @@ domains:
     - { id: token-compliance,   status: implemented, impl: ".claude/skills/_guards/token-guard/scripts/check.mjs", purpose: "Token-contract gate", used_by: [design-qa] }
     - { id: performance-qa,     status: implemented, impl: ".claude/skills/_guards/perf-guard/scripts/check.mjs", purpose: "Bloat/dead-import gate", used_by: [design-qa] }
     - { id: design-quality-qa,  status: implemented, impl: ".claude/skills/_guards/slop-guard/scripts/check.mjs", purpose: "De-slop / design-quality gate", used_by: [design-qa] }
+    # Status: the "implemented" value below refers to the SKILL.md document only. Visual regression and dynamic a11y are PLANNED,
+    # no implementation exists in this repository; see docs/VERIFICATION-LAYERS.md.
     - { id: visual-qa,          status: implemented, impl: ".claude/skills/workflow/06-verify/SKILL.md", purpose: "Visual regression + dynamic a11y tiers", used_by: [design-qa] }
     - { id: responsive-qa,      status: planned, purpose: "Responsive QA", used_by: [design-qa] }
     - { id: interaction-qa,     status: planned, purpose: "Interaction QA", used_by: [design-qa] }

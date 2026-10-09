@@ -1,7 +1,7 @@
 /**
  * a11y-guard (static / spec tier + per-adapter output tier)
  * Walks the IR and enforces baseline accessibility contracts before any code
- * is trusted. Dynamic tier (axe-core via Playwright) runs in 06-verify.
+ * is trusted. The dynamic tier (axe-core via Playwright) is not implemented (planned); see docs/VERIFICATION-LAYERS.md.
  *
  * Two tiers:
  *   1. IR tier   — structural contracts on the spec (alt, button-name, label…).

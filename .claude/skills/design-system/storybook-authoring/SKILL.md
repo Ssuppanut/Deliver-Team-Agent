@@ -8,6 +8,10 @@ description: >
   Do NOT use it to run the verification tiers — that is the 06-verify skill.
 ---
 
+> **Status: PLANNED, no implementation exists in this repository.** There is no Storybook configuration, no story
+> and no MDX file, and no code generates them. See
+> [`docs/VERIFICATION-LAYERS.md`](../../../../docs/VERIFICATION-LAYERS.md). The text below documents the intended design.
+
 # storybook-authoring
 
 Stories are both documentation and the substrate `06-verify` renders against.

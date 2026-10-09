@@ -28,12 +28,16 @@ layers:
   _guards:
     path: .claude/skills/_guards
     skills:
+      # Status: the static and source tiers are IMPLEMENTED. The dynamic axe-core tier named in the role below is PLANNED,
+      # no implementation exists in this repository; see docs/VERIFICATION-LAYERS.md.
       - name: a11y-guard
         role: Accessibility gate (static IR + source + dynamic axe-core).
         script: .claude/skills/_guards/a11y-guard/scripts/check.mjs
       - name: token-guard
         role: Token contract gate (registry membership + no hardcoded values).
         script: .claude/skills/_guards/token-guard/scripts/check.mjs
+      # Status: the static tier is IMPLEMENTED and advisory. The "bundle & Web Vitals (verify)" tiers named in the role below are
+      # PLANNED, no implementation exists in this repository; see docs/VERIFICATION-LAYERS.md.
       - name: perf-guard
         role: Bloat / dead-import gate (static) + bundle & Web Vitals (verify).
         script: .claude/skills/_guards/perf-guard/scripts/check.mjs
@@ -50,7 +54,10 @@ layers:
       - { name: 03-architect, role: API + structure -> architecture.yaml }
       - { name: 04-design, role: -> design-spec.yaml (source of truth) }
       - { name: 05-implement, role: spec-to-ir + 6 adapters + guards }
+      # Status: 06-verify is PLANNED, no implementation exists in this repository (no verify.mjs; dynamic a11y, visual regression,
+      # size and vitals are not run); see docs/VERIFICATION-LAYERS.md.
       - { name: 06-verify, role: dynamic a11y, visual regression, size, vitals }
+      # Status: 07-handoff is PLANNED, no implementation exists in this repository; see docs/VERIFICATION-LAYERS.md.
       - { name: 07-handoff, role: 8-artifact handoff bundle }
 
   design-system:
@@ -59,6 +66,7 @@ layers:
       - { name: tokens-dtcg, role: DTCG -> registry + 6 platform token outputs }
       - { name: tokens-sync, role: Figma Variables <-> DTCG source }
       - { name: component-contract, role: Public API parity contract }
+      # Status: storybook-authoring is PLANNED, no implementation exists in this repository; see docs/VERIFICATION-LAYERS.md.
       - { name: storybook-authoring, role: CSF + MDX stories for verify }
 
   adapters:

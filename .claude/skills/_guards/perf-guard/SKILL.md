@@ -8,6 +8,10 @@ description: >
   Do NOT use it for accessibility, the token contract, or design quality — those are the a11y-guard, token-guard, and slop-guard skills.
 ---
 
+> **Status:** the static tier is IMPLEMENTED and advisory only. The deferred tiers (bundle size with esbuild, Web
+> Vitals with Playwright) are PLANNED: no implementation exists in this repository. See
+> [`docs/VERIFICATION-LAYERS.md`](../../../../docs/VERIFICATION-LAYERS.md). The text below documents the intended design.
+
 # perf-guard
 
 Cheap structural checks now; expensive measurement in 06-verify.

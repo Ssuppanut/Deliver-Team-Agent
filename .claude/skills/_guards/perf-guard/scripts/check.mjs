@@ -3,7 +3,7 @@
  * Cheap structural checks that catch the common regressions:
  *   - an icon library imported but no icon actually used (dead import)
  *   - output far larger than the node count would justify (bloat heuristic)
- * Bundle-size (esbuild) and Web Vitals (Playwright) tiers run in 06-verify.
+ * The bundle-size (esbuild) and Web Vitals (Playwright) tiers are not implemented (planned); see docs/VERIFICATION-LAYERS.md.
  */
 export function checkPerf(ir, results) {
   const issues = [];
