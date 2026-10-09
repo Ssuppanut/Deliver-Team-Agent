@@ -2709,3 +2709,72 @@ expected-value table), with cluster fixes adding rows to it.
   save about 9 seconds per CI run; this change keeps both.
 
 Pins P122 to P131.
+
+# F-32 - token outputs held [object Object]
+
+## Finding
+
+`design-system/tokens-dtcg/scripts/build.mjs` resolved a semantic token (`{color.white}`) to the token RECORD of
+its target instead of to its value. In `resolveAliases`, `resolveOne(name)` returned the cached record
+`{ value, type, ext }` for a name it had already resolved, while the first resolution of a name returned the value.
+Core tokens are resolved first, so every alias target was already cached and the alias received the record. The
+record was then written into `registry.json` as the value of the semantic token.
+Evidence on the committed outputs before the fix (84 tokens, 26 of them aliases: 19 colours, 7 dimensions):
+
+| Output | Broken entries | What was written |
+|---|---|---|
+| `registry.json` | 26 | `"value": { "value": "#ffffff", "type": "color", "ext": null }` |
+| `tokens.css` | 26 | `--color-bg-default: [object Object];` |
+| `DesignTokens.swift` | 19 + 7 | `Color(hex: "[object Object]")`; the 7 dimensions silently `CGFloat = 0` |
+| `DesignTokens.kt` | 19 + 7 | `Color(0xFF[OBJECT OBJECT])`; the 7 dimensions silently `0.dp` |
+| `tokens-rn.ts` | 19 + 7 | the colour is a nested `{ value, type, ext }` object; the 7 dimensions are `0` |
+| `tailwind-theme.js`, `tokens.d.ts` | 0 | they hold `var(--x)` references only and did not change |
+
+The generated adapter output used the broken tokens: the web adapters import `tokens.css` and emit
+`var(--color-bg-*)` style values (111 colour and 65 space/radius references to semantic tokens in 73 files per
+web adapter), React Native reads `tokens.color.bg.default` (an object) and `tokens.space.inset.sm` (0), SwiftUI
+and Compose reference `DesignTokens.ColorBgDefault` and `SpaceInsetSm`.
+
+Earlier token checks verified names only. The token guard checks that every token name an adapter uses exists in
+`registry.json` and that no raw colour/px literal is in generated code; nothing read a token VALUE, so every gate
+was green while the values were wrong.
+
+## Fix
+
+- `resolveOne` now always returns the resolved VALUE (a string or number, or the composite value for a composite
+  type), for a first and for a cached resolution, for chains of any depth. Aliases nested inside a composite value
+  are resolved in place.
+- A cycle (including a self reference) throws `Circular token reference: a -> b -> a`; an unknown target names the
+  token that references it; an alias whose target has another DTCG `$type` is refused; an alias fragment inside a
+  longer string (`"{a}px"`) is refused.
+- Second defects of the same class, fixed in the same file: `parseFloat(String(value)) || 0` turned any
+  unparseable dimension (and every record object) into a silent `0`; it is now an error naming the token, as is a
+  colour that is not `#RRGGBB` / `#RRGGBBAA`, a value that is not a finite number or non-empty string (a composite
+  token has no scalar emitter and fails the build naming the token), and an icon without a usable name. An
+  8-digit colour is emitted as `0xAARRGGBB` in Kotlin.
+- `buildOutputs()` builds every output in memory and `main()` writes its result, so the gate and the build share
+  one definition. Token sources are unchanged. Build command: `node design-system/tokens-dtcg/scripts/build.mjs`
+  (also `npm run tokens:build`).
+
+## Gate: `_shared/scripts/check-token-outputs.mjs`
+
+A blocking step of `ci.mjs`, pure Node, runs on Linux. It reads the seven built outputs (`registry.json`,
+`tokens.css`, `tailwind-theme.js`, `tokens.d.ts`, `DesignTokens.swift`, `DesignTokens.kt`, `tokens-rn.ts`).
+
+| Rule | Fails when |
+|---|---|
+| `T0` load | an output is missing, unreadable, empty or unparseable, or the expected list is empty |
+| `T1` broken value | a value position holds `[object Object]` (any case), `undefined`, `NaN`, `null`, an empty value, or an object/array where a scalar is expected |
+| `T2` colour validity | a colour is not `#RRGGBB` / `#RRGGBBAA`, or a Swift/Kotlin literal is not 6/8 hex digits / `0xAARRGGBB` |
+| `T3` agreement | an output lacks a token, has an extra one, or holds a value different from `registry.json` after conversion (CSS `var()` chains are followed to their end and cycle-checked; kt `0xFFRRGGBB`; swift hex without `#`; `8px` -> `8` / `8.dp` / `8`) |
+| `T4` freshness | an output differs from `buildOutputs()` of the token sources (first differing line is named) |
+
+T1 reads value positions only (the right-hand side of a declaration or initialiser, the value of a JSON/TS key,
+the value of a `d.ts` record entry), after stripping comments quote-aware. A comment that quotes `[object Object]`,
+or a token name or id that contains `null`, `undefined` or `NaN`, does not fire; `undefined`, `NaN`, `null` count
+only as standalone words in a value.
+
+T4: no freshness check existed before (`ci.mjs` rebuilt the outputs in place and nothing compared them with what
+was committed). The gate therefore runs BEFORE the token build in `ci.mjs`; running it after would compare the
+build with itself. Pins P132 to P142 cover the build (value-not-record, cycles, composites) and each rule with
+temp fixtures, including a fixture that reproduces the exact original bug output.

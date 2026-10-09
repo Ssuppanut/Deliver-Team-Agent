@@ -35,6 +35,8 @@ import { checkNativeExprLeak, checkDeclaredDropped } from './output-guards.mjs';
 import { checkLedger, loadWaivers } from './ledger-gate.mjs';
 import { runMutationTesting, buildBundles, runGates as mutGates, buildBaseline as mutBaseline, discoverCorpus as mutCorpus, mutantIdentity } from './mutate-gates.mjs';
 import { checkSurvivors, loadKnownSurvivors, formatSurvivorReport, KNOWN_SURVIVORS_PATH, CLUSTERS as MUT_CLUSTERS } from './mutation-known-survivors.mjs';
+import { checkTokenOutputs, RULES as RULES_T, OUTPUT_FILES as TOKEN_FILES } from './check-token-outputs.mjs';
+import { buildOutputs as buildTokenOutputs, resolveAliases as resolveTokenAliases } from '../../design-system/tokens-dtcg/scripts/build.mjs';
 import { RendererBase } from '../../adapters/_shared/renderer-base.mjs';
 import { readFileSync, existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -2348,6 +2350,313 @@ check('P131', 'D4b docs: docs/BREADTH-MATRIX.md has a D4b section with the rules
   const harnessHeader = harness.slice(0, harness.indexOf('\nimport '));
   assert(!OLD_CLAIM.test(harnessHeader), `_shared/scripts/mutate-gates.mjs: the header comment still carries the old burn-down claim: ${(harnessHeader.match(OLD_CLAIM) ?? [])[0]}`);
   assert(/An entry is removed only when a gate\s+\*\s+checks the emitted value for that construct and kills the mutant/.test(harnessHeader), '_shared/scripts/mutate-gates.mjs: the header comment must state that an entry is removed only when a gate kills the mutant');
+});
+
+
+// =====================================================================================================
+// F-32: token build resolves aliases to values + token-output gate (T0 to T4).
+// Fixtures are tiny DTCG sources built through the real buildOutputs(); none reads a date or the repo outputs.
+// =====================================================================================================
+const F32_SOURCES = {
+  'core.tokens.json': JSON.stringify({
+    color: { $type: 'color', white: { $value: '#ffffff' }, ink: { $value: '#0a0a0a' }, translucent: { $value: '#11223344' }, null: { state: { $value: '#123456' } } },
+    space: { $type: 'dimension', 2: { $value: '8px' }, 4: { $value: '16px' } },
+    font: { family: { $type: 'fontFamily', sans: { $value: 'Inter, sans-serif' } }, weight: { $type: 'fontWeight', bold: { $value: 700 } } },
+  }),
+  'semantic.tokens.json': JSON.stringify({
+    color: {
+      $type: 'color',
+      bg: { base: { $value: '{color.white}' }, surface: { $value: '{color.bg.base}' }, card: { $value: '{color.bg.surface}' } },
+      fg: { default: { $value: '{color.ink}' } },
+    },
+    space: { $type: 'dimension', inset: { sm: { $value: '{space.2}' }, md: { $value: '{space.inset.sm}' } } },
+    font: { body: { $type: 'fontFamily', $value: '{font.family.sans}' }, strong: { $type: 'fontWeight', $value: '{font.weight.bold}' } },
+  }),
+  'icons.tokens.json': JSON.stringify({
+    icon: { $type: 'icon', ok: { $value: 'check', $extensions: { sfSymbol: 'checkmark', material: 'Check' } }, done: { $value: '{icon.ok}', $extensions: { sfSymbol: 'checkmark', material: 'Check' } } },
+  }),
+};
+const F32_CORE = JSON.parse(F32_SOURCES['core.tokens.json']);
+/** The fixture core.tokens.json with one value replaced. */
+const f32Core = (group, key, value) => ({ 'core.tokens.json': JSON.stringify({ ...F32_CORE, [group]: { ...F32_CORE[group], [key]: { $value: value } } }) });
+const f32Build = (over = {}) => buildTokenOutputs({ sources: { ...F32_SOURCES, ...over } }).files;
+const F32_GOOD = f32Build();
+const f32Gate = (outputs, extra = {}) => checkTokenOutputs({ outputs, fresh: F32_GOOD, ...extra });
+const f32Has = (r, rule, file, token) => r.issues.some((i) => i.rule === rule && i.file === file && (token === undefined || i.token === token));
+const f32Alias = ['color.bg.base', 'color.bg.surface', 'color.bg.card', 'color.fg.default'];
+const f32AliasDim = ['space.inset.sm', 'space.inset.md'];
+/** The original F-32 output: every alias token is a record object (colours) or silently 0 (dimensions). */
+function f32Bug(files = F32_GOOD) {
+  const o = { ...files };
+  const reg = JSON.parse(o['registry.json']);
+  for (const n of [...f32Alias, ...f32AliasDim]) reg[n] = { ...reg[n], value: { value: reg[n].value, type: reg[n].type, ext: null } };
+  o['registry.json'] = JSON.stringify(reg, null, 2) + '\n';
+  const lineSwap = (txt, re, to) => txt.split('\n').map((l) => (re.test(l) ? to(l) : l)).join('\n');
+  o['tokens.css'] = lineSwap(o['tokens.css'], new RegExp(`^  --(${[...f32Alias, ...f32AliasDim].map((n) => n.replace(/\./g, '-')).join('|')}):`), (l) => l.replace(/:.*;$/, ': [object Object];'));
+  const ids = (xs) => xs.map((n) => n.replace(/(^|\.)([a-z0-9])/g, (_, __, c) => c.toUpperCase()));
+  o['DesignTokens.swift'] = lineSwap(lineSwap(o['DesignTokens.swift'], new RegExp(`let (${ids(f32Alias).join('|')}) =`), (l) => l.replace(/Color\(hex: "[^"]*"\)/, 'Color(hex: "[object Object]")')), new RegExp(`let (${ids(f32AliasDim).join('|')}):`), (l) => l.replace(/= .*$/, '= 0'));
+  o['DesignTokens.kt'] = lineSwap(lineSwap(o['DesignTokens.kt'], new RegExp(`val (${ids(f32Alias).join('|')}) =`), (l) => l.replace(/Color\(0x[0-9A-F]+\)/, 'Color(0xFF[OBJECT OBJECT])')), new RegExp(`val (${ids(f32AliasDim).join('|')}) =`), (l) => l.replace(/= .*$/, '= 0.dp'));
+  const rn = JSON.parse(o['tokens-rn.ts'].replace(/^[\s\S]*?export const tokens = /, '').replace(/ as const;\s*$/, ''));
+  for (const n of f32Alias) { const [a, b, c] = n.split('.'); rn[a][b][c] = { value: reg[n].value.value, type: 'color', ext: null }; }
+  rn.space.inset.sm = 0; rn.space.inset.md = 0;
+  o['tokens-rn.ts'] = `/** Generated by tokens-dtcg. Do not edit. */\nexport const tokens = ${JSON.stringify(rn, null, 2)} as const;\n`;
+  return o;
+}
+/** Replace the first occurrence of `from` in one output. */
+const f32Edit = (file, from, to, files = F32_GOOD) => {
+  assert(files[file].includes(from), `fixture drift: ${file} has no ${JSON.stringify(from)}`);
+  return { ...files, [file]: files[file].replace(from, to) };
+};
+
+check('P132', 'F-32 build: an alias resolves to its VALUE (chains of any depth), never the token record; the fixture builds with no [object Object] anywhere', () => {
+  const files = F32_GOOD;
+  for (const [f, t] of Object.entries(files)) assert(!/\[object/i.test(t), `${f} contains [object ...]`);
+  const reg = JSON.parse(files['registry.json']);
+  assert(reg['color.bg.base'].value === '#ffffff' && reg['color.bg.surface'].value === '#ffffff' && reg['color.bg.card'].value === '#ffffff', 'a depth-1, depth-2 and depth-3 colour alias must all resolve to #ffffff');
+  assert(reg['space.inset.md'].value === '8px' && reg['font.body'].value === 'Inter, sans-serif' && reg['font.strong'].value === 700 && reg['icon.done'].value === 'check', 'dimension, fontFamily, fontWeight and icon aliases must resolve to their values');
+  assert(/--color-bg-card: #ffffff;/.test(files['tokens.css']) && /--space-inset-md: 8px;/.test(files['tokens.css']), 'tokens.css must carry the resolved values');
+  assert(/ColorBgCard = Color\(hex: "ffffff"\)/.test(files['DesignTokens.swift']) && /SpaceInsetMd: CGFloat = 8$/m.test(files['DesignTokens.swift']), 'DesignTokens.swift must carry the real hex and the real dimension');
+  assert(/ColorBgCard = Color\(0xFFFFFFFF\)/.test(files['DesignTokens.kt']) && /SpaceInsetMd = 8\.dp/.test(files['DesignTokens.kt']), 'DesignTokens.kt must carry 0xFFRRGGBB and the real dimension');
+  assert(/"card": "#ffffff"/.test(files['tokens-rn.ts']) && /"md": 8/.test(files['tokens-rn.ts']), 'tokens-rn.ts must carry plain values');
+  // resolveAliases directly: the value, not the record, for a deep chain
+  const raw = { a: { value: '1px', type: 'dimension', ext: null }, b: { value: '{a}', type: 'dimension', ext: null }, c: { value: '{b}', type: 'dimension', ext: null }, d: { value: '{c}', type: 'dimension', ext: null } };
+  const res = resolveTokenAliases(raw);
+  assert(['a', 'b', 'c', 'd'].every((n) => res[n].value === '1px'), 'a four deep chain must resolve to 1px for every link');
+  // the real repo registry has no object-valued non-composite token
+  const real = JSON.parse(readFileSync(resolve(ROOT, '_shared/tokens/registry.json'), 'utf8'));
+  const objs = Object.entries(real).filter(([, e]) => e.value !== null && typeof e.value === 'object');
+  assert(objs.length === 0, `_shared/tokens/registry.json has ${objs.length} object-valued token(s), e.g. ${objs[0]?.[0]}`);
+});
+
+check('P133', 'F-32 build: a cycle, a self reference, an unknown target, a type mismatch and an unresolved alias fragment throw an error that names the tokens', () => {
+  const T = (value, type = 'color') => ({ value, type, ext: null });
+  const msg = (raw) => { try { resolveTokenAliases(raw); } catch (e) { return String(e.message); } return null; };
+  const cyc = msg({ x: T('{y}'), y: T('{z}'), z: T('{x}') });
+  assert(cyc && /Circular/.test(cyc) && cyc.includes('x -> y -> z -> x'), `a three token cycle must be named: ${cyc}`);
+  const self = msg({ x: T('{x}') });
+  assert(self && /Circular/.test(self) && self.includes('x -> x'), `a self reference must be named: ${self}`);
+  const unk = msg({ x: T('{no.such.token}') });
+  assert(unk && unk.includes('no.such.token') && unk.includes('from x'), `an unknown target must be named with its source: ${unk}`);
+  const mism = msg({ c: T('#ffffff'), d: T('{c}', 'dimension') });
+  assert(mism && /type mismatch/.test(mism) && mism.includes('d') && mism.includes('c'), `a colour/dimension alias must be refused: ${mism}`);
+  const frag = msg({ c: T('#ffffff'), d: T('{c}px', 'dimension') });
+  assert(frag && /alias fragment/.test(frag) && frag.includes('d'), `an alias inside a longer string must be refused: ${frag}`);
+  // the build itself surfaces the same error (no output is produced from a cyclic source)
+  let built = false;
+  try { f32Build({ 'semantic.tokens.json': JSON.stringify({ color: { $type: 'color', a: { $value: '{color.b}' }, b: { $value: '{color.a}' } } }) }); built = true; } catch (e) { assert(/color\.a -> color\.b -> color\.a/.test(e.message), `build error must name the cycle: ${e.message}`); }
+  assert(!built, 'a cyclic source must not build');
+});
+
+check('P134', 'F-32 build: composite values resolve (aliases inside them too) but have no scalar emitter and fail the build naming the token; a bad dimension or colour is an error, never 0', () => {
+  const T = (value, type) => ({ value, type, ext: null });
+  const res = resolveTokenAliases({ c: T('#000000', 'color'), s: T({ color: '{c}', offset: ['1px', '{c}'] }, 'shadow'), s2: T('{s}', 'shadow') });
+  assert(res.s.value.color === '#000000' && res.s.value.offset[1] === '#000000', 'an alias inside a composite value must be resolved in place');
+  assert(JSON.stringify(res.s2.value) === JSON.stringify(res.s.value), 'an alias to a composite token must carry the composite value, not [object Object]');
+  const fails = (over, re, what) => { try { f32Build(over); } catch (e) { assert(re.test(e.message), `${what}: unexpected error ${e.message}`); return; } assert(false, `${what}: the build must fail`); };
+  fails({ 'icons.tokens.json': JSON.stringify({ icon: { $type: 'icon', ok: { $value: 'check' } }, elevation: { $type: 'shadow', low: { $value: { color: '#000000', blur: '2px' } } } }) }, /Token elevation\.low .*non-scalar/, 'a composite token');
+  fails(f32Core('space', '2', 'wide'), /Token space\.2 \(dimension\).*"wide".*px length/, 'an unparseable dimension');
+  fails(f32Core('space', '2', '1.5rem'), /Token space\.2 \(dimension\).*"1\.5rem"/, 'a rem dimension');
+  fails(f32Core('color', 'white', '#fff'), /Token color\.white \(color\).*"#fff".*#RRGGBB/, 'a 3 digit colour');
+  fails(f32Core('color', 'white', ''), /Token color\.white .*empty/, 'an empty value');
+  // an 8 digit colour is emitted as AARRGGBB in Kotlin
+  assert(/ColorTranslucent = Color\(0x44112233\)/.test(F32_GOOD['DesignTokens.kt']), '#11223344 must be 0x44112233 (ARGB) in Kotlin');
+});
+
+check('P135', 'F-32 gate T0: a missing, empty, unreadable or unparseable output and an empty expected list are refused; the good fixture passes', () => {
+  const ok = f32Gate(F32_GOOD);
+  assert(ok.ok, `the good fixture must pass: ${JSON.stringify(ok.issues.slice(0, 3))}`);
+  for (const f of TOKEN_FILES) {
+    assert(f32Has(f32Gate({ ...F32_GOOD, [f]: null }), 'T0-load', f), `a missing ${f} must be T0`);
+    assert(f32Has(f32Gate({ ...F32_GOOD, [f]: '' }), 'T0-load', f), `an empty ${f} must be T0`);
+  }
+  assert(f32Has(f32Gate({ ...F32_GOOD, 'registry.json': '{ not json' }), 'T0-load', 'registry.json'), 'an unparseable registry.json must be T0');
+  assert(f32Has(f32Gate({ ...F32_GOOD, 'tokens-rn.ts': 'export const tokens = {' }), 'T0-load', 'tokens-rn.ts'), 'an unparseable tokens-rn.ts must be T0');
+  assert(f32Has(f32Gate({ ...F32_GOOD, 'tokens.css': ':root {\n}\n' }), 'T0-load', 'tokens.css'), 'a tokens.css with no declarations must be T0');
+  assert(f32Has(f32Gate({ ...F32_GOOD, 'DesignTokens.kt': 'object DesignTokens {\n}\n' }), 'T0-load', 'DesignTokens.kt'), 'a Kotlin file with no members must be T0');
+  assert(f32Has(f32Gate(F32_GOOD, { expected: [] }), 'T0-load', '(gate)'), 'an empty expected list must be T0');
+  assert(f32Has(f32Gate(undefined), 'T0-load', 'registry.json'), 'no outputs at all must be T0');
+  assert(f32Has(checkTokenOutputs({ outputs: {}, fresh: null }), 'T0-load', 'tokens.css'), 'an empty outputs map must be T0 for every file');
+  assert(JSON.stringify(RULES_T) === JSON.stringify(['T0-load', 'T1-broken-value', 'T2-color-validity', 'T3-agreement', 'T4-freshness']), 'the rule list is T0 to T4');
+});
+
+check('P136', 'F-32 gate T1: the exact original bug output (record objects, [object Object], silent 0) is RED in registry.json, tokens.css, DesignTokens.swift, DesignTokens.kt and tokens-rn.ts, naming each token', () => {
+  const bug = f32Bug();
+  assert(/color\.bg\.base/.test(bug['registry.json']) && /--color-bg-card: \[object Object\];/.test(bug['tokens.css']) && /Color\(hex: "\[object Object\]"\)/.test(bug['DesignTokens.swift']) && /Color\(0xFF\[OBJECT OBJECT\]\)/.test(bug['DesignTokens.kt']), 'the bug fixture must reproduce the original lines');
+  const r = f32Gate(bug);
+  assert(!r.ok, 'the original bug must fail the gate');
+  for (const t of f32Alias) {
+    assert(f32Has(r, 'T1-broken-value', 'registry.json', t), `registry.json ${t}`);
+    assert(f32Has(r, 'T1-broken-value', 'tokens.css', t.replace(/\./g, '-')), `tokens.css ${t}`);
+    assert(f32Has(r, 'T1-broken-value', 'tokens-rn.ts', t), `tokens-rn.ts ${t}`);
+    const id = t.replace(/(^|\.)([a-z0-9])/g, (_, __, c) => c.toUpperCase());
+    assert(f32Has(r, 'T1-broken-value', 'DesignTokens.swift', id), `DesignTokens.swift ${id}`);
+    assert(f32Has(r, 'T1-broken-value', 'DesignTokens.kt', id), `DesignTokens.kt ${id}`);
+  }
+  for (const t of f32AliasDim) assert(f32Has(r, 'T1-broken-value', 'registry.json', t) && f32Has(r, 'T1-broken-value', 'tokens.css', t.replace(/\./g, '-')), `dimension ${t} must be T1 in registry.json and tokens.css`);
+  // the silent zero is invisible to T1 in swift/kt/rn when the registry is intact: T3 catches it
+  const silentZero = f32Gate({ ...bug, 'registry.json': F32_GOOD['registry.json'], 'tokens.css': F32_GOOD['tokens.css'] });
+  for (const f of ['DesignTokens.swift', 'DesignTokens.kt', 'tokens-rn.ts']) assert(f32Has(silentZero, 'T3-agreement', f, 'space.inset.md'), `${f}: a dimension that is 0 while the registry says 8px must be T3`);
+  // value positions in every format
+  const cases = [
+    ['tokens.css', '--color-fg-default: #0a0a0a;', '--color-fg-default: undefined;', '--color-fg-default'.slice(2)],
+    ['tokens.css', '--space-2: 8px;', '--space-2: NaN;', 'space-2'],
+    ['tokens.css', '--space-4: 16px;', '--space-4: ;', 'space-4'],
+    ['tokens.css', '--font-weight-bold: 700;', '--font-weight-bold: null;', 'font-weight-bold'],
+    ['DesignTokens.swift', 'SpaceInsetSm: CGFloat = 8', 'SpaceInsetSm: CGFloat = NaN', 'SpaceInsetSm'],
+    ['DesignTokens.swift', 'Color(hex: "0a0a0a")', 'Color(hex: "undefined")', 'ColorInk'],
+    ['DesignTokens.kt', 'SpaceInsetSm = 8.dp', 'SpaceInsetSm = null', 'SpaceInsetSm'],
+    ['DesignTokens.kt', 'Color(0xFF0A0A0A)', 'Color(0xFF[object object])', 'ColorInk'],
+    ['tokens-rn.ts', '"sm": 8', '"sm": undefined', 'space.inset.sm'],
+    ['tokens-rn.ts', '"sm": 8', '"sm": NaN', 'space.inset.sm'],
+    ['tokens-rn.ts', '"sm": 8', '"sm": null', 'space.inset.sm'],
+    ['tokens-rn.ts', '"sm": 8', '"sm": {}', 'space.inset.sm'],
+    ['tokens-rn.ts', '"ink": "#0a0a0a"', '"ink": ""', 'color.ink'],
+    ['tokens.d.ts', "'color.ink': 'var(--color-ink)'", "'color.ink': 'undefined'", 'color.ink'],
+    ['tailwind-theme.js', '"default": "var(--color-fg-default)"', '"default": "[object Object]"', 'colors.fg.default'],
+  ];
+  for (const [file, from, to, token] of cases) {
+    const rr = f32Gate(f32Edit(file, from, to));
+    assert(f32Has(rr, 'T1-broken-value', file, token), `${file}: ${JSON.stringify(to)} must be T1 for ${token}, got ${JSON.stringify(rr.issues.map((i) => `${i.rule} ${i.file} ${i.token}`).slice(0, 4))}`);
+  }
+  const reg = JSON.parse(F32_GOOD['registry.json']);
+  for (const bad of [null, '', {}, [], 'undefined', 'NaN']) {
+    reg['space.2'] = { ...reg['space.2'], value: bad };
+    assert(f32Has(f32Gate({ ...F32_GOOD, 'registry.json': JSON.stringify(reg) }), 'T1-broken-value', 'registry.json', 'space.2'), `registry.json value ${JSON.stringify(bad)} must be T1`);
+  }
+});
+
+check('P137', 'F-32 gate T1: comments that mention [object Object] and names or values that merely contain null/undefined/NaN are not broken values', () => {
+  const nameful = f32Build({ 'core.tokens.json': JSON.stringify({ color: { $type: 'color', white: { $value: '#ffffff' }, nullable: { $value: '#222222' }, undefinedBehavior: { $value: '#333333' }, nana: { $value: '#444444' } }, space: { $type: 'dimension', 2: { $value: '8px' }, 4: { $value: '16px' } }, font: { family: { $type: 'fontFamily', sans: { $value: 'Nullish Sans, sans-serif' } }, weight: { $type: 'fontWeight', bold: { $value: 700 } } } }), 'semantic.tokens.json': JSON.stringify({ color: { $type: 'color', fg: { null: { $value: '{color.nullable}' } } }, space: { $type: 'dimension', inset: { sm: { $value: '{space.2}' } } } }), 'icons.tokens.json': JSON.stringify({ icon: { $type: 'icon', ok: { $value: 'null.circle', $extensions: { sfSymbol: 'null.circle', material: 'Check' } } } }) });
+  assert(/--color-fg-null: #222222;/.test(nameful['tokens.css']) && /ColorFgNull = /.test(nameful['DesignTokens.swift']), 'fixture drift: the null-named token must exist');
+  const ok = checkTokenOutputs({ outputs: nameful, fresh: nameful });
+  assert(ok.ok, `names/values containing null, undefined, NaN must pass: ${JSON.stringify(ok.issues.slice(0, 3))}`);
+  // comments in every commentable format
+  const c = { ...nameful };
+  c['tokens.css'] = `/* never emit [object Object] or undefined */\n${nameful['tokens.css'].replace(':root {', ':root { /* NaN null */')}`;
+  c['DesignTokens.swift'] = nameful['DesignTokens.swift'].replace('public enum DesignTokens {', '// was Color(hex: "[object Object]")\npublic enum DesignTokens { // undefined\n    /* null NaN */');
+  c['DesignTokens.kt'] = nameful['DesignTokens.kt'].replace('object DesignTokens {', '// was Color(0xFF[OBJECT OBJECT])\nobject DesignTokens { // null');
+  c['tokens-rn.ts'] = nameful['tokens-rn.ts'].replace('export const tokens', '// "sm": undefined, "md": NaN\nexport const tokens');
+  c['tailwind-theme.js'] = nameful['tailwind-theme.js'].replace('export default', '/* [object Object] */\nexport default');
+  c['tokens.d.ts'] = nameful['tokens.d.ts'].replace('export type TokenName', '// value was undefined\nexport type TokenName');
+  const rc = checkTokenOutputs({ outputs: c, fresh: c });
+  assert(rc.ok, `commented mentions must not fire: ${JSON.stringify(rc.issues.slice(0, 3))}`);
+  // a url-like or path-like string containing // inside a value is not cut as a comment
+  const u = f32Edit('tokens.css', '--font-family-sans: Inter, sans-serif;', '--font-family-sans: url("https://x.test/a.woff2"), sans-serif;', F32_GOOD);
+  assert(!f32Has(f32Gate(u), 'T1-broken-value'), 'a value with // inside a string is not a comment and not broken');
+});
+
+check('P138', 'F-32 gate T2: a colour that is not #RRGGBB/#RRGGBBAA (registry.json, tokens.css, tokens-rn.ts) or whose Swift/Kotlin literal is not 6/8 hex digits / 0xAARRGGBB is refused', () => {
+  const cases = [
+    ['registry.json', '"value": "#ffffff"', '"value": "#fff"', 'color.white'],
+    ['registry.json', '"value": "#ffffff"', '"value": "white"', 'color.white'],
+    ['registry.json', '"value": "#0a0a0a"', '"value": "#0a0a0g"', 'color.ink'],
+    ['tokens.css', '--color-ink: #0a0a0a;', '--color-ink: #0a0a0;', 'color.ink'],
+    ['tokens.css', '--color-ink: #0a0a0a;', '--color-ink: rgb(10, 10, 10);', 'color.ink'],
+    ['DesignTokens.swift', 'Color(hex: "0a0a0a")', 'Color(hex: "0a0a")', 'color.ink'],
+    ['DesignTokens.swift', 'Color(hex: "0a0a0a")', 'Color(hex: "#0a0a0a")', 'color.ink'],
+    ['DesignTokens.kt', 'Color(0xFF0A0A0A)', 'Color(0xFF0A0A)', 'color.ink'],
+    ['DesignTokens.kt', 'Color(0xFF0A0A0A)', 'Color(0xZZ0A0A0A)', 'color.ink'],
+    ['tokens-rn.ts', '"ink": "#0a0a0a"', '"ink": "#0a0a0"', 'color.ink'],
+    ['tokens-rn.ts', '"ink": "#0a0a0a"', '"ink": 10', 'color.ink'],
+  ];
+  for (const [file, from, to, token] of cases) {
+    const fresh = f32Edit(file, from, to);
+    const rr = checkTokenOutputs({ outputs: fresh, fresh });
+    const hit = token === 'color.white' && file === 'registry.json' ? rr.issues.some((i) => i.rule === 'T2-color-validity' && i.file === file) : f32Has(rr, 'T2-color-validity', file, token);
+    assert(hit, `${file}: ${JSON.stringify(to)} must be T2, got ${JSON.stringify(rr.issues.map((i) => `${i.rule} ${i.file} ${i.token}`).slice(0, 4))}`);
+  }
+  // the valid forms pass, upper and lower case
+  const up = f32Edit('tokens.css', '--color-ink: #0a0a0a;', '--color-ink: #0A0A0A;');
+  assert(checkTokenOutputs({ outputs: up, fresh: up }).ok, 'an upper case hex that equals the registry value must pass');
+  // T2 does not double report: a [object Object] colour is T1 only
+  const bug = f32Gate(f32Bug());
+  assert(!bug.issues.some((i) => i.rule === 'T2-color-validity' && i.file === 'tokens.css'), 'a colour already reported as T1 is not also reported as T2');
+});
+
+check('P139', 'F-32 gate T3: a value that differs from registry.json after conversion, a missing or extra token, a var() chain that ends elsewhere or cycles, and a dangling tailwind/d.ts reference are refused', () => {
+  const cases = [
+    ['tokens.css', '--color-ink: #0a0a0a;', '--color-ink: #0a0a0b;', 'tokens.css', 'color.ink'],
+    ['tokens.css', '--space-2: 8px;', '--space-2: 9px;', 'tokens.css', 'space.2'],
+    ['tokens.css', '--font-weight-bold: 700;', '--font-weight-bold: 600;', 'tokens.css', 'font.weight.bold'],
+    ['DesignTokens.swift', 'Color(hex: "0a0a0a")', 'Color(hex: "0a0a0b")', 'DesignTokens.swift', 'color.ink'],
+    ['DesignTokens.swift', 'Space2: CGFloat = 8', 'Space2: CGFloat = 0', 'DesignTokens.swift', 'space.2'],
+    ['DesignTokens.kt', 'Color(0xFF0A0A0A)', 'Color(0xFF0A0A0B)', 'DesignTokens.kt', 'color.ink'],
+    ['DesignTokens.kt', 'Color(0x44112233)', 'Color(0xFF112233)', 'DesignTokens.kt', 'color.translucent'],
+    ['DesignTokens.kt', 'Space2 = 8.dp', 'Space2 = 8', 'DesignTokens.kt', 'space.2'],
+    ['DesignTokens.kt', 'Space2 = 8.dp', 'Space2 = 0.dp', 'DesignTokens.kt', 'space.2'],
+    ['tokens-rn.ts', '"ink": "#0a0a0a"', '"ink": "#0a0a0b"', 'tokens-rn.ts', 'color.ink'],
+    ['tokens-rn.ts', '"bold": 700', '"bold": 600', 'tokens-rn.ts', 'font.weight.bold'],
+    ['DesignTokens.swift', 'checkmark', 'xmark', 'DesignTokens.swift', 'icon.ok'],
+    ['DesignTokens.kt', 'IconOkIcon = "Check"', 'IconOkIcon = "Close"', 'DesignTokens.kt', 'icon.ok'],
+    ['tokens.css', '--color-ink: #0a0a0a;', '--color-ink: var(--color-white);', 'tokens.css', 'color.ink'],
+    ['tokens.css', '--color-ink: #0a0a0a;', '--color-ink: var(--color-nope);', 'tokens.css', 'color.ink'],
+    ['tokens.css', '--color-ink: #0a0a0a;', '--color-ink: var(--color-white);\n  --color-white: var(--color-ink);', 'tokens.css', 'color.ink'],
+    ['tokens.css', '  --space-4: 16px;\n', '', 'tokens.css', 'space.4'],
+    ['tokens.css', '  --space-4: 16px;\n', '  --space-4: 16px;\n  --space-9: 72px;\n', 'tokens.css', 'space-9'],
+    ['DesignTokens.swift', '    public static let Space4: CGFloat = 16\n', '', 'DesignTokens.swift', 'space.4'],
+    ['DesignTokens.kt', '    val Space4 = 16.dp\n', '    val Space4 = 16.dp\n    val Space9 = 72.dp\n', 'DesignTokens.kt', 'Space9'],
+    ['tokens-rn.ts', '"4": 16', '"4": 16,\n    "9": 72', 'tokens-rn.ts', 'space.9'],
+    ['tailwind-theme.js', '"var(--color-ink)"', '"var(--color-nope)"', 'tailwind-theme.js', null],
+    ['tokens.d.ts', "'color.ink': 'var(--color-ink)'", "'color.ink': 'var(--color-white)'", 'tokens.d.ts', 'color.ink'],
+    ['tokens.d.ts', "  | 'space.4'\n", '', 'tokens.d.ts', 'space.4'],
+  ];
+  for (const [file, from, to, f, token] of cases) {
+    let out;
+    try { out = f32Edit(file, from, to); } catch (e) { throw new Error(`${e.message} (case ${file} -> ${JSON.stringify(to)})`); }
+    const rr = checkTokenOutputs({ outputs: out, fresh: out });
+    const hit = token === null ? rr.issues.some((i) => i.rule === 'T3-agreement' && i.file === f) : rr.issues.some((i) => i.rule === 'T3-agreement' && i.file === f && (i.token === token || i.msg.includes(token)));
+    assert(hit, `${file}: ${JSON.stringify(to)} must be T3 for ${token}, got ${JSON.stringify(rr.issues.map((i) => `${i.rule} ${i.file} ${i.token}`).slice(0, 4))}`);
+  }
+  // a var() chain that ends at the registry value is fine
+  const chain = f32Edit('tokens.css', '--color-bg-surface: #ffffff;', '--color-bg-surface: var(--color-bg-base);');
+  assert(checkTokenOutputs({ outputs: chain, fresh: chain }).ok, 'a var() chain that ends at the registry value must pass');
+  // 8 digit colour: kt is AARRGGBB, swift keeps the digits, rn keeps #RRGGBBAA
+  assert(/Color\(0x44112233\)/.test(F32_GOOD['DesignTokens.kt']) && /Color\(hex: "11223344"\)/.test(F32_GOOD['DesignTokens.swift']) && /"translucent": "#11223344"/.test(F32_GOOD['tokens-rn.ts']), 'the 8 digit colour conversions must hold in the fixture');
+});
+
+check('P140', 'F-32 gate T4: an output that differs from a fresh build is refused naming the first differing line; a still valid but stale value is caught only by T4', () => {
+  // outputs that are consistent with each other (T1 to T3 pass) but built from older sources: only T4 sees it
+  const newer = f32Build({ 'core.tokens.json': F32_SOURCES['core.tokens.json'].replace('#ffffff', '#fefefe') });
+  const rr = checkTokenOutputs({ outputs: F32_GOOD, fresh: newer });
+  assert(rr.issues.length > 0 && rr.issues.every((i) => i.rule === 'T4-freshness'), `stale but self consistent outputs must be T4 only: ${JSON.stringify(rr.issues.map((i) => i.rule))}`);
+  for (const f of ['registry.json', 'tokens.css', 'DesignTokens.swift', 'DesignTokens.kt', 'tokens-rn.ts']) assert(f32Has(rr, 'T4-freshness', f) && /line \d+/.test(rr.issues.find((i) => i.file === f).msg), `T4 must name ${f} and the first differing line`);
+  for (const f of ['tailwind-theme.js', 'tokens.d.ts']) assert(!f32Has(rr, 'T4-freshness', f), `${f} holds only var() references and does not change`);
+  // a whitespace-only change is still a byte difference
+  const ws = f32Gate({ ...F32_GOOD, 'tokens.d.ts': F32_GOOD['tokens.d.ts'] + '\n' });
+  assert(f32Has(ws, 'T4-freshness', 'tokens.d.ts') && ws.issues.every((i) => i.rule === 'T4-freshness'), 'a trailing newline difference must be T4 only');
+  // an equal fresh build passes; fresh:null skips T4; a failing fresh build is reported, not thrown
+  assert(f32Gate(F32_GOOD).ok, 'a build equal to the fresh build passes');
+  assert(checkTokenOutputs({ outputs: F32_GOOD, fresh: null }).ok && !checkTokenOutputs({ outputs: F32_GOOD, fresh: newer }).ok, 'fresh: null skips T4');
+  const broken = checkTokenOutputs({ outputs: F32_GOOD, fresh: { ...F32_GOOD, 'registry.json': undefined } });
+  assert(f32Has(broken, 'T4-freshness', 'registry.json'), 'a fresh build with no registry.json is T4');
+  // the default fresh build is the real one: the repo outputs equal it
+  const real = checkTokenOutputs({ outputs: Object.fromEntries(TOKEN_FILES.map((f) => [f, readFileSync(resolve(ROOT, '_shared/tokens', f), 'utf8')])) });
+  assert(real.ok, `the committed _shared/tokens outputs must pass every rule: ${JSON.stringify(real.issues.slice(0, 3))}`);
+});
+
+check('P141', 'F-32 gate: output is deterministic, the exit code follows ok, and ci.mjs runs the gate before the token build', () => {
+  const bug = f32Bug();
+  const a = JSON.stringify(f32Gate(bug).issues), b = JSON.stringify(f32Gate(bug).issues);
+  assert(a === b, 'two runs must produce identical issues');
+  const rules = f32Gate(bug).issues.map((i) => RULES_T.indexOf(i.rule));
+  assert(rules.every((r, i) => i === 0 || rules[i - 1] <= r), 'issues must be sorted by rule order');
+  const ci = readFileSync(resolve(ROOT, '_shared/scripts/ci.mjs'), 'utf8');
+  const gateAt = ci.indexOf("run('node _shared/scripts/check-token-outputs.mjs')"), buildAt = ci.indexOf("run('node design-system/tokens-dtcg/scripts/build.mjs')");
+  assert(gateAt > 0 && buildAt > 0 && gateAt < buildAt, 'ci.mjs must run check-token-outputs before the token build');
+  assert(/failures\+\+/.test(ci.slice(gateAt, buildAt)), 'a gate failure must count as a CI failure');
+  const wf = execSync('git ls-files .github/workflows', { cwd: ROOT, encoding: 'utf8' });
+  assert(wf.trim() !== '', 'the workflow file must still exist (this PR does not change it)');
+  const run = (dir) => { try { execSync('node _shared/scripts/check-token-outputs.mjs', { cwd: ROOT, stdio: 'pipe' }); return 0; } catch (e) { return e.status; } };
+  assert(run() === 0, 'the gate CLI must exit 0 on the committed outputs');
+});
+
+check('P142', 'F-32 docs: docs/BREADTH-MATRIX.md has an F-32 section with the finding, the fix, rules T0 to T4, the outputs covered and the Linux note', () => {
+  const doc = readFileSync(resolve(ROOT, 'docs/BREADTH-MATRIX.md'), 'utf8');
+  assert(doc.includes('# F-32 - token outputs held [object Object]'), 'an F-32 section must exist');
+  const sec = doc.slice(doc.indexOf('# F-32 - token outputs held [object Object]'));
+  for (const r of ['T0', 'T1', 'T2', 'T3', 'T4']) assert(new RegExp(`\`${r}\``).test(sec), `the section must describe ${r}`);
+  for (const f of TOKEN_FILES) assert(sec.includes(f), `the section must name ${f}`);
+  assert(/names? only/i.test(sec) && /resolveOne/.test(sec) && /Linux/.test(sec) && /before the (token )?build/i.test(sec), 'the section must say earlier checks verified names only, name resolveOne, say it runs on Linux and before the build');
 });
 
 console.log('\n=== verify-patches ===');

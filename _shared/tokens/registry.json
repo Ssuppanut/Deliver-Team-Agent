@@ -196,211 +196,107 @@
     "type": "fontWeight"
   },
   "color.bg.default": {
-    "value": {
-      "value": "#ffffff",
-      "type": "color",
-      "ext": null
-    },
+    "value": "#ffffff",
     "type": "color"
   },
   "color.bg.subtle": {
-    "value": {
-      "value": "#f8fafc",
-      "type": "color",
-      "ext": null
-    },
+    "value": "#f8fafc",
     "type": "color"
   },
   "color.bg.muted": {
-    "value": {
-      "value": "#f1f5f9",
-      "type": "color",
-      "ext": null
-    },
+    "value": "#f1f5f9",
     "type": "color"
   },
   "color.fg.default": {
-    "value": {
-      "value": "#0f172a",
-      "type": "color",
-      "ext": null
-    },
+    "value": "#0f172a",
     "type": "color"
   },
   "color.fg.muted": {
-    "value": {
-      "value": "#64748b",
-      "type": "color",
-      "ext": null
-    },
+    "value": "#64748b",
     "type": "color"
   },
   "color.fg.onAccent": {
-    "value": {
-      "value": "#ffffff",
-      "type": "color",
-      "ext": null
-    },
+    "value": "#ffffff",
     "type": "color"
   },
   "color.border.default": {
-    "value": {
-      "value": "#e2e8f0",
-      "type": "color",
-      "ext": null
-    },
+    "value": "#e2e8f0",
     "type": "color"
   },
   "color.border.strong": {
-    "value": {
-      "value": "#cbd5e1",
-      "type": "color",
-      "ext": null
-    },
+    "value": "#cbd5e1",
     "type": "color"
   },
   "color.accent.default": {
-    "value": {
-      "value": "#2563eb",
-      "type": "color",
-      "ext": null
-    },
+    "value": "#2563eb",
     "type": "color"
   },
   "color.accent.hover": {
-    "value": {
-      "value": "#1d4ed8",
-      "type": "color",
-      "ext": null
-    },
+    "value": "#1d4ed8",
     "type": "color"
   },
   "color.accent.subtle": {
-    "value": {
-      "value": "#eff6ff",
-      "type": "color",
-      "ext": null
-    },
+    "value": "#eff6ff",
     "type": "color"
   },
   "color.success.fg": {
-    "value": {
-      "value": "#16a34a",
-      "type": "color",
-      "ext": null
-    },
+    "value": "#16a34a",
     "type": "color"
   },
   "color.success.bg": {
-    "value": {
-      "value": "#f0fdf4",
-      "type": "color",
-      "ext": null
-    },
+    "value": "#f0fdf4",
     "type": "color"
   },
   "color.warning.fg": {
-    "value": {
-      "value": "#d97706",
-      "type": "color",
-      "ext": null
-    },
+    "value": "#d97706",
     "type": "color"
   },
   "color.warning.bg": {
-    "value": {
-      "value": "#fffbeb",
-      "type": "color",
-      "ext": null
-    },
+    "value": "#fffbeb",
     "type": "color"
   },
   "color.danger.fg": {
-    "value": {
-      "value": "#dc2626",
-      "type": "color",
-      "ext": null
-    },
+    "value": "#dc2626",
     "type": "color"
   },
   "color.danger.bg": {
-    "value": {
-      "value": "#fef2f2",
-      "type": "color",
-      "ext": null
-    },
+    "value": "#fef2f2",
     "type": "color"
   },
   "color.info.fg": {
-    "value": {
-      "value": "#2563eb",
-      "type": "color",
-      "ext": null
-    },
+    "value": "#2563eb",
     "type": "color"
   },
   "color.info.bg": {
-    "value": {
-      "value": "#eff6ff",
-      "type": "color",
-      "ext": null
-    },
+    "value": "#eff6ff",
     "type": "color"
   },
   "space.inset.sm": {
-    "value": {
-      "value": "8px",
-      "type": "dimension",
-      "ext": null
-    },
+    "value": "8px",
     "type": "dimension"
   },
   "space.inset.md": {
-    "value": {
-      "value": "16px",
-      "type": "dimension",
-      "ext": null
-    },
+    "value": "16px",
     "type": "dimension"
   },
   "space.inset.lg": {
-    "value": {
-      "value": "24px",
-      "type": "dimension",
-      "ext": null
-    },
+    "value": "24px",
     "type": "dimension"
   },
   "space.stack.sm": {
-    "value": {
-      "value": "8px",
-      "type": "dimension",
-      "ext": null
-    },
+    "value": "8px",
     "type": "dimension"
   },
   "space.stack.md": {
-    "value": {
-      "value": "16px",
-      "type": "dimension",
-      "ext": null
-    },
+    "value": "16px",
     "type": "dimension"
   },
   "radius.control": {
-    "value": {
-      "value": "8px",
-      "type": "dimension",
-      "ext": null
-    },
+    "value": "8px",
     "type": "dimension"
   },
   "radius.surface": {
-    "value": {
-      "value": "12px",
-      "type": "dimension",
-      "ext": null
-    },
+    "value": "12px",
     "type": "dimension"
   },
   "icon.check": {

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
  * ci — the full pipeline as one command, for GitHub Actions and local checks.
+ *   0. token outputs gate (the committed token outputs hold real values and equal a fresh build)
  *   1. build tokens
  *   2. run e2e for every discovered feature (example specs + artifact specs)
  *      - in-scope features must pass every gate
@@ -42,11 +43,18 @@ function discoverFeatures() {
 }
 
 function main() {
-  console.log('## 1. build tokens');
+  let failures = 0;
+
+  // Runs BEFORE the build: step 1 rewrites the outputs in place, so a stale or broken committed
+  // output would otherwise be silently replaced by a good one and never reach a reviewer.
+  console.log('## 0. token outputs gate (F-32 — committed token outputs hold real values, agree with each other and equal a fresh build)');
+  try { run('node _shared/scripts/check-token-outputs.mjs'); }
+  catch { console.error('FAIL: check-token-outputs'); failures++; }
+
+  console.log('\n## 1. build tokens');
   run('node design-system/tokens-dtcg/scripts/build.mjs');
 
   console.log('\n## 1b. validate architecture (agents / skills / artifacts / workflow / AI)');
-  let failures = 0;
   try { run('node _shared/scripts/validate-architecture.mjs'); }
   catch { console.error('FAIL: validate-architecture'); failures++; }
 
