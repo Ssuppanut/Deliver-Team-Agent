@@ -2778,3 +2778,94 @@ T4: no freshness check existed before (`ci.mjs` rebuilt the outputs in place and
 was committed). The gate therefore runs BEFORE the token build in `ci.mjs`; running it after would compare the
 build with itself. Pins P132 to P142 cover the build (value-not-record, cycles, composites) and each rule with
 temp fixtures, including a fixture that reproduces the exact original bug output.
+
+
+# F-31 - the generated SwiftUI did not compile
+
+## Finding
+
+Every gate read the generated SwiftUI as text; none ran the Swift compiler. A type-check probe on a Mac (Xcode 27.0,
+`xcrun --sdk iphonesimulator swiftc -typecheck`, targets `arm64-apple-ios17.0-simulator` and `arm64-apple-ios16.0-simulator`,
+identical results) found that **all 109 files in `out/swiftui` failed** (53 corpus outputs, 26 `verify-*` and 30 `_verify`
+pin artefacts) while every gate was green. With a stub for `Color(hex:)` 87 of the 109 passed and 22 failed (12 distinct
+specs plus their copies). Causes, each shown by a compiler run:
+
+| Cause | Evidence (raw compiler message) | Files |
+|---|---|---|
+| **E.** `DesignTokens.swift` used `Color(hex: "...")`, which is not an SDK API; no extension defining it existed | `DesignTokens.swift:5:41: error: extraneous argument label 'hex:' in call` | all |
+| **A.** a change callback was typed `(String) -> Void` but called with a `Bool` or `Double` | `cannot convert value of type 'Bool' to expected argument type 'String'` | checkbox, checkbox-control, checkbox-error, state-boolean, number-input, slider-control, state-range |
+| **B.** `onToggle` is `() -> Void` but was called as `onToggle($0)` | `argument passed to call that takes no arguments` | switch-toggle, switch-control |
+| **C.** a generated struct named `Button` or `Slider` shadows the SwiftUI type used in its own body | `extra arguments at positions #1, #2 in call` | button, slider |
+| **D.** a slot was rendered as `content` but the struct had no such property | `cannot find 'content' in scope` | slot-host |
+| **F.** a variant case on `padding` or `radius` emitted a `Color.clear` fallback for a CGFloat dictionary (no corpus spec used it; found with a throwaway spec) | `cannot convert value of type 'Any?' to expected argument type 'Edge.Set'`, `cannot convert value of type 'Color' to expected argument type 'CGFloat'` | none in the corpus |
+
+## Fixes
+
+- **E** - the token build emits `Color(.sRGB, red: R / 255, green: G / 255, blue: B / 255, opacity: 1)` (`opacity: A / 255` for a
+  `#RRGGBBAA` source). Each channel is the source byte as a decimal integer over 255, so it round-trips to the byte exactly
+  and no helper exists anywhere. Only `DesignTokens.swift` changed among the token outputs. F-32's `check-token-outputs.mjs`
+  parses the new form; **T3 still compares every colour byte with `registry.json`** (a Swift channel off by one, an
+  alpha off by one, an opaque `opacity: 1` for a translucent token and the old `Color(hex:)` form are all T3; a channel
+  over 255 is T2). The F-32 pins that contained the old Swift form (P132, P136, P138, P139) were edited only for the format.
+- **C** - every SwiftUI type the adapter emits in a feature file is module-qualified: `SwiftUI.Text`, `Label`, `Image`,
+  `Button`, `VStack`, `HStack`, `AsyncImage`, `Link`, `Toggle`, `Picker`, `ForEach`, `Slider`, `Stepper`, `TextField`,
+  `Color` (`Color.clear`, `Color.primary`), `Binding`, `View` (conformance and `some SwiftUI.View`) and `ViewBuilder`.
+  Modifiers, enum members, the import line, `DesignTokens`, generated structs and Foundation / standard-library types
+  (`URL`, `NumberFormatter`, `DateFormatter`, `Locale`, `TimeZone`, `NSNumber`, `Date`, `UUID`, `Identifiable`) stay
+  unqualified. Struct names are unchanged, so they still equal the other adapters'.
+- **A, B** - the schema declares a callback only as `type: function`; React, React Native and SwiftUI pick the arity from
+  the prop name (a name matching `/change/i` takes a value, any other takes none). That name rule stays the declaration
+  of arity. The SwiftUI value type now comes from the bound control, mirroring `visitInput`: boolean state or
+  checkbox / switch role -> `Bool`, numeric-range state or slider role -> `Double`, selected-value state or a plain text
+  field -> `String`. A callback whose name does not match is called without arguments (`set: { _ in onToggle() }`), so a
+  switch driven by `onToggle` does not pass its new value (the caller holds the state).
+- **D** - a slot makes the struct generic: `struct SlotHost<Content: SwiftUI.View>: SwiftUI.View`, a stored `content`,
+  and `init(..., @SwiftUI.ViewBuilder content: () -> Content)`. **Known limitation:** `slot-host` has two slots (one
+  unnamed, one named `header`); both still collapse onto the same `content`, so the named slot is not a separate
+  parameter. A real slot contract is future work; no ledger trait or waiver changed.
+- **F** - per slot kind the fallback is `SwiftUI.Color.clear` (background), `SwiftUI.Color.primary` (color), `0` (padding)
+  and `0` (radius). The corpus spec `variant-padding-radius` exercises padding and radius variant cases on all six adapters
+  and passes every gate.
+
+## The gate: `_shared/scripts/check-swift-typecheck.mjs`
+
+For each corpus feature file it runs
+`xcrun --sdk iphonesimulator swiftc -typecheck -target arm64-apple-ios17.0-simulator _shared/tokens/DesignTokens.swift <file>`
+(one invocation per file, a bounded parallel pool), plus `DesignTokens.swift` alone. `--ios 16` checks the other target.
+
+| Rule | Fires when |
+|---|---|
+| `S0` environment | on macOS: `xcrun`, `swiftc` or the iphonesimulator SDK is not found, or `out/swiftui` is missing or has no feature directory |
+| `S1` typecheck | a feature file does not type-check; the issue carries the first compiler error raw, with line and column |
+| `S2` tokens | `DesignTokens.swift` alone does not type-check (no feature file is then compiled) |
+| `S3` inventory | a corpus feature has no SwiftUI output, or `out/swiftui` has a directory that is neither a corpus feature nor a pin artefact directory |
+
+**Exclusion rule:** the pin artefact directories `out/swiftui/verify-*` and `out/swiftui/_verify` are not compiled and not
+reported. verify-patches writes them so its pins can read generated text; they are copies or variants of corpus output,
+and compiling them would count one defect once per copy. Pins P143 to P147 cover the rules with an injected fake
+compiler (any OS), the real compiler on a known-good and a known-bad fixture (macOS only), the skip message and this
+section. A macOS-only pin on another OS is reported `SKIP`, is not counted as passed, and does not fail the run.
+
+**Linux CI skips the gate.** On any OS other than macOS it prints `SKIPPED (not macOS): swiftui typecheck` and exits 0; no
+macOS CI job was added and the workflow file is unchanged. GitHub Actions has not run this change. A Mac run
+(`node _shared/scripts/ci.mjs`) is therefore required before merging any SwiftUI change.
+
+## Results (facts only)
+
+| Typecheck over the 53 corpus outputs + tokens (the 54th, `variant-padding-radius`, is new) | iOS 17 | iOS 16 |
+|---|---|---|
+| main before F-31, raw | tokens file fails (S2), nothing else compiled | same |
+| main before F-31, with a scratch `Color(hex:)` stub | 12 of 53 fail | 12 of 53 fail |
+| after F-31 | 0 failures (54 files + tokens) | 0 failures (54 files + tokens) |
+
+This records what compiled; it makes no claim about supported OS versions beyond that. No deployment target is stated
+elsewhere in the repo.
+
+## Open follow-ups
+
+- **Callback parity risk (unverified):** the React and React Native adapters type these callbacks as `(value: string) => void`
+  (or `() => void`) and call them with booleans or numbers. No `tsc` run has been done on them; this PR does not touch them.
+- Compose and the TypeScript adapters have no compile or type-check gate verified.
+- Nothing renders the generated output; the gate proves it type-checks, not that it looks or behaves right.
+- No macOS CI job was added; only a local Mac run executes this gate.
+- The slot collapse above (a named slot shares the unnamed `content`).
