@@ -115,8 +115,11 @@ request (and refuses out-of-scope categories):
 - **04-design** produces the single source of truth: `design-spec.yaml`
   (validated against `_shared/schemas/design-spec.schema.yaml`).
 - **05-implement** normalizes it to IR and runs all 6 adapters, then guards.
-- **06-verify** adds dynamic a11y (axe-core), visual regression, bundle size,
-  and Web Vitals.
+- **06-verify** is the planned deep-verification step (dynamic a11y with axe-core,
+  visual regression, bundle size, Web Vitals). Status: PLANNED, no implementation
+  exists in this repository and nothing runs these tiers; `06-verify` has no
+  entry point. What runs today is listed in
+  [`docs/VERIFICATION-LAYERS.md`](docs/VERIFICATION-LAYERS.md).
 
 ## Primary architecture vs runtime surfaces
 

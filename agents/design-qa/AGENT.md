@@ -19,6 +19,7 @@ quality capabilities, not tied to one agent.
 - `performance-qa` — `perf-guard`
 - `design-quality-qa` — `slop-guard` (no emoji; state not by color alone)
 - `visual-qa` — `06-verify` (visual regression + dynamic a11y)
+  Status: PLANNED, no implementation exists in this repository; see `docs/VERIFICATION-LAYERS.md`.
 - `readiness-check` — refuse unresolved TBD
 
 ## Produces

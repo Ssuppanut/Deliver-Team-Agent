@@ -16,7 +16,7 @@ this folder is the neutral, provider-agnostic index of them.
 | performance | `performance-qa` | `.claude/skills/_guards/perf-guard/scripts/check.mjs` | advisory |
 | design quality | `design-quality-qa` | `.claude/skills/_guards/slop-guard/scripts/check.mjs` | yes (emoji) |
 | cross-adapter parity | `design-code-parity` | `_shared/scripts/e2e-multi.mjs` | yes |
-| visual / dynamic a11y | `visual-qa` | `.claude/skills/workflow/06-verify/SKILL.md` | at verify tier |
+| visual / dynamic a11y | `visual-qa` | `.claude/skills/workflow/06-verify/SKILL.md` | at verify tier (PLANNED: not implemented, see [`docs/VERIFICATION-LAYERS.md`](../docs/VERIFICATION-LAYERS.md)) |
 
 > Migration note: a future step may physically relocate the guard modules here
 > and leave thin re-exports under `.claude/skills/_guards/*`. That is planned in

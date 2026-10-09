@@ -8,6 +8,12 @@ description: >
   Do NOT use it to assemble the handoff bundle — that is the 07-handoff skill.
 ---
 
+> **Status: PLANNED, no implementation exists in this repository.** None of the tiers below runs: there is no
+> `verify.mjs` (neither `workflow/06-verify/scripts/verify.mjs` nor `.claude/skills/workflow/06-verify/scripts/verify.mjs`
+> exists), no axe-core, Playwright, pixelmatch or esbuild dependency, and no code reads `verify-report.yaml`. Only
+> the static guards and gates run, through `node _shared/scripts/ci.mjs`. See
+> [`docs/VERIFICATION-LAYERS.md`](../../../../docs/VERIFICATION-LAYERS.md). The text below documents the intended design.
+
 # 06-verify
 
 The heavyweight gate that runs beyond the static guards in `05-implement`.

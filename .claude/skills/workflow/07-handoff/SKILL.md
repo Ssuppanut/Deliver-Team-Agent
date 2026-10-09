@@ -8,6 +8,10 @@ description: >
   Do NOT use it to run the pipeline or gates — those are the orchestrator and 06-verify skills.
 ---
 
+> **Status: PLANNED, no implementation exists in this repository.** No code assembles the handoff bundle and no
+> handoff file exists. See [`docs/VERIFICATION-LAYERS.md`](../../../../docs/VERIFICATION-LAYERS.md). The text below
+> documents the intended design.
+
 # 07-handoff
 
 Package the verified component for consumers.

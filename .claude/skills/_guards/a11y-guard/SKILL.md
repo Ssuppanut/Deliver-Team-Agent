@@ -8,6 +8,10 @@ description: >
   Do NOT use it for the token contract, performance, or design quality — those are the token-guard, perf-guard, and slop-guard skills.
 ---
 
+> **Status:** the static and source tiers are IMPLEMENTED (text and regex checks). The dynamic tier (axe-core via
+> Playwright, item 3 below) is PLANNED: no implementation exists in this repository. See
+> [`docs/VERIFICATION-LAYERS.md`](../../../../docs/VERIFICATION-LAYERS.md). The text below documents the intended design.
+
 # a11y-guard
 
 Enforces accessibility contracts. A serious/critical finding blocks the gate.
