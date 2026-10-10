@@ -4,7 +4,7 @@
  * Each check pins a fix or a pipeline invariant so future edits can't silently
  * regress it. Run in CI and after any adapter change.
  */
-import { resolve, dirname, join } from 'node:path';
+import { resolve, dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { specToIrFromFile, specToIr } from './spec-to-ir.mjs';
 import { generateReact } from '../../adapters/react/generate.mjs';
@@ -37,9 +37,11 @@ import { runMutationTesting, buildBundles, runGates as mutGates, buildBaseline a
 import { checkSurvivors, loadKnownSurvivors, formatSurvivorReport, KNOWN_SURVIVORS_PATH, CLUSTERS as MUT_CLUSTERS } from './mutation-known-survivors.mjs';
 import { checkTokenOutputs, RULES as RULES_T, OUTPUT_FILES as TOKEN_FILES } from './check-token-outputs.mjs';
 import { buildOutputs as buildTokenOutputs, resolveAliases as resolveTokenAliases } from '../../design-system/tokens-dtcg/scripts/build.mjs';
+import { checkTsTypecheck, compileFiles as ttCompile, loadPolicy as ttLoadPolicy, formatReport as ttFormat, RULES as RULES_TT, ADAPTERS as TT_ADAPTERS, POLICY_PATH as TT_POLICY_PATH, AMBIENT_FILE as TT_AMBIENT, defaultLoadTs as ttLoadTs } from './check-ts-typecheck.mjs';
+import { topLevelParts } from '../../adapters/react/generate.mjs';
 import { RendererBase } from '../../adapters/_shared/renderer-base.mjs';
-import { checkSwiftTypecheck, formatReport as formatSwiftReport, SKIP_MESSAGE as SWIFT_SKIP, RULES as RULES_S, typecheckArgs as swiftArgs, spawnRunner as swiftSpawn } from './check-swift-typecheck.mjs';
-import { readFileSync, existsSync, mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs';
+import { corpusFeatures as corpusFeaturesTs, checkSwiftTypecheck, formatReport as formatSwiftReport, SKIP_MESSAGE as SWIFT_SKIP, RULES as RULES_S, typecheckArgs as swiftArgs, spawnRunner as swiftSpawn } from './check-swift-typecheck.mjs';
+import { readFileSync, existsSync, mkdtempSync, writeFileSync, rmSync, mkdirSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { execSync } from 'node:child_process';
 
@@ -2802,6 +2804,284 @@ check('P147', 'F-31 docs: docs/BREADTH-MATRIX.md has an F-31 section with the fi
   assert(/Color\(\.sRGB/.test(sec) && /T3/.test(sec), 'the section must record the colour format and the T3 edit');
   assert(/\(value: string\) => void/.test(sec) && /unverified/i.test(sec), 'the section must record the React / React Native callback parity risk');
   assert(/Compose/.test(sec) && /macOS CI job/i.test(sec), 'the section must list the open follow-ups');
+});
+
+
+// =====================================================================================================
+// TS-1: the generated React type-checks, plus the TypeScript typecheck gate (rules TT0 to TT3).
+// Rule-logic pins inject fakes; the real-compiler pins type-check tiny fixtures with the real TypeScript API and
+// run on every OS (never skipped). Every clock is the pinned D3_NOW, never a real expiry date.
+// =====================================================================================================
+const TT_NOW = D3_NOW;
+const TT_APPROVER = 'Ssuppanut (design-system a11y owner)';
+const ttEntry = (adapter, over = {}) => ({ adapter, enabled: false, reason: 'N of 54 corpus files fail; see docs/SUPPORTED-VERSIONS.md', approver: TT_APPROVER, expires: '2027-03-31', ...over });
+const ttPolicyOf = (entries) => JSON.stringify({ adapters: entries }); // JSON is valid YAML
+const TT_GOOD_ENTRIES = [{ adapter: 'react', enabled: true }, ttEntry('react-native'), ttEntry('vue'), ttEntry('svelte')];
+const TT_GOOD_POLICY = ttPolicyOf(TT_GOOD_ENTRIES);
+const TT_OUT = resolve(ROOT, 'out');
+const ttTree = () => ({ react: { alpha: ['Alpha.tsx'], beta: ['Beta.tsx'], _verify: ['X.tsx'], 'verify-z': ['Z.tsx'] } });
+const ttOpts = (over = {}) => {
+  const tree = over.tree ?? ttTree();
+  const parts = (p) => relative(TT_OUT, p).split(sep).filter(Boolean);
+  return {
+    policyText: over.policyText ?? TT_GOOD_POLICY, now: over.now ?? TT_NOW, outRoot: TT_OUT, features: over.features ?? ['alpha', 'beta'],
+    exists: (p) => { const [a, f] = parts(p); return a === undefined || (a in tree && (f === undefined || f in tree[a])); },
+    listDirs: (d) => Object.keys(tree[parts(d)[0]] ?? {}),
+    listFiles: (d, ext) => { const [a, f] = parts(d); return (tree[a]?.[f] ?? []).filter((n) => ext.some((e) => n.endsWith(e))); },
+    loadTs: over.loadTs ?? (async () => ({ fake: true })),
+    hasReactTypes: over.hasReactTypes ?? (() => true),
+    typecheck: over.typecheck ?? (async (_ts, _a, files) => new Map(files.map((f) => [f, { syntax: [], semantic: [] }]))),
+  };
+};
+const ttHas = (r, rule, needle) => r.issues.some((i) => i.rule === rule && (needle === undefined || i.msg.includes(needle) || i.file.includes(needle)));
+const ttDiag = (code, line, col, msg) => ({ code, line, col, msg });
+
+await checkAsync('P148', 'TS-1 gate TT0: typescript or @types/react not installed (run npm ci), a missing or unparseable policy, an adapter with no entry, and an enabled adapter with no output directory FAIL; the good fixture passes', async () => {
+  const ok = await checkTsTypecheck(ttOpts());
+  assert(ok.ok && ok.lines[0] === 'ts typecheck: react PASS (2 files)', `the good fixture must pass: ${JSON.stringify(ok.issues)} ${ok.lines[0]}`);
+  const noTs = await checkTsTypecheck(ttOpts({ loadTs: async () => null }));
+  assert(!noTs.ok && ttHas(noTs, 'TT0-env', 'typescript') && noTs.issues.some((i) => /run `npm ci`/.test(i.msg)), 'a missing typescript package must be TT0 saying run npm ci');
+  assert(noTs.lines[0] === 'ts typecheck: react FAIL (environment not ready, see TT0)' && noTs.issues.length === 1, 'a broken environment is one TT0 issue and nothing is compiled');
+  assert(ttHas(await checkTsTypecheck(ttOpts({ hasReactTypes: () => false })), 'TT0-env', '@types/react'), 'missing @types/react must be TT0');
+  assert(ttHas(await checkTsTypecheck(ttOpts({ policyText: ': : not yaml [' })), 'TT0-env', 'not valid YAML'), 'an unparseable policy must be TT0');
+  assert(ttHas(await checkTsTypecheck(ttOpts({ policyText: '{ "other": 1 }' })), 'TT0-env', 'no `adapters` key'), 'a policy with no adapters key must be TT0');
+  assert(ttHas(await checkTsTypecheck({ ...ttOpts(), policyText: undefined, policyPath: join(tmpdir(), 'no-such-ts-policy.yaml') }), 'TT0-env', 'not found'), 'a missing policy file must be TT0');
+  const missing = await checkTsTypecheck(ttOpts({ policyText: ttPolicyOf(TT_GOOD_ENTRIES.filter((e) => e.adapter !== 'svelte')) }));
+  assert(ttHas(missing, 'TT0-env', 'adapter svelte has no entry'), 'an adapter with no policy entry must be TT0 naming it');
+  assert(ttHas(await checkTsTypecheck(ttOpts({ tree: {} })), 'TT0-env', 'does not exist'), 'an enabled adapter with no output directory must be TT0');
+  assert(ttHas(await checkTsTypecheck(ttOpts({ tree: { react: {} } })), 'TT0-env', 'no feature directory'), 'an output directory with no feature must be TT0');
+  // typescript is only required when an adapter is enabled
+  const none = await checkTsTypecheck(ttOpts({ policyText: ttPolicyOf(['react', 'react-native', 'vue', 'svelte'].map((a) => ttEntry(a))), loadTs: async () => null }));
+  assert(none.ok && none.lines.length === 4 && none.lines.every((l) => /NOT ENABLED/.test(l)), 'with nothing enabled the compiler is not needed and four NOT ENABLED lines print');
+});
+
+await checkAsync('P149', 'TS-1 gate TT1: the first compiler error is reported raw with file, line, column and the error count; a syntax error says the semantic check was skipped; clean files pass', async () => {
+  const typecheck = async (_ts, _a, files) => new Map(files.map((f) => [f, f.endsWith('Beta.tsx')
+    ? { syntax: [ttDiag(2657, 12, 5, 'JSX expressions must have one parent element.')], semantic: [] }
+    : f.endsWith('Alpha.tsx') ? { syntax: [], semantic: [ttDiag(2345, 15, 107, "Argument of type 'boolean' is not assignable to parameter of type 'string'."), ttDiag(2554, 16, 1, 'x')] } : { syntax: [], semantic: [] }]));
+  const r = await checkTsTypecheck(ttOpts({ typecheck }));
+  assert(!r.ok && r.issues.length === 2 && r.issues.every((i) => i.rule === 'TT1-type'), `two TT1 issues expected: ${JSON.stringify(r.issues)}`);
+  const alpha = r.issues.find((i) => i.file.endsWith('Alpha.tsx')).msg, beta = r.issues.find((i) => i.file.endsWith('Beta.tsx')).msg;
+  assert(alpha.includes('out/react/alpha/Alpha.tsx:15:107 TS2345 Argument of type \'boolean\' is not assignable to parameter of type \'string\'.') && alpha.includes('(2 errors in file)'), `raw first error with line, column and count: ${alpha}`);
+  assert(beta.includes('Beta.tsx:12:5 TS2657') && beta.includes('(1 error in file, syntax error: semantic check skipped)'), `syntax error wording: ${beta}`);
+  assert(r.lines[0] === 'ts typecheck: react FAIL (2 issues, 2 files)', `FAIL line: ${r.lines[0]}`);
+  assert(ttFormat(r).split('\n')[0].startsWith('  TT1-type  out/react/alpha/Alpha.tsx'), 'issues print before the adapter lines, sorted by file');
+  const files = [];
+  await checkTsTypecheck(ttOpts({ typecheck: async (_ts, a, fs) => { files.push(a, ...fs.map((f) => relative(ROOT, f))); return new Map(); } }));
+  assert(JSON.stringify(files) === JSON.stringify(['react', 'out/react/alpha/Alpha.tsx', 'out/react/beta/Beta.tsx']), `only the corpus features are checked, in order, and the pin artefact directories are not: ${JSON.stringify(files)}`);
+});
+
+await checkAsync('P150', 'TS-1 gate TT2: a corpus feature with no output and a directory that is neither a corpus feature nor a pin artefact (verify-*, _verify) FAIL naming the path', async () => {
+  const r = await checkTsTypecheck(ttOpts({ features: ['alpha', 'beta', 'gamma'] }));
+  assert(ttHas(r, 'TT2-inventory', 'corpus feature gamma has no react output'), 'a feature with no output must be TT2 naming it');
+  const stray = await checkTsTypecheck(ttOpts({ tree: { react: { ...ttTree().react, stray: ['S.tsx'] } } }));
+  assert(ttHas(stray, 'TT2-inventory', 'out/react/stray') && stray.issues.filter((i) => i.rule === 'TT2-inventory').length === 1, 'an unexpected directory must be TT2 and verify-z, _verify must not be');
+  const empty = await checkTsTypecheck(ttOpts({ tree: { react: { alpha: ['Alpha.tsx'], beta: [] } } }));
+  assert(ttHas(empty, 'TT2-inventory', 'corpus feature beta has no react output'), 'a feature directory with no .tsx file must be TT2');
+});
+
+await checkAsync('P151', 'TS-1 gate TT3 and NOT ENABLED: empty reason, wrong approver, missing, invalid or past expiry, duplicate, unknown adapter and a non-boolean enabled FAIL; the expiry day is not inclusive; the NOT ENABLED line is exact and deterministic', async () => {
+  const good = await checkTsTypecheck(ttOpts());
+  assert(good.lines.slice(1).join('\n') === [
+    'ts typecheck: react-native NOT ENABLED (policy, expires 2027-03-31): N of 54 corpus files fail; see docs/SUPPORTED-VERSIONS.md',
+    'ts typecheck: vue NOT ENABLED (policy, expires 2027-03-31): N of 54 corpus files fail; see docs/SUPPORTED-VERSIONS.md',
+    'ts typecheck: svelte NOT ENABLED (policy, expires 2027-03-31): N of 54 corpus files fail; see docs/SUPPORTED-VERSIONS.md'].join('\n'), `the NOT ENABLED lines: ${good.lines.join(' | ')}`);
+  const withEntry = (over, adapter = 'vue') => ttPolicyOf(TT_GOOD_ENTRIES.map((e) => (e.adapter === adapter ? ttEntry(adapter, over) : e)));
+  const bad = async (policyText, needle, what) => { const r = await checkTsTypecheck(ttOpts({ policyText })); assert(ttHas(r, 'TT3-policy', needle), `${what}: ${JSON.stringify(r.issues)}`); return r; };
+  await bad(withEntry({ reason: '  ' }), 'empty reason', 'an empty reason');
+  await bad(withEntry({ approver: 'someone else' }), 'approver', 'a wrong approver');
+  await bad(withEntry({ approver: 'ssuppanut (design-system a11y owner)' }), 'approver', 'a case-differing approver');
+  await bad(withEntry({ expires: undefined }), 'without an expiry', 'a missing expiry');
+  await bad(withEntry({ expires: 'not a date' }), 'unparseable expiry', 'an invalid expiry');
+  const past = await bad(withEntry({ expires: '2026-10-05' }), 'has passed', 'a past expiry');
+  assert(ttHas(past, 'TT3-policy', 'vue was disabled until 2026-10-05'), 'a past expiry names the adapter and the date');
+  const sameDay = await checkTsTypecheck(ttOpts({ policyText: withEntry({ expires: '2026-10-06' }), now: new Date(TT_NOW.getTime() + 12 * 3600000) }));
+  assert(ttHas(sameDay, 'TT3-policy', 'has passed'), 'the expiry day is NOT inclusive: the entry is past later on its own date');
+  const before = await checkTsTypecheck(ttOpts({ policyText: withEntry({ expires: '2026-10-07' }), now: new Date('2026-10-06T00:00:00Z') }));
+  assert(before.ok, 'the day before the expiry passes');
+  await bad(ttPolicyOf([...TT_GOOD_ENTRIES, ttEntry('vue')]), 'duplicates entry', 'a duplicate adapter');
+  await bad(ttPolicyOf([...TT_GOOD_ENTRIES, ttEntry('compose')]), 'not one of', 'an unknown adapter');
+  await bad(withEntry({ enabled: 'yes' }), 'enabled must be true or false', 'a non-boolean enabled');
+  await bad(ttPolicyOf(TT_GOOD_ENTRIES.map((e) => (e.adapter === 'vue' ? { ...e, extra: 1 } : e))), 'unknown field', 'an unknown field');
+  // an enabled adapter other than react has no checker yet: refused, never silently passed
+  await bad(ttPolicyOf(TT_GOOD_ENTRIES.map((e) => (e.adapter === 'vue' ? { adapter: 'vue', enabled: true } : e))), 'no checker for it yet', 'enabling an adapter without a checker');
+  // deterministic: same input, same report, sorted by rule order then file
+  const a = await checkTsTypecheck(ttOpts({ policyText: withEntry({ reason: '', expires: '2020-01-01' }), tree: { react: { ...ttTree().react, zz: ['Z.tsx'], aa: ['A.tsx'] } } }));
+  const b = await checkTsTypecheck(ttOpts({ policyText: withEntry({ reason: '', expires: '2020-01-01' }), tree: { react: { ...ttTree().react, zz: ['Z.tsx'], aa: ['A.tsx'] } } }));
+  assert(JSON.stringify(a) === JSON.stringify(b) && ttFormat(a) === ttFormat(b), 'two runs must produce identical reports');
+  const order = a.issues.map((i) => RULES_TT.indexOf(i.rule));
+  assert(order.every((r, i) => i === 0 || order[i - 1] <= r) && a.issues.length >= 3, 'issues sort by rule order');
+});
+
+// Real-compiler fixtures: a temp out/ tree whose node_modules is a symlink to the repo's, so `react` and its types resolve.
+const ttTmp = (files) => {
+  const dir = mkdtempSync(join(tmpdir(), 'ts1-'));
+  symlinkSync(resolve(ROOT, 'node_modules'), join(dir, 'node_modules'));
+  const abs = {};
+  for (const [rel, text] of Object.entries(files)) { const f = join(dir, 'out/react', rel); mkdirSync(dirname(f), { recursive: true }); writeFileSync(f, text); abs[rel] = f; }
+  return { dir, abs };
+};
+const TT_GOOD_TSX = `import React from 'react';\nimport '../../_shared/tokens/tokens.css';\n\nexport interface GoodProps { label: string; checked: boolean; onChange: (value: boolean) => void }\n\nexport function Good({ label, checked, onChange }: GoodProps) {\n  return (\n    <>\n      <label htmlFor="g">{label}</label>\n      <input id="g" type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />\n    </>\n  );\n}\n`;
+const TT_SIBLINGS_TSX = TT_GOOD_TSX.replace('    <>\n', '').replace('    </>\n', '').replaceAll('Good', 'Syn');
+const TT_BADTYPE_TSX = TT_GOOD_TSX.replace('(value: boolean) => void', '(value: string) => void').replaceAll('Good', 'Sem');
+
+await checkAsync('P152', 'TS-1 gate with the REAL TypeScript compiler (every OS, never skipped): a good fixture passes; two sibling roots is a TT1 syntax error (TS2657) with line and column; a boolean passed to a string callback is TT1 (TS2345); the ambient *.css declaration resolves a missing relative css import; one program equals one program per file', async () => {
+  const ts = await ttLoadTs();
+  assert(ts && ts.version.startsWith('6.'), `the repo must provide TypeScript 6 (got ${ts?.version})`);
+  const { dir, abs } = ttTmp({ 'good/Good.tsx': TT_GOOD_TSX, 'syn/Syn.tsx': TT_SIBLINGS_TSX, 'sem/Sem.tsx': TT_BADTYPE_TSX });
+  try {
+    const policyText = ttPolicyOf(TT_GOOD_ENTRIES);
+    const base = { policyText, now: TT_NOW, outRoot: join(dir, 'out') };
+    const solo = ttTmp({ 'good/Good.tsx': TT_GOOD_TSX });
+    let good;
+    try { good = await checkTsTypecheck({ ...base, outRoot: join(solo.dir, 'out'), features: ['good'] }); } finally { rmSync(solo.dir, { recursive: true, force: true }); }
+    assert(good.ok && good.lines[0] === 'ts typecheck: react PASS (1 files)', `the good fixture must pass the real compiler: ${JSON.stringify(good.issues)}`);
+    const all = await checkTsTypecheck({ ...base, features: ['good', 'syn', 'sem'] });
+    const syn = all.issues.find((i) => i.file.endsWith('Syn.tsx')), sem = all.issues.find((i) => i.file.endsWith('Sem.tsx'));
+    assert(all.issues.length === 2 && !all.issues.some((i) => i.file.endsWith('Good.tsx')), `only the two bad fixtures fail: ${JSON.stringify(all.issues)}`);
+    assert(/Syn\.tsx:8:7 TS2657 JSX expressions must have one parent element\./.test(syn.msg) && /syntax error: semantic check skipped/.test(syn.msg), `syntax error with line and column: ${syn.msg}`);
+    assert(/Sem\.tsx:10:\d+ TS2345 Argument of type 'boolean' is not assignable to parameter of type 'string'\./.test(sem.msg), `semantic error: ${sem.msg}`);
+    // the ambient declaration owns the css import: without it TypeScript 6 reports TS2882, with it nothing is reported
+    const files = [abs['good/Good.tsx']];
+    const withAmbient = ttCompile(ts, files).get(files[0]);
+    const without = ttCompile(ts, files, { ambientText: '' }).get(files[0]);
+    assert(withAmbient.syntax.length + withAmbient.semantic.length === 0, 'the ambient declaration must resolve the missing relative css import');
+    assert(without.semantic.some((d) => d.code === 2882), 'without the ambient declaration TS2882 is reported for the css import');
+    assert(!existsSync(join(dir, 'out/_shared')) && !existsSync(TT_AMBIENT), 'no token file is copied into out/ and the ambient declaration is not a file');
+    // one program == one program per file
+    const three = [abs['good/Good.tsx'], abs['syn/Syn.tsx'], abs['sem/Sem.tsx']];
+    const one = ttCompile(ts, three), per = ttCompile(ts, three, { perFile: true });
+    assert(JSON.stringify([...one]) === JSON.stringify([...per]), 'one program and one program per file must give the same diagnostics');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// The six original React defects, in the shape they were generated before TS-1: the real compiler must reject each.
+const TT_DEFECTS = {
+  R1: { code: 2657, tsx: `import React from 'react';\nexport function A({ label }: { label: string }) {\n  return (\n    <label>{label}</label>\n    <input />\n  );\n}\n` },
+  R2: { code: 1005, tsx: `import React from 'react';\nexport function A({ e, items }: { e: boolean; items: { id: string }[] }) {\n  return (\n    <div>\n      {e ? (\n        <span />\n      ) : (\n        {items.map((i) => (<span key={i.id} />))}\n      )}\n    </div>\n  );\n}\n` },
+  R3: { code: 2345, tsx: `import React from 'react';\nexport function A({ on }: { on: (value: string) => void }) {\n  return <input type="checkbox" onChange={(e) => on(e.target.checked)} />;\n}\n` },
+  R3b: { code: 2554, tsx: `import React from 'react';\nexport function A({ onToggle }: { onToggle: () => void }) {\n  return <input type="checkbox" onChange={(e) => onToggle(e.target.checked)} />;\n}\n` },
+  R4: { code: 2339, tsx: `import React from 'react';\nexport function A({ status }: { status: 'default' | 'success' }) {\n  return <div>{({ "success": <b /> })[status]}</div>;\n}\n` },
+  R5: { code: 2304, tsx: `import React from 'react';\nexport function A({}: {}) {\n  return <div>{children}</div>;\n}\n` },
+  R6: { code: 2322, tsx: `import React from 'react';\nexport function A({ checked }: { checked: boolean }) {\n  return <input type="text" value={checked} />;\n}\n` },
+};
+await checkAsync('P153', 'TS-1 gate fired-gate pins: each of the six original React defects (sibling roots, ternary block, string-typed boolean callback, zero-arg callback called with a value, lookup map missing an enum value, undeclared slot, checkbox as a text input) is rejected by the real compiler with the expected code', async () => {
+  const ts = await ttLoadTs();
+  const { dir, abs } = ttTmp(Object.fromEntries(Object.entries(TT_DEFECTS).map(([k, v]) => [`${k}/${k}.tsx`, v.tsx])));
+  try {
+    const res = ttCompile(ts, Object.values(abs), { perFile: true });
+    for (const [k, v] of Object.entries(TT_DEFECTS)) {
+      const r = res.get(abs[`${k}/${k}.tsx`]);
+      const codes = [...r.syntax, ...r.semantic].map((d) => d.code);
+      assert(codes.includes(v.code), `${k}: the compiler must report TS${v.code}, got ${JSON.stringify(codes)}`);
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+const TT_ARTIFACT = (f) => resolve(ROOT, '.claude/artifacts', f, 'design-spec.yaml');
+const ttSpec = (yaml) => { const dir = mkdtempSync(join(tmpdir(), 'ts1-spec-')); const p = join(dir, 'design-spec.yaml'); writeFileSync(p, yaml); return { dir, p }; };
+
+check('P154', 'TS-1 React R1 and R2: several top-level elements are wrapped in a fragment, a single root is not; an iteration inside a ternary branch is emitted as a bare expression; the JSX scanner ignores braces, quotes and arrows', () => {
+  const parts = (s) => topLevelParts(s).map((p) => p.kind).join(',');
+  assert(parts('<a />\n<b>x</b>') === 'element,element', 'two elements');
+  assert(parts('<div>\n  <a />\n  <b>{x ? "a>b" : \'}\'}</b>\n</div>') === 'element', 'one element with braces, quotes and > inside');
+  assert(parts("{items.map((i) => (<a key={i} onClick={() => f('}')} />))}") === 'expr', 'one expression container with an arrow and a quoted brace');
+  assert(parts('<a />\n{b}\ntext') === 'element,expr,text', 'element, expression and text');
+  assert(parts('<a title="x > y" />') === 'element', 'a > inside a quoted attribute is not a tag end');
+  const cc = generateReact(TT_ARTIFACT('checkbox-control'), '_verify').code;
+  assert(/return \(\n    <>\n      <label htmlFor="checkboxcontrol-checked">[^\n]*<\/label>\n      <input /.test(cc) && /\n    <\/>\n  \);/.test(cc), 'two sibling roots must be wrapped in <>...</>');
+  for (const f of ['alert', 'button', 'badge', 'product-card']) assert(!/<>/.test(generateReact(f === 'product-card' ? resolve(ROOT, '_shared/schemas/examples/product-card.spec.yaml') : TT_ARTIFACT(f), '_verify').code), `${f}: a single root must not gain a fragment`);
+  const cl = generateReact(CONDLIST, '_verify').code;
+  assert(/\) : \(\n        items\.map\(\(item\) => \(/.test(cl) && !/\) : \(\n\s+\{items\.map/.test(cl), 'the else branch must be a bare expression, not a { } block inside parentheses');
+  assert(/<div style=\{\{ gap[^\n]*\n      \{isEmpty \? \(/.test(cl), 'the outer conditional keeps its single { } container as a child');
+});
+
+check('P155', 'TS-1 React R3: the shared callbackSignatures() helper derives arity from the name (/change/i) and the value type from the bound control; React uses it, no other adapter does; zero-argument callbacks are called without arguments', () => {
+  const sig = (spec, name) => new RendererBase(specToIrFromFile(spec), { adapter: 'x' }).callbackSignatures().get(name);
+  const eq = (a, b, m) => assert(JSON.stringify(a) === JSON.stringify(b), `${m}: got ${JSON.stringify(a)}`);
+  eq(sig(TT_ARTIFACT('checkbox-control'), 'onCheckedChange'), { takesValue: true, valueType: 'boolean' }, 'checkbox (boolean state)');
+  eq(sig(TT_ARTIFACT('checkbox'), 'onChange'), { takesValue: true, valueType: 'boolean' }, 'checkbox role, plain input');
+  eq(sig(TT_ARTIFACT('switch-toggle'), 'onToggle'), { takesValue: false, valueType: 'boolean' }, 'switch role, name without change takes none');
+  eq(sig(TT_ARTIFACT('slider-control'), 'onValueChange') ?? sig(TT_ARTIFACT('slider-control'), 'onChange'), { takesValue: true, valueType: 'number' }, 'slider (numeric range)');
+  eq(sig(TT_ARTIFACT('slider'), 'onChange'), { takesValue: true, valueType: 'number' }, 'slider role, number input');
+  eq(sig(TT_ARTIFACT('number-input'), 'onAmountChange'), { takesValue: true, valueType: 'number' }, 'number input (numeric range)');
+  eq(sig(TT_ARTIFACT('state-select'), [...new RendererBase(specToIrFromFile(TT_ARTIFACT('state-select')), { adapter: 'x' }).callbackSignatures().keys()][0]), { takesValue: true, valueType: 'string' }, 'selected-value state');
+  eq(sig(TT_ARTIFACT('textarea'), 'onChange'), { takesValue: true, valueType: 'string' }, 'text field');
+  eq(sig(TT_ARTIFACT('alert'), 'onDismiss'), { takesValue: false, valueType: 'string' }, 'a callback bound to no control takes none');
+  const sw = generateReact(TT_ARTIFACT('switch-toggle'), '_verify').code;
+  assert(/onToggle: \(\) => void;/.test(sw) && /onChange=\{\(\) => onToggle\(\)\}/.test(sw) && !/onToggle\(e\./.test(sw), 'a zero-argument callback is typed () => void and called without arguments');
+  const sc = generateReact(TT_ARTIFACT('slider-control'), '_verify').code;
+  assert(/: \(value: number\) => void;/.test(sc) && /\(Number\(e\.target\.value\)\)/.test(sc), 'a numeric callback is typed (value: number) => void and called with a number');
+  assert(/: \(value: boolean\) => void;/.test(generateReact(TT_ARTIFACT('state-boolean'), '_verify').code), 'a boolean state callback is typed (value: boolean) => void');
+  assert(/: \(value: string\) => void;/.test(generateReact(TT_ARTIFACT('form-field'), '_verify').code), 'a text callback stays (value: string) => void');
+  for (const a of ['vue', 'svelte', 'react-native', 'swiftui', 'compose']) assert(!/callbackSignatures|inputValueKind/.test(readFileSync(resolve(ROOT, `adapters/${a}/generate.mjs`), 'utf8')), `${a}: must not use the new helper in this change`);
+  assert(/callbackSignatures/.test(readFileSync(resolve(ROOT, 'adapters/react/generate.mjs'), 'utf8')), 'React uses the helper');
+});
+
+check('P156', 'TS-1 React R4 to R6: a lookup map has an entry for every enum value (null or {} when none); a slot is declared as an optional React.ReactNode prop; a checkbox or switch is a checkbox input with checked and e.target.checked and keeps its role; other input types are unchanged', () => {
+  const badge = generateReact(TT_ARTIFACT('badge'), '_verify').code;
+  assert(/"error": <CircleAlert aria-hidden="true" \/>, "default": null \}\)\[status\]/.test(badge), 'an enum value with no icon maps to null');
+  const partial = ttSpec(`component: Tag\ncategory: display\nprops:\n  - { name: tone, type: enum, values: [a, b, c], required: true }\nroot:\n  el: container\n  variant:\n    prop: tone\n    cases:\n      a: { background: color.bg.muted }\n      b: { background: color.bg.subtle, icon: icon.info }\n`);
+  try {
+    const tag = generateReact(partial.p, '_verify').code;
+    assert(/\.\.\.\(\{ "a": \{ backgroundColor: [^}]*\}, "b": \{ backgroundColor: [^}]*\}, "c": \{\} \}\)\[tone\]/.test(tag), `a style map must have {} for the missing enum value: ${tag.split('\n').find((l) => l.includes('tone'))}`);
+    assert(/"b": <Info aria-hidden="true" \/>, "a": null, "c": null/.test(tag), 'an icon map must have null for the missing enum values');
+  } finally { rmSync(partial.dir, { recursive: true, force: true }); }
+  const slot = generateReact(TT_ARTIFACT('slot-host'), '_verify').code;
+  assert(/export interface SlotHostProps \{\n  children\?: React\.ReactNode;\n  header\?: React\.ReactNode;\n\}/.test(slot) && /export function SlotHost\(\{ children, header \}: SlotHostProps\)/.test(slot), 'slots are declared as optional React.ReactNode props and destructured');
+  const cb = generateReact(TT_ARTIFACT('checkbox'), '_verify').code;
+  assert(/<input id="checkbox-checked" type="checkbox" checked=\{checked\} onChange=\{\(e\) => onChange\(e\.target\.checked\)\} role="checkbox"/.test(cb) && !/type="text"/.test(cb), 'the checkbox spec is a checkbox input with checked and e.target.checked, and keeps role="checkbox"');
+  assert(/type="checkbox" checked=\{checked\} onChange=\{\(\) => onToggle\(\)\} role="switch"/.test(generateReact(TT_ARTIFACT('switch-toggle'), '_verify').code), 'the switch role is a checkbox input and keeps role="switch"');
+  for (const [type, kindArg] of [['text', 'e.target.value'], ['email', 'e.target.value'], ['password', 'e.target.value'], ['number', 'Number(e.target.value)']]) {
+    const sp = ttSpec(`component: F\ncategory: input\nprops:\n  - { name: v, type: ${type === 'number' ? 'number' : 'string'}, required: true }\n  - { name: onVChange, type: function, required: true }\nroot:\n  el: input\n  input: { valueProp: v, changeProp: onVChange, inputType: ${type} }\n`);
+    try {
+      const code = generateReact(sp.p, '_verify').code;
+      assert(code.includes(`type="${type}" value={v} onChange={(e) => onVChange(${kindArg})}`), `inputType ${type}: unexpected output ${code.split('\n').find((l) => l.includes('<input'))}`);
+    } finally { rmSync(sp.dir, { recursive: true, force: true }); }
+  }
+});
+
+await checkAsync('P157', 'TS-1 wiring: ci.mjs runs the gate after generation and before verify-patches and counts a failure; the real policy enables react only with the three NOT ENABLED reasons and counts; the real generated React output type-checks; package.json and the lock pin TypeScript 6, React 19 and @types/react 19; the workflow file is unchanged', async () => {
+  const ci = readFileSync(resolve(ROOT, '_shared/scripts/ci.mjs'), 'utf8');
+  const gateAt = ci.indexOf("run('node _shared/scripts/check-ts-typecheck.mjs')"), genAt = ci.indexOf("run(`node _shared/scripts/e2e-multi.mjs"), vpAt = ci.indexOf("run('node _shared/scripts/verify-patches.mjs')");
+  assert(genAt > 0 && gateAt > genAt && gateAt < vpAt, 'ci.mjs must run the TypeScript gate after the generation steps and before verify-patches');
+  assert(/failures\+\+/.test(ci.slice(gateAt, vpAt)), 'a gate failure must count as a CI failure');
+  const { entries, problem } = ttLoadPolicy({ path: TT_POLICY_PATH });
+  assert(!problem && JSON.stringify(entries.map((e) => [e.adapter, e.enabled])) === JSON.stringify([['react', true], ['react-native', false], ['vue', false], ['svelte', false]]), `the real policy enables react only: ${problem} ${JSON.stringify(entries.map((e) => [e.adapter, e.enabled]))}`);
+  const expect = { 'react-native': '28 of 54', vue: '15 of 54', svelte: '14 of 54' };
+  for (const e of entries.filter((x) => !x.enabled)) {
+    assert(e.approver === TT_APPROVER && String(e.expires).slice(0, 10) === '2027-03-31', `${e.adapter}: approver and expiry`);
+    assert(e.reason.includes(expect[e.adapter]) && /fixes planned in their own PR, see docs\/SUPPORTED-VERSIONS\.md/.test(e.reason), `${e.adapter}: the reason must carry the count and the pointer: ${e.reason}`);
+  }
+  // generate the real corpus React output (the same bytes ci.mjs writes), then run the real gate with the real clock-free pinned now
+  for (const f of corpusFeaturesTs()) {
+    const art = resolve(ROOT, '.claude/artifacts', f, 'design-spec.yaml');
+    generateReact(existsSync(art) ? art : resolve(ROOT, '_shared/schemas/examples', `${f}.spec.yaml`), f);
+  }
+  const real = await checkTsTypecheck({ now: TT_NOW });
+  assert(real.ok && /^ts typecheck: react PASS \(54 files\)$/m.test(ttFormat(real)), `the real React output must type-check: ${ttFormat(real).slice(0, 400)}`);
+  assert(real.lines.filter((l) => /NOT ENABLED/.test(l)).length === 3, 'three NOT ENABLED lines print on every run');
+  const pkg = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf8'));
+  const d = pkg.devDependencies;
+  assert(/^\^6\./.test(d.typescript) && /^\^19\./.test(d.react) && /^\^19\./.test(d['@types/react']) && d['lucide-react'], `devDependencies: ${JSON.stringify(d)}`);
+  const lock = JSON.parse(readFileSync(resolve(ROOT, 'package-lock.json'), 'utf8')).packages;
+  assert(/^6\.\d+\.\d+$/.test(lock['node_modules/typescript'].version) && /^19\./.test(lock['node_modules/react'].version) && /^19\./.test(lock['node_modules/@types/react'].version), 'the lock resolves TypeScript 6.x, React 19.x, @types/react 19.x');
+  assert(Object.keys(lock).filter((k) => /(^|\/)node_modules\/typescript$/.test(k)).length === 1, 'exactly one typescript in the lock');
+  const wf = readFileSync(resolve(ROOT, '.github/workflows/ci.yml'), 'utf8');
+  assert(/npm ci/.test(wf) && /node _shared\/scripts\/ci\.mjs/.test(wf) && !/typescript|tsc/i.test(wf), 'the workflow file still runs npm ci and ci.mjs and is not edited for this gate');
+});
+
+check('P158', 'TS-1 docs: docs/BREADTH-MATRIX.md has a TS-1 section, docs/SUPPORTED-VERSIONS.md states the version policy, docs/VERIFICATION-LAYERS.md has a row for the gate', () => {
+  const doc = readFileSync(resolve(ROOT, 'docs/BREADTH-MATRIX.md'), 'utf8');
+  assert(doc.includes('# TS-1 - the generated React type-checks'), 'a TS-1 section must exist');
+  const sec = doc.slice(doc.indexOf('# TS-1 - the generated React type-checks'));
+  for (const r of ['TT0', 'TT1', 'TT2', 'TT3']) assert(new RegExp(`\`${r}\``).test(sec), `the section must describe ${r}`);
+  assert(/17 of the 54 corpus React files/.test(sec) && /verify-\*/.test(sec) && /_verify/.test(sec) && /ts-typecheck-adapters\.yaml/.test(sec) && /SUPPORTED-VERSIONS/.test(sec), 'the section must record the count, the exclusion rule, the policy file and the version pointer');
+  assert(/temporary/i.test(sec) && /Vue, Svelte and React Native/.test(sec) && /28 of 54/.test(sec) && /15 of 54/.test(sec) && /14 of 54/.test(sec) && /nothing renders/i.test(sec), 'the section must record the temporary callback drift, the remaining counts and that nothing renders the output');
+  const v = readFileSync(resolve(ROOT, 'docs/SUPPORTED-VERSIONS.md'), 'utf8');
+  for (const needle of ['React 19', 'Vue 3.5', 'Svelte 5', 'React Native 0.87', 'TypeScript ^6', 'TypeScript 7', 'Node 20', 'Node 22', '@lucide/vue', '@lucide/svelte', 'declared, gate pending', 'React 18', 'Svelte 4']) assert(v.includes(needle), `SUPPORTED-VERSIONS.md must mention ${needle}`);
+  const vl = readFileSync(resolve(ROOT, 'docs/VERIFICATION-LAYERS.md'), 'utf8');
+  assert(/check-ts-typecheck\.mjs/.test(vl) && /\| TypeScript typecheck gate/.test(vl), 'VERIFICATION-LAYERS.md must have a row for the TypeScript typecheck gate');
 });
 
 console.log('\n=== verify-patches ===');

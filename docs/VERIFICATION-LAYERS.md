@@ -1,6 +1,6 @@
 # Verification layers: what is claimed, what exists, what runs
 
-Last verified: 2026-10-09 on `main` at `1f49d3d0cc5a9aecfb93789292b35e769f702922` (merge of PR #33).
+Last verified: 2026-10-10 on `main` at `78a5f78d6176f773ff717924ec05c1ff8927736d` (merge of PR #34).
 
 ## How to read this
 
@@ -29,6 +29,7 @@ and 22. The only declared dependencies are `ajv`, `ajv-formats` and `yaml` (`pac
 | Mutation harness with known survivors (D4b) | Mutants of generated output are caught by a gate, or listed as approved survivors | IMPLEMENTED | CI Linux | `_shared/scripts/mutate-gates.mjs`, `_shared/policy/mutation-known-survivors.yaml`, last step of `ci.mjs` | Mutates generated output text only, never adapter source |
 | Token-output gate (F-32) | Built token outputs hold real values, agree with each other and equal a fresh build | IMPLEMENTED | CI Linux | `_shared/scripts/check-token-outputs.mjs`, `ci.mjs` step 0 | See `docs/BREADTH-MATRIX.md`, section F-32 |
 | SwiftUI typecheck gate (F-31) | Generated SwiftUI and `DesignTokens.swift` type-check with the real compiler | MACOS-ONLY | CI skipped on Linux; local on a Mac | `_shared/scripts/check-swift-typecheck.mjs`; on Linux `ci.mjs` prints `SKIPPED (not macOS): swiftui typecheck`; pins P145 and P146 are skipped on Linux | See `docs/BREADTH-MATRIX.md`, section F-31. Green Linux CI does not show that SwiftUI compiles |
+| TypeScript typecheck gate (TS-1) | Generated TypeScript output type-checks with the real compiler | PARTIAL | CI Linux, for React only; react-native, vue and svelte are listed as NOT ENABLED with a dated expiry | `_shared/scripts/check-ts-typecheck.mjs`, `_shared/policy/ts-typecheck-adapters.yaml`, `ci.mjs` step 2c | Enabled for React only; see `docs/SUPPORTED-VERSIONS.md` and `docs/BREADTH-MATRIX.md`, section TS-1 |
 | a11y-guard, IR and source tiers | Accessibility contracts on the spec and on the generated source | IMPLEMENTED | CI Linux | `.claude/skills/_guards/a11y-guard/scripts/check.mjs`, called from `e2e-multi.mjs` | String and regex checks on text; no rendering |
 | a11y-guard, dynamic tier | axe-core through Playwright against a rendered Storybook story | PLANNED | nowhere | no axe-core or Playwright in `package.json` or `node_modules`; no script runs it | Static tiers above |
 | token-guard | Token names exist in the registry; no raw colour or px literals in generated code | IMPLEMENTED | CI Linux | `.claude/skills/_guards/token-guard/scripts/check.mjs`, called from `e2e-multi.mjs` | Checks names; the F-32 gate checks values |
@@ -43,12 +44,13 @@ and 22. The only declared dependencies are `ajv`, `ajv-formats` and `yaml` (`pac
 
 ## What is not checked
 
-Generated web (React, Vue, Svelte) and React Native output is currently not parsed, type-checked, compiled or
-rendered by any gate. Nothing in the repository executes it. Gates read it as text.
+Generated Vue, Svelte and React Native output is currently not parsed, type-checked, compiled or rendered by any
+gate. Generated React output is type-checked by the TS-1 gate (TypeScript compiler API, corpus outputs only) and
+is not rendered. Nothing in the repository executes generated output. Other gates read it as text.
 
 A one-off type-check probe on `main` at `1f49d3d` ran the real tools (TypeScript, vue-tsc, svelte-check, the Vue
 and Svelte compilers) on the 54 corpus outputs of each of those four adapters. 74 of the 216 files failed (React 17,
-React Native 28, Vue 15, Svelte 14). The probe lived in a temp directory and left nothing in the repository, so
+React Native 28, Vue 15, Svelte 14). The 17 React failures are fixed by TS-1; the other 57 remain. The probe lived in a temp directory and left nothing in the repository, so
 these numbers can be reproduced only by repeating it.
 
 For SwiftUI and tokens, the findings and fixes are recorded in `docs/BREADTH-MATRIX.md`: F-31 (generated SwiftUI

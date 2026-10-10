@@ -102,6 +102,13 @@ function main() {
   try { run('node _shared/scripts/check-swift-typecheck.mjs'); }
   catch { console.error('FAIL: check-swift-typecheck'); failures++; }
 
+  // TS-1: type-checks the generated TypeScript output with the real compiler. Runs on every OS. The policy file
+  // _shared/policy/ts-typecheck-adapters.yaml says which adapters are enabled; a disabled adapter prints a NOT
+  // ENABLED line on every run and fails once its expiry has passed.
+  console.log('\n## 2c. typescript typecheck (TS-1 — corpus output of every enabled adapter type-checks with the real TypeScript compiler)');
+  try { run('node _shared/scripts/check-ts-typecheck.mjs'); }
+  catch { console.error('FAIL: check-ts-typecheck'); failures++; }
+
   console.log('\n## 3. regression harness');
   try { run('node _shared/scripts/verify-patches.mjs'); }
   catch { console.error('FAIL: verify-patches'); failures++; }

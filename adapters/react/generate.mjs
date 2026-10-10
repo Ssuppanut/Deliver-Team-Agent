@@ -16,7 +16,86 @@ const ROOT = resolve(__dirname, '../..');
 
 const escapeJsx = (s) => String(s).replace(/[{}<>]/g, (c) => `{'${c}'}`);
 
+/**
+ * Split a rendered JSX block into its top-level parts: elements, `{...}` containers and bare text.
+ * The adapter emits well-formed JSX, so a small scanner is enough: it skips string literals and balanced
+ * braces (an arrow `=>` or a `>` inside braces or a quoted attribute is not a tag end).
+ * @returns {{ kind: 'element'|'expr'|'text', start: number, end: number }[]}
+ */
+export function topLevelParts(src) {
+  const parts = [];
+  const n = src.length;
+  let i = 0;
+  const skipString = (q) => { i++; while (i < n && src[i] !== q) { if (src[i] === '\\') i++; i++; } i++; };
+  const skipBraces = () => {
+    let depth = 0;
+    while (i < n) {
+      const c = src[i];
+      if (c === '"' || c === "'" || c === '`') { skipString(c); continue; }
+      if (c === '{') depth++;
+      if (c === '}') depth--;
+      i++;
+      if (depth === 0) break;
+    }
+  };
+  // Consume one tag starting at `<`; returns 'open' | 'self' | 'close'.
+  const tag = () => {
+    const closing = src[i + 1] === '/';
+    i++;
+    while (i < n && src[i] !== '>') {
+      const c = src[i];
+      if (c === '"' || c === "'") { skipString(c); continue; }
+      if (c === '{') { skipBraces(); continue; }
+      i++;
+    }
+    const selfClosing = src[i - 1] === '/';
+    i++;
+    return closing ? 'close' : selfClosing ? 'self' : 'open';
+  };
+  while (i < n) {
+    if (/\s/.test(src[i])) { i++; continue; }
+    const start = i;
+    if (src[i] === '{') { skipBraces(); parts.push({ kind: 'expr', start, end: i }); continue; }
+    if (src[i] === '<') {
+      let depth = 0;
+      do {
+        if (src[i] === '<') { const t = tag(); if (t === 'open') depth++; else if (t === 'close') depth--; }
+        else if (src[i] === '{') skipBraces();
+        else i++;
+      } while (i < n && depth > 0);
+      parts.push({ kind: 'element', start, end: i });
+      continue;
+    }
+    while (i < n && src[i] !== '<' && src[i] !== '{') i++;
+    parts.push({ kind: 'text', start, end: i });
+  }
+  return parts;
+}
+
 class ReactRenderer extends RendererBase {
+  // TS-1 callback signatures (shared helper in renderer-base): arity from the prop name, value type from the bound control.
+  get sigs() { return (this._sigs ??= this.callbackSignatures()); }
+  takesValue(name) { return this.sigs.get(name)?.takesValue ?? /change/i.test(name); }
+  /** Call a change callback: `name(arg)` when the name takes the value, `name()` otherwise. */
+  callCb(name, arg) { return this.takesValue(name) ? `${name}(${arg})` : `${name}()`; }
+  /** `onChange={(e) => name(arg)}`, or `onChange={() => name()}` for a zero-argument callback. */
+  onChangeAttr(name, arg) { return this.takesValue(name) ? `onChange={(e) => ${name}(${arg})}` : `onChange={() => ${name}()}`; }
+
+  /**
+   * A rendered block used where ONE JSX expression is required (the component return, a ternary or `&&`
+   * branch): several top-level elements become a fragment; a single `{...}` container (an iteration) is
+   * unwrapped to its bare expression, because a `{ }` block inside parentheses is not valid JSX. A block that
+   * is already a bare expression (a nested conditional, `null`) is left alone.
+   */
+  asExpression(src) {
+    const t = src.trim();
+    if (!t.startsWith('<') && !t.startsWith('{')) return src;
+    const parts = topLevelParts(t);
+    if (parts.length === 1 && parts[0].kind === 'expr') return t.slice(1, -1);
+    if (parts.length > 1) return `<>\n${indent(t, 2)}\n</>`;
+    return src;
+  }
+
   interp(vr) {
     if (!vr) return '';
     if (vr.kind === 'literal') return escapeJsx(vr.value);
@@ -58,16 +137,23 @@ class ReactRenderer extends RendererBase {
     let spread = '';
     const v = this.variantData(node);
     if (v) {
-      const cases = Object.entries(v.styleCases)
-        .map(([value, slots]) => {
-          const inner = Object.entries(slots).map(([s, t]) => `${STYLE_PROP[s] ?? s}: '${mapToken(t)}'`).join(', ');
-          return `${JSON.stringify(value)}: { ${inner} }`;
-        })
-        .join(', ');
+      // Every enum value gets an entry (a value with no style slots maps to an empty object).
+      const entries = Object.entries(v.styleCases).map(([value, slots]) => {
+        const inner = Object.entries(slots).map(([s, t]) => `${STYLE_PROP[s] ?? s}: '${mapToken(t)}'`).join(', ');
+        return [value, inner ? `{ ${inner} }` : '{}'];
+      });
+      for (const val of this.enumValues(v.prop)) if (!(val in v.styleCases)) entries.push([val, '{}']);
+      const cases = entries.map(([value, obj]) => `${JSON.stringify(value)}: ${obj}`).join(', ');
       spread = `...({ ${cases} })[${v.prop}]`;
     }
     const inner = [...base, spread].filter(Boolean).join(', ');
     return inner ? ` style={{ ${inner} }}` : '';
+  }
+
+  /** The values of an enum prop (empty when the prop is not an enum or is not declared). */
+  enumValues(propName) {
+    const p = (this.ir.props ?? []).find((x) => x.name === propName);
+    return p?.type === 'enum' ? (p.values ?? []) : [];
   }
 
   idAttr(node) {
@@ -107,9 +193,10 @@ class ReactRenderer extends RendererBase {
     const v = this.variantData(node);
     if (!v || !Object.keys(v.iconCases).length) return '';
     this.express('icon', { mechanism: 'variant icon cases (aria-hidden icon component)' });
-    const cases = Object.entries(v.iconCases)
-      .map(([val, tok]) => `${JSON.stringify(val)}: <${this.icon(tok)} aria-hidden="true" />`)
-      .join(', ');
+    // Every enum value gets an entry (a value with no icon maps to null), so indexing by the full enum type type-checks.
+    const entries = Object.entries(v.iconCases).map(([val, tok]) => [val, `<${this.icon(tok)} aria-hidden="true" />`]);
+    for (const val of this.enumValues(v.prop)) if (!(val in v.iconCases)) entries.push([val, 'null']);
+    const cases = entries.map(([val, jsx]) => `${JSON.stringify(val)}: ${jsx}`).join(', ');
     return `{({ ${cases} })[${v.prop}]}`;
   }
 
@@ -195,7 +282,7 @@ class ReactRenderer extends RendererBase {
     const num = (n, v) => (v == null ? '' : ` ${n}={${v}}`);
     if (cs.kind === 'boolean') {
       this.express('state=boolean', { mechanism: 'checked + onChange (controlled)' });
-      return `${labelEl}<input id="${id}" type="checkbox" checked={${cs.value}} onChange={(e) => ${cs.change}(e.target.checked)}${tail} />`;
+      return `${labelEl}<input id="${id}" type="checkbox" checked={${cs.value}} ${this.onChangeAttr(cs.change, 'e.target.checked')}${tail} />`;
     }
     if (cs.kind === 'selected-value') {
       if (node.role === 'radiogroup') {
@@ -204,7 +291,7 @@ class ReactRenderer extends RendererBase {
         this.express('state=selected-value', { mechanism: 'radiogroup: name-grouped <input type="radio"> + checked/onChange (controlled)' });
         const ic = this.richOptionIcon(node);
         const items = cs.options
-          ? `\n  {${cs.options}.map((opt) => (\n    <label key={opt.value}>\n      <input type="radio" name="${id}" value={opt.value} checked={${cs.value} === opt.value} onChange={() => ${cs.change}(opt.value)} />\n      ${ic}{opt.label}\n    </label>\n  ))}\n`
+          ? `\n  {${cs.options}.map((opt) => (\n    <label key={opt.value}>\n      <input type="radio" name="${id}" value={opt.value} checked={${cs.value} === opt.value} onChange={() => ${this.callCb(cs.change, 'opt.value')}} />\n      ${ic}{opt.label}\n    </label>\n  ))}\n`
           : '';
         return `${labelEl}<div id="${id}"${tail}>${items}</div>`;
       }
@@ -212,11 +299,11 @@ class ReactRenderer extends RendererBase {
       const items = cs.options
         ? `\n  {${cs.options}.map((opt) => (\n    <option key={opt.value} value={opt.value}>{opt.label}</option>\n  ))}\n`
         : '';
-      return `${labelEl}<select id="${id}" value={${cs.value}} onChange={(e) => ${cs.change}(e.target.value)}${tail}>${items}</select>`;
+      return `${labelEl}<select id="${id}" value={${cs.value}} ${this.onChangeAttr(cs.change, 'e.target.value')}${tail}>${items}</select>`;
     }
     this.express('state=numeric-range', { mechanism: 'value + onChange + min/max/step (controlled)' });
     const t = node.input?.inputType === 'number' ? 'number' : 'range';
-    return `${labelEl}<input id="${id}" type="${t}" value={${cs.value}} onChange={(e) => ${cs.change}(Number(e.target.value))}${num('min', cs.min)}${num('max', cs.max)}${num('step', cs.step)}${tail} />`;
+    return `${labelEl}<input id="${id}" type="${t}" value={${cs.value}} ${this.onChangeAttr(cs.change, 'Number(e.target.value)')}${num('min', cs.min)}${num('max', cs.max)}${num('step', cs.step)}${tail} />`;
   }
 
   visitInput(node) {
@@ -225,8 +312,12 @@ class ReactRenderer extends RendererBase {
     if (cs) return this.renderControlState(node, cs);
     const id = this.inputId(node);
     const labelEl = node.label ? `<label htmlFor="${id}">${this.interp(node.label)}</label>\n` : '';
-    const value = i.valueProp ? ` value={${i.valueProp}}` : '';
-    const change = i.changeProp ? ` onChange={(e) => ${i.changeProp}(e.target.value)}` : '';
+    // What the control hands its callback (shared rule): a checkbox or switch is a boolean checkbox input
+    // (checked + e.target.checked), a number or slider hands a number, everything else the string value.
+    const kind = i.multiline ? 'string' : this.inputValueKind(node);
+    const value = i.valueProp ? (kind === 'boolean' ? ` checked={${i.valueProp}}` : ` value={${i.valueProp}}`) : '';
+    const arg = { boolean: 'e.target.checked', number: 'Number(e.target.value)', string: 'e.target.value' }[kind];
+    const change = i.changeProp ? ` ${this.onChangeAttr(i.changeProp, arg)}` : '';
     const invalid = node.a11y?.invalid;
     const desc = node.a11y?.describedBy;
     let aria = '';
@@ -241,7 +332,8 @@ class ReactRenderer extends RendererBase {
       this.express('input.multiline', { mechanism: '<textarea>' });
       return `${labelEl}<textarea id="${id}"${value}${change}${aria}${this.a11yAttrs(node)}${this.styleAttr(node)} />`;
     }
-    return `${labelEl}<input id="${id}" type="${i.inputType ?? 'text'}"${value}${change}${aria}${this.a11yAttrs(node)}${this.styleAttr(node)} />`;
+    const type = kind === 'boolean' ? 'checkbox' : (i.inputType ?? 'text');
+    return `${labelEl}<input id="${id}" type="${type}"${value}${change}${aria}${this.a11yAttrs(node)}${this.styleAttr(node)} />`;
   }
 
   visitSlot(node) {
@@ -250,7 +342,7 @@ class ReactRenderer extends RendererBase {
   }
 
   wrapConditional(node, rendered) {
-    return `{${node.when} && (\n${indent(rendered, 2)}\n)}`;
+    return `{${node.when} && (\n${indent(this.asExpression(rendered), 2)}\n)}`;
   }
 
   // A conditional lowers to a bare JS expression; wrapTopConditional adds the
@@ -259,12 +351,12 @@ class ReactRenderer extends RendererBase {
   condChainRender(branches, elseBody) {
     // One-way (single clause, no else): `flag && (body)`.
     if (branches.length === 1 && elseBody == null) {
-      return `${branches[0].when} && (\n${indent(branches[0].body, 2)}\n)`;
+      return `${branches[0].when} && (\n${indent(this.asExpression(branches[0].body), 2)}\n)`;
     }
     // if/else and else-if chains → a nested ternary (native JSX else-if idiom).
     return branches.reduceRight(
-      (acc, b) => `${b.when} ? (\n${indent(b.body, 2)}\n) : (\n${indent(acc, 2)}\n)`,
-      elseBody != null ? elseBody : 'null',
+      (acc, b) => `${b.when} ? (\n${indent(this.asExpression(b.body), 2)}\n) : (\n${indent(acc, 2)}\n)`,
+      elseBody != null ? this.asExpression(elseBody) : 'null',
     );
   }
   wrapTopConditional(str) {
@@ -284,7 +376,10 @@ class ReactRenderer extends RendererBase {
       case 'number': return 'number';
       case 'boolean': return 'boolean';
       case 'date': return 'Date';
-      case 'function': return /change/i.test(prop.name) ? '(value: string) => void' : '() => void';
+      case 'function': {
+        const sig = this.sigs.get(prop.name);
+        return this.takesValue(prop.name) ? `(value: ${sig?.valueType ?? 'string'}) => void` : '() => void';
+      }
       case 'enum': return (prop.values ?? []).map((v) => `'${v}'`).join(' | ') || 'string';
       case 'node': return 'React.ReactNode';
       case 'array': {
@@ -299,12 +394,22 @@ class ReactRenderer extends RendererBase {
 
   renderComponent(root) {
     const name = this.ir.component;
-    const propsIface = this.ir.props.length
-      ? `export interface ${name}Props {\n`
-        + this.ir.props.map((p) => `  ${p.name}${p.required ? '' : '?'}: ${this.tsType(p)};`).join('\n')
-        + `\n}\n\n`
+    // A slot renders a caller-supplied node (`{children}`, `{header}`): declare each one as an optional
+    // React.ReactNode prop unless the spec already declares a prop of that name.
+    const slotProps = [];
+    this.irNodes(this.ir.root, (n) => {
+      if (n.kind !== 'slot') return;
+      const slot = n.label?.value ?? 'children';
+      if (!slotProps.includes(slot) && !this.ir.props.some((p) => p.name === slot)) slotProps.push(slot);
+    });
+    const propLines = [
+      ...this.ir.props.map((p) => `  ${p.name}${p.required ? '' : '?'}: ${this.tsType(p)};`),
+      ...slotProps.map((slot) => `  ${slot}?: React.ReactNode;`),
+    ];
+    const propsIface = propLines.length
+      ? `export interface ${name}Props {\n${propLines.join('\n')}\n}\n\n`
       : `export interface ${name}Props {}\n\n`;
-    const args = this.ir.props.map((p) => p.name).join(', ');
+    const args = [...this.ir.props.map((p) => p.name), ...slotProps].join(', ');
     const iconImport = this.usedIcons.size
       ? `import { ${[...this.usedIcons].join(', ')} } from '${ICON_LIB}';\n`
       : '';
@@ -320,7 +425,7 @@ class ReactRenderer extends RendererBase {
       + optionIcons
       + tzGuard
       + `export function ${name}({ ${args} }: ${name}Props) {\n`
-      + `  return (\n${indent(root, 4)}\n  );\n}\n`;
+      + `  return (\n${indent(this.asExpression(root), 4)}\n  );\n}\n`;
   }
 }
 
