@@ -1,0 +1,29 @@
+# TS-1: which adapters the TypeScript compile gate (_shared/scripts/check-ts-typecheck.mjs) checks.
+#
+# One entry per adapter (react, react-native, vue, svelte). `enabled: true` means the gate type-checks
+# that adapter's corpus output and a type or syntax error fails CI. `enabled: false` is NOT silent: the gate
+# prints one `NOT ENABLED` line for the adapter on every run, and the entry FAILS (TT3) once its `expires`
+# date has passed, so nothing stays disabled forever.
+#
+# A disabled entry needs: a specific reason, the approver (exactly the string below) and an expiry
+# (a valid date; the expiry day is not inclusive, as in the other policy files).
+#
+# Versions the gates test against: docs/SUPPORTED-VERSIONS.md.
+adapters:
+  - adapter: react
+    enabled: true
+  - adapter: react-native
+    enabled: false
+    reason: "28 of 54 corpus files fail the real type-check; fixes planned in their own PR, see docs/SUPPORTED-VERSIONS.md"
+    approver: "Ssuppanut (design-system a11y owner)"
+    expires: 2027-03-31
+  - adapter: vue
+    enabled: false
+    reason: "15 of 54 corpus files fail vue-tsc (7 of them are also rejected by the Vue compiler); fixes planned in their own PR, see docs/SUPPORTED-VERSIONS.md"
+    approver: "Ssuppanut (design-system a11y owner)"
+    expires: 2027-03-31
+  - adapter: svelte
+    enabled: false
+    reason: "14 of 54 corpus files fail svelte-check; fixes planned in their own PR, see docs/SUPPORTED-VERSIONS.md"
+    approver: "Ssuppanut (design-system a11y owner)"
+    expires: 2027-03-31

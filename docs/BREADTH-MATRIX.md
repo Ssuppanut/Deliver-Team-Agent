@@ -2869,3 +2869,78 @@ elsewhere in the repo.
 - Nothing renders the generated output; the gate proves it type-checks, not that it looks or behaves right.
 - No macOS CI job was added; only a local Mac run executes this gate.
 - The slot collapse above (a named slot shares the unnamed `content`).
+
+# TS-1 - the generated React type-checks
+
+## Finding
+
+A type-check probe (TypeScript 6.0.3, react 19.3.0, `@types/react` 19.3.0, `lucide-react` 1.54.0) showed that
+17 of the 54 corpus React files failed the real compiler while every gate was green. No gate parsed or type-checked
+generated web or React Native output, and no version of any framework or tool was declared in the repository.
+Syntax errors hid semantic ones: after the sibling roots were wrapped, 12 files still failed.
+
+Causes in React, with the fix for each (all in `adapters/react/generate.mjs`; the output of every other adapter is
+byte-identical):
+
+- **R1 sibling roots (9 files, TS2657).** A labelled input renders a `<label>` and an `<input>` side by side. A
+  component whose rendered root has several top-level elements is now wrapped in a fragment `<>...</>`, in the
+  adapter's root rendering (a small JSX scanner counts the top-level parts), so it applies to every spec.
+- **R2 cond-list (TS1005).** An iteration inside a ternary branch was emitted as a `{ }` block inside parentheses.
+  A branch (and the `&&` form, and the component return) now holds one expression: a single `{ }` container is
+  unwrapped, several elements become a fragment.
+- **R3 callbacks (7 files, TS2345 and TS2554).** Callbacks were typed `(value: string) => void` for names matching
+  `/change/i` whatever the control handed them, and a name without `change` (`onToggle`) was typed `() => void` but
+  called with an argument. A new shared helper in `adapters/_shared/renderer-base.mjs` (`callbackSignatures()`,
+  `inputValueKind()`) derives the arity from the name and the value type from the bound control (boolean state,
+  checkbox or switch: boolean; numeric-range state, slider or number input: number; selected-value state or text
+  field: string). Zero-argument callbacks are called without arguments (`onToggle()`). Only React uses it.
+- **R4 badge (TS2339).** A lookup map lacked the `default` enum value. Every enum value now has an entry: `null`
+  for an icon map, `{}` for a style map.
+- **R5 slot-host (TS2304, TS2552).** The slots rendered `{children}` and `{header}` but declared neither. Each slot is
+  now an optional `React.ReactNode` prop (no other corpus spec uses a slot, so there was nothing to mirror).
+- **R6 checkbox (TS2322).** The checkbox and switch specs were generated as `<input type="text" value={checked}>`
+  reading `e.target.value`. They are now `type="checkbox"` with `checked` and `e.target.checked`; the `role`
+  attribute is kept. Other input types (text, email, password) are unchanged; a plain number or slider input now
+  hands its callback `Number(e.target.value)` to match the `number` type (a behaviour change for those specs).
+- **Environment.** TypeScript 6 checks side-effect imports, and `roundingMode` needs `lib` es2023; the gate owns both
+  settings (see below).
+
+17 React feature outputs changed (the 17 failing specs); the other 37 are byte-identical.
+
+## Gate: `_shared/scripts/check-ts-typecheck.mjs`
+
+Pure Node, runs on Linux and macOS, never skipped, blocking step 2c of `ci.mjs` (after generation, before
+`verify-patches`). It uses the TypeScript compiler API from `node_modules` (no `npx`, no network): one program whose
+roots are every corpus React output plus an in-memory declaration `declare module '*.css'` owned by the gate. The
+import `../../_shared/tokens/tokens.css` does not exist under `out/`; the ambient wildcard resolves it, so no token
+file is copied into `out/` and no file is added for it. Options: target ES2022, module ESNext, moduleResolution
+Bundler, jsx ReactJSX, strict, noEmit, skipLibCheck, esModuleInterop, allowSyntheticDefaultImports, lib es2023 and
+dom. Wall time on the Linux machine: about 1.8 s for one program, about 20 s for one program per file (same
+diagnostics).
+
+| Rule | Fails when |
+|---|---|
+| `TT0` env | `typescript` or `@types/react` is not installed (run `npm ci`), the policy file is missing or unparseable, an adapter has no policy entry, or an enabled adapter has no output directory |
+| `TT1` type | a file has a syntax or type error (first error raw with line and column, plus the count per file; a file with a syntax error skips the semantic check, as `tsc` does) |
+| `TT2` inventory | a corpus feature has no output, or the adapter output directory holds a directory that is neither a corpus feature nor a pin artefact directory |
+| `TT3` policy | an entry has an unknown or duplicate adapter, a non-boolean `enabled`, an empty reason, an approver that is not exactly the approver string, or a missing, invalid or past expiry (the expiry day is not inclusive) |
+
+**Scope and exclusion rule.** The 54 feature directories under `out/react`. The pin artefact directories
+`out/react/verify-*` and `out/react/_verify` are excluded: `verify-patches` writes into them, they are copies or
+variants of corpus output, and checking them would count one defect once per copy (same rule as the SwiftUI gate).
+
+**Policy file.** `_shared/policy/ts-typecheck-adapters.yaml`, one entry per adapter. `react` is enabled. `react-native`,
+`vue` and `svelte` are `enabled: false` with a reason, the approver and the expiry 2027-03-31; the gate prints one
+`NOT ENABLED` line for each on every run, and an entry past its expiry fails (TT3), so nothing stays disabled
+forever. Versions: `docs/SUPPORTED-VERSIONS.md`.
+
+## What remains
+
+- `react-native`, `vue` and `svelte` are not enabled: 28 of 54, 15 of 54 (vue-tsc; 7 of them are also rejected by the
+  Vue compiler) and 14 of 54 corpus files fail the real tools. Each is planned as its own PR.
+- **Temporary callback drift.** React now types callbacks from the bound control; Vue, Svelte and React Native still
+  type every `/change/i` callback `(value: string) => void` until their PRs. There is no cross-adapter signature
+  parity gate today.
+- Nothing renders the generated output: the gate checks syntax and types only (`docs/VERIFICATION-LAYERS.md`).
+
+Pins P148 to P158.

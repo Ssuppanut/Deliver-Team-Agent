@@ -140,6 +140,48 @@ export class RendererBase {
   }
 
   /**
+   * TS-1 callback signatures. Derives, for every `function` prop, how its callback is typed and called:
+   *   - ARITY from the prop NAME (the convention React, React Native and SwiftUI share): a name matching
+   *     /change/i takes the new value, any other name takes none and is called without arguments;
+   *   - VALUE TYPE from the control the callback is bound to (`input.changeProp`), see inputValueKind().
+   * A value-taking callback bound to no control defaults to 'string'. Used by the React adapter only (the
+   * other adapters keep their own typing until their own PRs; there is no cross-adapter signature gate).
+   * @returns {Map<string, { takesValue: boolean, valueType: 'boolean'|'number'|'string' }>}
+   */
+  callbackSignatures() {
+    const bound = new Map();
+    this.irNodes(this.ir.root, (n) => {
+      if (n.kind === 'input' && n.input?.changeProp && !bound.has(n.input.changeProp)) bound.set(n.input.changeProp, this.inputValueKind(n));
+    });
+    const out = new Map();
+    for (const p of this.ir.props ?? []) {
+      if (p.type === 'function') out.set(p.name, { takesValue: /change/i.test(p.name), valueType: bound.get(p.name) ?? 'string' });
+    }
+    return out;
+  }
+
+  /**
+   * The kind of value an input control hands its change callback:
+   *   boolean state, or a checkbox / switch (role or inputType) -> 'boolean';
+   *   numeric-range state, or a slider role or number inputType  -> 'number';
+   *   selected-value state, a select, a text field or anything else -> 'string'.
+   */
+  inputValueKind(node) {
+    const cs = this.controlState(node);
+    if (cs) return { boolean: 'boolean', 'numeric-range': 'number', 'selected-value': 'string' }[cs.kind] ?? 'string';
+    const t = node.input?.inputType;
+    if (node.role === 'checkbox' || node.role === 'switch' || t === 'checkbox') return 'boolean';
+    if (node.role === 'slider' || t === 'number') return 'number';
+    return 'string';
+  }
+
+  /** Depth-first walk of the IR tree. */
+  irNodes(node, fn) {
+    fn(node);
+    for (const c of node.children ?? []) this.irNodes(c, fn);
+  }
+
+  /**
    * Build the JS `Intl.NumberFormat(...).format(...)` expression for a normalized
    * number-format descriptor. Shared by every web adapter and React Native (all
    * have a native Intl). Precision + the four F-12 dimensions compose into ONE
