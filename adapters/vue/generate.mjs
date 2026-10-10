@@ -11,7 +11,27 @@ import { iconMap, ICON_LIB } from './icon-map.mjs';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '../..');
 
+const BACKSLASH = /\\/g;
+const SQUOTE = /'/g;
+const DQUOTE = /"/g;
+const AMP = /&/g;
+/** A single-quoted JS string literal. Everything inside a double-quoted template attribute must use this, never JSON.stringify. */
+const sq = (v) => "'" + String(v).replace(BACKSLASH, '\\\\').replace(SQUOTE, "\\'") + "'";
+/** A double-quoted static HTML attribute value: the attribute's own quote and the ampersand are escaped. */
+const attrValue = (v) => '"' + String(v).replace(AMP, '&amp;').replace(DQUOTE, '&quot;') + '"';
+
 class VueRenderer extends RendererBase {
+  // TS-2 callback signatures (shared helper in renderer-base): arity from the prop name, value type from the bound control.
+  get sigs() { return (this._sigs ??= this.callbackSignatures()); }
+  takesValue(name) { return this.sigs.get(name)?.takesValue ?? /change/i.test(name); }
+  /** A change handler attribute: `@event="name(arg)"` when the name takes the value, `@event="name()"` otherwise. */
+  handler(event, name, arg) { return `@${event}="${this.takesValue(name) ? `${name}(${arg})` : `${name}()`}"`; }
+  /** The values of an enum prop (empty when the prop is not an enum or is not declared). */
+  enumValues(propName) {
+    const p = (this.ir.props ?? []).find((x) => x.name === propName);
+    return p?.type === 'enum' ? (p.values ?? []) : [];
+  }
+
   interp(vr) {
     if (!vr) return '';
     if (vr.kind === 'literal') return String(vr.value);
@@ -26,7 +46,7 @@ class VueRenderer extends RendererBase {
   }
   bind(attr, vr) {
     if (!vr) return '';
-    if (vr.kind === 'literal') return ` ${attr}=${JSON.stringify(String(vr.value))}`;
+    if (vr.kind === 'literal') return ` ${attr}=${attrValue(vr.value)}`;
     return ` :${attr}="${vr.value}"`;
   }
   styleAttr(node) {
@@ -56,12 +76,13 @@ class VueRenderer extends RendererBase {
       ...(node.style ? Object.entries(node.style).map(([slot, token]) => `'${STYLE_PROP[slot] ?? slot}': '${mapToken(token)}'`) : []),
     ];
     const sizeObj = node.size ? [`'width': '${mapToken(node.size)}'`, `'height': '${mapToken(node.size)}'`] : [];
-    const cases = Object.entries(v.styleCases)
-      .map(([value, slots]) => {
-        const inner = Object.entries(slots).map(([s, t]) => `'${STYLE_PROP[s] ?? s}': '${mapToken(t)}'`).join(', ');
-        return `${JSON.stringify(value)}: { ${inner} }`;
-      })
-      .join(', ');
+    // Keys are single-quoted (this sits inside a double-quoted attribute) and every enum value has an entry ({} when none).
+    const entries = Object.entries(v.styleCases).map(([value, slots]) => {
+      const inner = Object.entries(slots).map(([s, t]) => `'${STYLE_PROP[s] ?? s}': '${mapToken(t)}'`).join(', ');
+      return [value, inner ? `{ ${inner} }` : '{}'];
+    });
+    for (const val of this.enumValues(v.prop)) if (!(val in v.styleCases)) entries.push([val, '{}']);
+    const cases = entries.map(([value, obj]) => `${sq(value)}: ${obj}`).join(', ');
     const inner = [...base, ...sizeObj, `...({ ${cases} })[${v.prop}]`].filter(Boolean).join(', ');
     return ` :style="{ ${inner} }"`;
   }
@@ -98,9 +119,10 @@ class VueRenderer extends RendererBase {
     const v = this.variantData(node);
     if (!v || !Object.keys(v.iconCases).length) return '';
     this.express('icon', { mechanism: 'variant icon cases (aria-hidden dynamic component)' });
-    const cases = Object.entries(v.iconCases)
-      .map(([val, tok]) => `${JSON.stringify(val)}: ${this.icon(tok)}`)
-      .join(', ');
+    // Single-quoted keys (inside a double-quoted attribute); every enum value has an entry (null when it has no icon).
+    const entries = Object.entries(v.iconCases).map(([val, tok]) => [val, this.icon(tok)]);
+    for (const val of this.enumValues(v.prop)) if (!(val in v.iconCases)) entries.push([val, 'null']);
+    const cases = entries.map(([val, sym]) => `${sq(val)}: ${sym}`).join(', ');
     return `<component :is="({ ${cases} })[${v.prop}]" aria-hidden="true" />`;
   }
   visitContainer(node, children) {
@@ -166,14 +188,14 @@ class VueRenderer extends RendererBase {
     const num = (n, v) => (v == null ? '' : ` :${n}="${v}"`);
     if (cs.kind === 'boolean') {
       this.express('state=boolean', { mechanism: ':checked + @change (v-model-style controlled)' });
-      return `${labelEl}<input id="${id}" type="checkbox" :checked="${cs.value}" @change="${cs.change}(($event.target as HTMLInputElement).checked)"${tail} />`;
+      return `${labelEl}<input id="${id}" type="checkbox" :checked="${cs.value}" ${this.handler('change', cs.change, '($event.target as HTMLInputElement).checked')}${tail} />`;
     }
     if (cs.kind === 'selected-value') {
       if (node.role === 'radiogroup') {
         this.express('state=selected-value', { mechanism: 'radiogroup: name-grouped radios, :checked from bound value + @change (controlled)' });
         const ic = this.richOptionIcon(node);
         const items = cs.options
-          ? `\n  <label v-for="opt in ${cs.options}" :key="opt.value">\n    <input type="radio" name="${id}" :value="opt.value" :checked="${cs.value} === opt.value" @change="${cs.change}(opt.value)" />\n    ${ic}{{ opt.label }}\n  </label>\n`
+          ? `\n  <label v-for="opt in ${cs.options}" :key="opt.value">\n    <input type="radio" name="${id}" :value="opt.value" :checked="${cs.value} === opt.value" ${this.handler('change', cs.change, 'opt.value')} />\n    ${ic}{{ opt.label }}\n  </label>\n`
           : '';
         return `${labelEl}<div id="${id}"${tail}>${items}</div>`;
       }
@@ -181,11 +203,11 @@ class VueRenderer extends RendererBase {
       const items = cs.options
         ? `\n  <option v-for="opt in ${cs.options}" :key="opt.value" :value="opt.value">{{ opt.label }}</option>\n`
         : '';
-      return `${labelEl}<select id="${id}" :value="${cs.value}" @change="${cs.change}(($event.target as HTMLSelectElement).value)"${tail}>${items}</select>`;
+      return `${labelEl}<select id="${id}" :value="${cs.value}" ${this.handler('change', cs.change, '($event.target as HTMLSelectElement).value')}${tail}>${items}</select>`;
     }
     this.express('state=numeric-range', { mechanism: ':value + @input + :min/:max/:step (v-model-style controlled)' });
     const t = node.input?.inputType === 'number' ? 'number' : 'range';
-    return `${labelEl}<input id="${id}" type="${t}" :value="${cs.value}" @input="${cs.change}(Number(($event.target as HTMLInputElement).value))"${num('min', cs.min)}${num('max', cs.max)}${num('step', cs.step)}${tail} />`;
+    return `${labelEl}<input id="${id}" type="${t}" :value="${cs.value}" ${this.handler('input', cs.change, 'Number(($event.target as HTMLInputElement).value)')}${num('min', cs.min)}${num('max', cs.max)}${num('step', cs.step)}${tail} />`;
   }
 
   visitInput(node) {
@@ -194,8 +216,15 @@ class VueRenderer extends RendererBase {
     if (cs) return this.renderControlState(node, cs);
     const id = node.id || `${this.ir.component.toLowerCase()}-${i.valueProp ?? 'input'}`;
     const labelEl = node.label ? `<label for="${id}">${this.interp(node.label)}</label>\n` : '';
-    const model = i.valueProp ? ` :value="${i.valueProp}"` : '';
-    const change = i.changeProp ? ` @input="${i.changeProp}(($event.target as HTMLInputElement).value)"` : '';
+    // What the control hands its callback (shared rule): a checkbox or switch is a boolean checkbox input
+    // (:checked + @change reading target.checked), a number or slider hands a number, everything else the string value.
+    const kind = i.multiline ? 'string' : this.inputValueKind(node);
+    const model = i.valueProp ? (kind === 'boolean' ? ` :checked="${i.valueProp}"` : ` :value="${i.valueProp}"`) : '';
+    const change = i.changeProp
+      ? (kind === 'boolean'
+        ? ` ${this.handler('change', i.changeProp, '($event.target as HTMLInputElement).checked')}`
+        : ` ${this.handler('input', i.changeProp, kind === 'number' ? 'Number(($event.target as HTMLInputElement).value)' : '($event.target as HTMLInputElement).value')}`)
+      : '';
     const invalid = node.a11y?.invalid;
     const desc = node.a11y?.describedBy;
     let aria = '';
@@ -206,7 +235,8 @@ class VueRenderer extends RendererBase {
       this.express('input.multiline', { mechanism: '<textarea>' });
       return `${labelEl}<textarea id="${id}"${model}${change}${aria}${this.a11y(node)}${this.styleAttr(node)}></textarea>`;
     }
-    return `${labelEl}<input id="${id}" type="${i.inputType ?? 'text'}"${model}${change}${aria}${this.a11y(node)}${this.styleAttr(node)} />`;
+    const type = kind === 'boolean' ? 'checkbox' : (i.inputType ?? 'text');
+    return `${labelEl}<input id="${id}" type="${type}"${model}${change}${aria}${this.a11y(node)}${this.styleAttr(node)} />`;
   }
   visitSlot(node) {
     const name = node.label?.value;
@@ -236,7 +266,7 @@ class VueRenderer extends RendererBase {
       case 'number': return 'number';
       case 'boolean': return 'boolean';
       case 'date': return 'Date';
-      case 'function': return /change/i.test(prop.name) ? '(value: string) => void' : '() => void';
+      case 'function': return this.takesValue(prop.name) ? `(value: ${this.sigs.get(prop.name)?.valueType ?? 'string'}) => void` : '() => void';
       case 'enum': return (prop.values ?? []).map((v) => `'${v}'`).join(' | ') || 'string';
       case 'array': {
         const shape = prop.itemShape

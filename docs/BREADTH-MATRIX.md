@@ -2944,3 +2944,74 @@ forever. Versions: `docs/SUPPORTED-VERSIONS.md`.
 - Nothing renders the generated output: the gate checks syntax and types only (`docs/VERIFICATION-LAYERS.md`).
 
 Pins P148 to P158.
+
+# TS-2 - the generated Vue compiles and type-checks
+
+## Finding
+
+The TS-RECON probe (vue 3.5.43, vue-tsc 3.3.12 on TypeScript 6.0.3, `@vue/compiler-sfc` 3.5.43,
+`lucide-vue-next` 1.0.0) showed that 15 of the 54 corpus Vue files failed vue-tsc, and that 7 of them (alert, badge,
+banner, button, stat-card, status-default-intent, variant-padding-radius) were also rejected by the real Vue
+compiler, while every gate was green. Measured with the gate's own method on main (before the fix): 7 files fail
+the Vue compiler layer and 8 fail vue-tsc, 15 failing files in total (a syntax error anywhere in a vue-tsc project
+hides every semantic error, so the 7 compiler failures are left out of the vue-tsc project; see below). After the
+quoting fix alone, 9 files still fail vue-tsc (badge, six callback files, two `onToggle` files).
+
+Causes in Vue, with the fix for each (all in `adapters/vue/generate.mjs`; the output of every other adapter is
+byte-identical):
+
+- **V1 quoting (7 files, compiler errors).** Lookup-map keys were written with `JSON.stringify`, so a double
+  quote appeared inside a double-quoted attribute (`:style="{ ...({ "info": {...} })[severity] }"`), which ends the
+  attribute early. Every attribute expression now uses single-quoted keys through one escaping helper (a quote or
+  backslash in a case value is escaped) and a quote or ampersand in a static attribute value becomes `&quot;` or
+  `&amp;`. All the attribute-expression code paths were checked (`:style`, `:is`, the static `bind`).
+- **V2 callbacks (8 files).** `(value: string) => void` for every `/change/i` name whatever the control handed it
+  (six files), and `onToggle: () => void` called with an argument (two files). The shared helper
+  `callbackSignatures()` / `inputValueKind()` (introduced in TS-1, unchanged) now types the callbacks and builds the
+  handler: zero-argument callbacks are called without arguments (`@change="onToggle()"`).
+- **V3 lookup maps (badge).** Every enum value gets an entry: `null` for an icon map, `{}` for a style map.
+- **V4 checkbox and switch.** The checkbox and switch specs were generated as
+  `<input type="text" :value="checked" @input="onChange(($event.target as HTMLInputElement).value)" role="checkbox">`.
+  They are now `<input type="checkbox" :checked="checked" @change="onChange(($event.target as HTMLInputElement).checked)" role="checkbox">`
+  (the role is kept). Other input types are unchanged; a plain number or slider input now hands its callback
+  `Number(...)` to match the `number` type (a behaviour change for the slider spec).
+
+17 Vue feature outputs changed (the 15 failing specs plus checkbox and slider); the other 37 are byte-identical.
+V4 on its own was not detected: the old `type="text"` shape (callback typed `string`) type-checked and compiled. With the V2
+callback types the shape is caught when it reads `.value` for a boolean callback (TS2345); the markup pins guard the rest.
+
+## Gate: Vue in `_shared/scripts/check-ts-typecheck.mjs`
+
+The policy `_shared/policy/ts-typecheck-adapters.yaml` now enables `vue` (the NOT ENABLED entry is removed; `react-native`
+and `svelte` are unchanged). For every corpus `.vue` file (the pin artefact directories `out/vue/verify-*` and
+`out/vue/_verify` are excluded, same rule as React) the runner does two layers:
+
+- **The Vue compiler** (`@vue/compiler-sfc`: parse, compileScript, compileTemplate). Every error is a `TV1` failure
+  with the raw message and its position; warnings are printed and never fail.
+- **vue-tsc in one project.** One process over all the files the compiler accepts (about 2 s for 54 files; the
+  probe measured 76 s with `npx` per file), run as `node node_modules/vue-tsc/bin/vue-tsc.js` (no `npx`, no network)
+  with a tsconfig and an ambient `declare module '*.css'` that the gate writes into an OS temp directory and
+  removes afterwards (nothing is written into the repo). Options: target ES2022, module ESNext, moduleResolution
+  Bundler, strict, noEmit, skipLibCheck, esModuleInterop, lib ES2023 and DOM, jsx preserve, `types: []`,
+  `vueCompilerOptions.target` 3.5. The ambient wildcard resolves `'../../_shared/tokens/tokens.css'`, which does not
+  exist under `out/`; without it vue-tsc reports TS2882. The output is parsed into per-file `TT1` issues.
+
+| Rule | Fails when |
+|---|---|
+| `TT0` env | `vue`, `@vue/compiler-sfc`, `lucide-vue-next` or the vue-tsc binary is missing (run `npm ci`), or vue-tsc crashes without a parseable error |
+| `TT1` type | vue-tsc reports an error (first error raw with line and column, plus the count per file) |
+| `TV1` compiler | the Vue compiler rejects a file (first error raw with position, plus the count; vue-tsc is skipped for that file) |
+| `TT2`, `TT3` | inventory and policy, as for React |
+
+Output line: `ts typecheck: vue PASS (54 files: compiler + vue-tsc)`. Versions and the deprecation of `lucide-vue-next`
+(upstream moved to `@lucide/vue`; not migrated here): `docs/SUPPORTED-VERSIONS.md`.
+
+## What remains
+
+- `react-native` (28 of 54) and `svelte` (14 of 54) are not enabled; each is planned as its own PR.
+- React and Vue now type callbacks from the bound control; Svelte and React Native still type every `/change/i`
+  callback `(value: string) => void` until their PRs (temporary drift; there is no cross-adapter signature gate).
+- Svelte still emits `type="text"` for the checkbox and switch specs.
+- Nothing renders the generated output: the gate checks the compiler and types only.
+
+Pins P159 to P165.

@@ -18,10 +18,7 @@ adapters:
     approver: "Ssuppanut (design-system a11y owner)"
     expires: 2027-03-31
   - adapter: vue
-    enabled: false
-    reason: "15 of 54 corpus files fail vue-tsc (7 of them are also rejected by the Vue compiler); fixes planned in their own PR, see docs/SUPPORTED-VERSIONS.md"
-    approver: "Ssuppanut (design-system a11y owner)"
-    expires: 2027-03-31
+    enabled: true
   - adapter: svelte
     enabled: false
     reason: "14 of 54 corpus files fail svelte-check; fixes planned in their own PR, see docs/SUPPORTED-VERSIONS.md"

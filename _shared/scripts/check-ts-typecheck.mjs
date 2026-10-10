@@ -27,11 +27,25 @@
  * verify-patches (its pins generate into them to read the text), they are copies or variants of corpus output
  * and not part of the corpus; compiling them would count one defect once per copy. Same rule as the SwiftUI gate.
  *
+ * Vue (TS-2) runs two layers over every corpus .vue file (verify-* and _verify excluded, same rule):
+ *   (a) the real Vue compiler (@vue/compiler-sfc: parse, compileScript, compileTemplate): every error is a
+ *       TV1 FAIL, warnings are printed and do not fail;
+ *   (b) vue-tsc over ALL the files the compiler accepts in ONE project invocation (a file the compiler rejects is
+ *       a TV1 failure and is left out, because a syntax error anywhere in a project hides every semantic error) (node node_modules/vue-tsc/bin/vue-tsc.js, no
+ *       npx, no network) with a tsconfig and an ambient `declare module '*.css'` that the gate writes into an OS
+ *       temp directory (never into the repo) and removes afterwards. Options: target ES2022, module ESNext,
+ *       moduleResolution Bundler, strict, noEmit, skipLibCheck, esModuleInterop, lib ES2023 + DOM, jsx preserve,
+ *       types [], vueCompilerOptions target 3.5. The ambient wildcard resolves '../../_shared/tokens/tokens.css',
+ *       which does not exist under out/, so no token file is copied.
+ *
  * Rules (each issue carries a stable id and names the file):
- *   TT0-env      typescript or @types/react is not installed (run `npm ci`), the policy file is missing or
- *                unparseable, an adapter has no policy entry, or an enabled adapter has no output directory
- *   TT1-type     a file has a syntax or type error; the issue carries the FIRST error raw with line and
- *                column and the number of errors in the file
+ *   TT0-env      typescript or @types/react is not installed (run `npm ci`), vue, @vue/compiler-sfc, the
+ *                vue-tsc binary or lucide-vue-next is missing while vue is enabled, the policy file is missing
+ *                or unparseable, an adapter has no policy entry, or an enabled adapter has no output directory
+ *   TT1-type     a file has a syntax or type error (TypeScript for react, vue-tsc for vue); the issue carries
+ *                the FIRST error raw with line and column and the number of errors in the file
+ *   TV1-compiler a .vue file is rejected by the Vue compiler; the issue carries the first error raw with its
+ *                position and the number of errors in the file
  *   TT2-inventory a corpus feature has no output for an enabled adapter, or the adapter output directory holds
  *                a directory that is neither a corpus feature nor a pin artefact directory
  *   TT3-policy   a policy entry is invalid: unknown adapter, duplicate adapter, `enabled` not a boolean, a
@@ -43,9 +57,11 @@
  *     --timing     also print wall time (kept out of the default output so it stays deterministic)
  *     --per-file   one TypeScript program per file instead of one program (same diagnostics; timing comparison)
  */
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, relative, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseDocument, isMap, isSeq } from 'yaml';
 import { APPROVER, expiryState } from './check-trait-registry.mjs';
@@ -54,7 +70,7 @@ import { corpusFeatures } from './check-swift-typecheck.mjs';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '../..');
 
-export const RULES = ['TT0-env', 'TT1-type', 'TT2-inventory', 'TT3-policy'];
+export const RULES = ['TT0-env', 'TT1-type', 'TV1-compiler', 'TT2-inventory', 'TT3-policy'];
 export const ADAPTERS = ['react', 'react-native', 'vue', 'svelte'];
 export const POLICY_PATH = resolve(ROOT, '_shared/policy/ts-typecheck-adapters.yaml');
 export const OUT_ROOT = resolve(ROOT, 'out');
@@ -62,7 +78,8 @@ export const AMBIENT_FILE = resolve(ROOT, '__ts_typecheck_ambient__.d.ts');
 export const AMBIENT_TEXT = "declare module '*.css';\n";
 const PIN_ARTEFACT = /^(?:_verify|verify-.*)$/;
 const FIELDS = ['adapter', 'enabled', 'reason', 'approver', 'expires'];
-const SOURCE_EXT = { react: ['.tsx', '.ts'] };
+const SOURCE_EXT = { react: ['.tsx', '.ts'], vue: ['.vue'] };
+export const VUE_TSC_BIN = resolve(ROOT, 'node_modules/vue-tsc/bin/vue-tsc.js');
 
 const nonEmptyStr = (v) => typeof v === 'string' && v.trim() !== '';
 const day = (d) => (d instanceof Date ? d.toISOString().slice(0, 10) : String(d));
@@ -134,6 +151,104 @@ export function compileFiles(ts, files, { perFile = false, ambientFile = AMBIENT
   return out;
 }
 
+/** Names of the packages the Vue runner needs that are not installed (empty when all are). */
+export function defaultVueMissing(bin = VUE_TSC_BIN) {
+  const req = createRequire(import.meta.url);
+  const missing = [];
+  for (const pkg of ['vue', '@vue/compiler-sfc', 'lucide-vue-next']) {
+    try { req.resolve(`${pkg}/package.json`); } catch { missing.push(pkg); }
+  }
+  if (!existsSync(bin)) missing.push('vue-tsc');
+  return missing;
+}
+
+/** The tsconfig the gate writes into an OS temp directory for vue-tsc (pure: exported for the pins). */
+export function vueTsconfig(files, ambientFile) {
+  return JSON.stringify({
+    compilerOptions: { target: 'ES2022', module: 'ESNext', moduleResolution: 'Bundler', strict: true, noEmit: true, skipLibCheck: true, esModuleInterop: true, lib: ['ES2023', 'DOM'], jsx: 'preserve', types: [] },
+    vueCompilerOptions: { target: 3.5 },
+    include: [...files, ambientFile],
+  }, null, 2) + '\n';
+}
+
+/** Parse vue-tsc output `path(line,col): error TSnnnn: message` (continuation lines are ignored). @returns Map<absFile, Diag[]> */
+export function parseVueTscOutput(output, cwd = ROOT) {
+  const out = new Map();
+  for (const l of String(output).split('\n')) {
+    const m = l.match(/^(.+?)\((\d+),(\d+)\): error TS(\d+): (.*)$/);
+    if (!m) continue;
+    const f = resolve(cwd, m[1]);
+    if (!out.has(f)) out.set(f, []);
+    out.get(f).push({ code: Number(m[4]), line: Number(m[2]), col: Number(m[3]), msg: m[5].trim() });
+  }
+  return out;
+}
+
+/**
+ * ONE vue-tsc invocation over all `files`, with a tsconfig and an ambient *.css declaration written into an OS temp
+ * directory (removed afterwards, never inside the repo). @returns { diags: Map<file, Diag[]>, status, crash?: string, ms }
+ */
+export function runVueTsc(files, { bin = VUE_TSC_BIN, cwd = ROOT, tmpBase = tmpdir(), spawn = spawnSync, onTsconfig } = {}) {
+  const t0 = Date.now();
+  const dir = mkdtempSync(join(tmpBase, 'ts-gate-vue-'));
+  try {
+    const ambient = join(dir, 'ambient.d.ts');
+    const cfg = join(dir, 'tsconfig.json');
+    writeFileSync(ambient, AMBIENT_TEXT);
+    const text = vueTsconfig(files, ambient);
+    writeFileSync(cfg, text);
+    if (onTsconfig) onTsconfig({ dir, cfg, text });
+    const r = spawn(process.execPath, [bin, '--noEmit', '-p', cfg, '--pretty', 'false'], { cwd, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+    const output = `${r.stdout ?? ''}\n${r.stderr ?? ''}`;
+    const diags = parseVueTscOutput(output, cwd);
+    const crash = r.status !== 0 && diags.size === 0
+      ? `vue-tsc exited ${r.status ?? r.error?.code ?? '?'} without a parseable error: ${(output.split('\n').find((l) => l.trim()) ?? 'no output').trim()}`
+      : undefined;
+    return { diags, status: r.status, crash, ms: Date.now() - t0 };
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+}
+
+/** The Vue compiler over every file. @returns Map<file, { errors: {message,line,col}[], warnings: string[] }> */
+export function compileVueFiles(sfc, files, read = (f) => readFileSync(f, 'utf8')) {
+  const out = new Map();
+  const first = (m) => String(m).split('\n')[0].trim();
+  for (const f of files) {
+    const src = read(f);
+    const errors = [], warnings = [];
+    const seen = new Set();
+    const addErr = (message, line, col) => { const k = `${message}@${line}:${col}`; if (!seen.has(k)) { seen.add(k); errors.push({ message: first(message), line, col }); } };
+    const { descriptor, errors: parseErrors } = sfc.parse(src, { filename: f });
+    for (const e of parseErrors) addErr(e.message ?? e, e.loc?.start?.line ?? null, e.loc?.start?.column ?? null);
+    let bindings;
+    try { bindings = sfc.compileScript(descriptor, { id: 'gate' }).bindings; }
+    catch (e) { addErr(e.message, e.loc?.start?.line ?? null, e.loc?.start?.column ?? null); }
+    if (descriptor.template) {
+      const t = descriptor.template;
+      const tr = sfc.compileTemplate({ source: t.content, filename: f, id: 'gate', compilerOptions: { bindingMetadata: bindings } });
+      // Template positions are relative to the template content: make them file positions.
+      const at = (loc) => (loc ? { line: t.loc.start.line + loc.start.line - 1, col: loc.start.line === 1 ? t.loc.start.column - 1 + loc.start.column : loc.start.column } : { line: null, col: null });
+      for (const e of tr.errors) { const p = at(e.loc); addErr(typeof e === 'string' ? e : e.message, p.line, p.col); }
+      for (const w of tr.tips ?? []) warnings.push(first(w.message ?? w));
+    }
+    out.set(f, { errors, warnings });
+  }
+  return out;
+}
+
+/** The default Vue runner: the Vue compiler layer, then ONE vue-tsc project. */
+export async function defaultVueRunner(files) {
+  const sfc = (await import('@vue/compiler-sfc')).default ?? (await import('@vue/compiler-sfc'));
+  const t0 = Date.now();
+  const compiler = compileVueFiles(sfc, files);
+  const compilerMs = Date.now() - t0;
+  // vue-tsc, like tsc, reports no semantic error anywhere in a project that has a syntax error. A file the Vue
+  // compiler rejects is already a TV1 failure, so it is left out of the vue-tsc project: its syntax error cannot
+  // hide the type errors of the other files.
+  const typed = files.filter((f) => !(compiler.get(f)?.errors.length));
+  const tsc = typed.length ? runVueTsc(typed) : { diags: new Map(), crash: undefined, ms: 0 };
+  return { compiler, tsc: tsc.diags, crash: tsc.crash, ms: { compiler: compilerMs, tsc: tsc.ms } };
+}
+
 /**
  * Pure rule logic. Everything environmental is injectable:
  *   policyPath / policyText   the policy file (text overrides the file)
@@ -141,7 +256,10 @@ export function compileFiles(ts, files, { perFile = false, ambientFile = AMBIENT
  *   outRoot                   the out/ directory      features   corpus feature names
  *   exists / listDirs / listFiles   file system probes (default: the real fs)
  *   loadTs / hasReactTypes    the compiler loader and the @types/react probe
- *   typecheck                 async (ts, adapter, files) => Map<file, { syntax, semantic }>  (default: the real compiler)
+ *   typecheck                 async (ts, adapter, files) => Map<file, { syntax, semantic }>  (react; default: the real compiler)
+ *   hasVuePackages / vueRunner  the vue package probe (names of missing packages) and the Vue runner
+ *                             async (files) => { compiler: Map<file,{errors,warnings}>, tsc: Map<file,Diag[]>, crash?, ms }
+ *   onTimings                 called with { vue: { compiler, tsc } } (milliseconds) after the Vue runner ran; timing is never part of the report
  * @returns {{ ok: boolean, issues: {rule,file,msg}[], lines: string[], adapters: Record<string, {state:string, files:number}> }}
  */
 export async function checkTsTypecheck({
@@ -150,6 +268,7 @@ export async function checkTsTypecheck({
   listDirs = (d) => readdirSync(d).filter((n) => statSync(resolve(d, n)).isDirectory()),
   listFiles = (d, ext) => readdirSync(d).filter((n) => ext.some((e) => n.endsWith(e))),
   loadTs = defaultLoadTs, hasReactTypes = defaultHasReactTypes, typecheck,
+  hasVuePackages = defaultVueMissing, vueRunner = defaultVueRunner, onTimings = () => {},
 } = {}) {
   const issues = [];
   const add = (rule, file, msg) => issues.push({ rule, file, msg });
@@ -186,15 +305,22 @@ export async function checkTsTypecheck({
   // ---- environment ----
   const enabled = ADAPTERS.filter((a) => byAdapter.get(a)?.entry?.enabled === true);
   let ts = null;
+  const envMissing = new Set(); // TT0 names that stop an adapter from being compiled
   if (enabled.length) {
     ts = await loadTs();
-    if (!ts) add('TT0-env', 'typescript', 'the typescript package is not installed: run `npm ci`');
-    if (!hasReactTypes()) add('TT0-env', '@types/react', 'the @types/react package is not installed: run `npm ci`');
+    if (!ts) { add('TT0-env', 'typescript', 'the typescript package is not installed: run `npm ci`'); envMissing.add('typescript'); }
   }
-
-  // A broken environment (compiler or React types missing) is reported once as TT0; nothing is compiled, since
-  // every file would only repeat the missing-types error.
-  const envBroken = issues.some((i) => i.rule === 'TT0-env' && (i.file === 'typescript' || i.file === '@types/react'));
+  if (enabled.includes('react') && !hasReactTypes()) { add('TT0-env', '@types/react', 'the @types/react package is not installed: run `npm ci`'); envMissing.add('@types/react'); }
+  if (enabled.includes('vue')) {
+    for (const pkg of hasVuePackages()) {
+      add('TT0-env', pkg, pkg === 'vue-tsc' ? 'the vue-tsc binary (node_modules/vue-tsc/bin/vue-tsc.js) is missing: run `npm ci`' : `the ${pkg} package is not installed: run \`npm ci\``);
+      envMissing.add(pkg);
+    }
+  }
+  // A broken environment is reported once as TT0 per missing package; the adapter is not compiled, since every
+  // file would only repeat the missing-package error.
+  const needs = { react: ['typescript', '@types/react'], vue: ['typescript', 'vue', '@vue/compiler-sfc', 'lucide-vue-next', 'vue-tsc'] };
+  const brokenFor = (a) => (needs[a] ?? []).some((n) => envMissing.has(n));
 
   // ---- per adapter ----
   const fileCount = (list, a, n) => { adapters[a] = { state: list, files: n }; };
@@ -207,6 +333,7 @@ export async function checkTsTypecheck({
       continue;
     }
     // enabled
+    const envBroken = brokenFor(a);
     const ext = SOURCE_EXT[a];
     if (!ext) { add('TT3-policy', rel(policyPath), `adapter ${a} is enabled in the policy but this gate has no checker for it yet`); fileCount('fail', a, 0); continue; }
     const aOut = resolve(outRoot, a);
@@ -225,7 +352,8 @@ export async function checkTsTypecheck({
     for (const d of dirs) {
       if (!featureSet.has(d) && !PIN_ARTEFACT.test(d)) add('TT2-inventory', rel(resolve(aOut, d)), `${rel(resolve(aOut, d))} is neither a corpus feature nor a pin artefact directory (verify-*, _verify)`);
     }
-    if (ts && !envBroken && files.length) {
+    const warnLines = [];
+    if (a === 'react' && ts && !envBroken && files.length) {
       const results = await (typecheck ? typecheck(ts, a, files) : compileFiles(ts, files));
       for (const f of files) {
         const r = results.get(f) ?? { syntax: [], semantic: [] };
@@ -236,13 +364,33 @@ export async function checkTsTypecheck({
         add('TT1-type', rel(f), `${rel(f)}${where} TS${first.code} ${first.msg.split('\n')[0]} (${all.length} error${all.length === 1 ? '' : 's'} in file${r.syntax.length ? ', syntax error: semantic check skipped' : ''})`);
       }
     }
+    if (a === 'vue' && !envBroken && files.length) {
+      const res = await vueRunner(files);
+      onTimings({ vue: res.ms });
+      if (res.crash) add('TT0-env', 'vue-tsc', res.crash);
+      for (const f of files) {
+        // (a) the Vue compiler: every error fails, warnings are only printed
+        const c = res.compiler.get(f) ?? { errors: [], warnings: [] };
+        if (c.errors.length) {
+          const e = c.errors[0];
+          const where = e.line != null ? `:${e.line}${e.col != null ? `:${e.col}` : ''}` : '';
+          add('TV1-compiler', rel(f), `${rel(f)}${where} ${e.message} (${c.errors.length} error${c.errors.length === 1 ? '' : 's'} in file, vue-tsc skipped for this file)`);
+        }
+        for (const w of c.warnings) warnLines.push(`  warning (not failing) vue compiler ${rel(f)}: ${w}`);
+        // (b) vue-tsc
+        const d = res.tsc.get(f) ?? [];
+        if (d.length) add('TT1-type', rel(f), `${rel(f)}:${d[0].line}:${d[0].col} TS${d[0].code} ${d[0].msg.split('\n')[0]} (${d.length} error${d.length === 1 ? '' : 's'} in file)`);
+      }
+    }
     const failed = issues.length > before || envBroken;
     fileCount(failed ? 'fail' : 'pass', a, files.length);
+    const layers = a === 'vue' ? ': compiler + vue-tsc' : '';
+    lines.push(...warnLines.sort());
     lines.push(envBroken
       ? `ts typecheck: ${a} FAIL (environment not ready, see TT0)`
       : failed
-        ? `ts typecheck: ${a} FAIL (${issues.length - before} issue${issues.length - before === 1 ? '' : 's'}, ${files.length} files)`
-        : `ts typecheck: ${a} PASS (${files.length} files)`);
+        ? `ts typecheck: ${a} FAIL (${issues.length - before} issue${issues.length - before === 1 ? '' : 's'}, ${files.length} files${layers})`
+        : `ts typecheck: ${a} PASS (${files.length} files${layers})`);
   }
 
   const order = (r) => RULES.indexOf(r);
@@ -264,9 +412,13 @@ async function main() {
   const argv = process.argv.slice(2);
   const perFile = argv.includes('--per-file');
   const t0 = Date.now();
-  const r = await checkTsTypecheck({ typecheck: perFile ? async (ts, _a, files) => compileFiles(ts, files, { perFile: true }) : undefined });
+  let timings = null;
+  const r = await checkTsTypecheck({ typecheck: perFile ? async (ts, _a, files) => compileFiles(ts, files, { perFile: true }) : undefined, onTimings: (t) => { timings = t; } });
   console.log(formatReport(r));
-  if (argv.includes('--timing')) console.log(`wall time: ${((Date.now() - t0) / 1000).toFixed(1)} s (${perFile ? 'one program per file' : 'one program'})`);
+  if (argv.includes('--timing')) {
+    console.log(`wall time: ${((Date.now() - t0) / 1000).toFixed(1)} s (${perFile ? 'one program per file' : 'one program'})`);
+    if (timings?.vue) console.log(`vue runner: compiler ${(timings.vue.compiler / 1000).toFixed(1)} s, vue-tsc ${(timings.vue.tsc / 1000).toFixed(1)} s (one project)`);
+  }
   process.exit(r.ok ? 0 : 1);
 }
 

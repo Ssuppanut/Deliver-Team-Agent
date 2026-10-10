@@ -4,7 +4,7 @@
  * Each check pins a fix or a pipeline invariant so future edits can't silently
  * regress it. Run in CI and after any adapter change.
  */
-import { resolve, dirname, join, relative, sep } from 'node:path';
+import { resolve, dirname, join, relative, sep, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { specToIrFromFile, specToIr } from './spec-to-ir.mjs';
 import { generateReact } from '../../adapters/react/generate.mjs';
@@ -37,13 +37,13 @@ import { runMutationTesting, buildBundles, runGates as mutGates, buildBaseline a
 import { checkSurvivors, loadKnownSurvivors, formatSurvivorReport, KNOWN_SURVIVORS_PATH, CLUSTERS as MUT_CLUSTERS } from './mutation-known-survivors.mjs';
 import { checkTokenOutputs, RULES as RULES_T, OUTPUT_FILES as TOKEN_FILES } from './check-token-outputs.mjs';
 import { buildOutputs as buildTokenOutputs, resolveAliases as resolveTokenAliases } from '../../design-system/tokens-dtcg/scripts/build.mjs';
-import { checkTsTypecheck, compileFiles as ttCompile, loadPolicy as ttLoadPolicy, formatReport as ttFormat, RULES as RULES_TT, ADAPTERS as TT_ADAPTERS, POLICY_PATH as TT_POLICY_PATH, AMBIENT_FILE as TT_AMBIENT, defaultLoadTs as ttLoadTs } from './check-ts-typecheck.mjs';
+import { compileVueFiles as ttCompileVue, defaultVueRunner as ttVueRunner, runVueTsc as ttRunVueTsc, vueTsconfig as ttVueTsconfig, parseVueTscOutput as ttParseVueTsc, defaultVueMissing as ttVueMissing, VUE_TSC_BIN as TT_VUE_BIN, checkTsTypecheck, compileFiles as ttCompile, loadPolicy as ttLoadPolicy, formatReport as ttFormat, RULES as RULES_TT, ADAPTERS as TT_ADAPTERS, POLICY_PATH as TT_POLICY_PATH, AMBIENT_FILE as TT_AMBIENT, defaultLoadTs as ttLoadTs } from './check-ts-typecheck.mjs';
 import { topLevelParts } from '../../adapters/react/generate.mjs';
 import { RendererBase } from '../../adapters/_shared/renderer-base.mjs';
 import { corpusFeatures as corpusFeaturesTs, checkSwiftTypecheck, formatReport as formatSwiftReport, SKIP_MESSAGE as SWIFT_SKIP, RULES as RULES_S, typecheckArgs as swiftArgs, spawnRunner as swiftSpawn } from './check-swift-typecheck.mjs';
-import { readFileSync, existsSync, mkdtempSync, writeFileSync, rmSync, mkdirSync, symlinkSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync, mkdtempSync, writeFileSync, rmSync, mkdirSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { execSync } from 'node:child_process';
+import { execSync, spawnSync } from 'node:child_process';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '../..');
@@ -320,7 +320,7 @@ check('P20', 'routing: every SKILL.md description says "Do NOT use"', () => {
 check('P21', 'variant: a per-severity icon is emitted on every adapter', () => {
   const expect = [
     [generateReact, /"info": <Info aria-hidden="true" \/>/],
-    [generateVue, /"info": Info/],
+    [generateVue, /'info': Info/],
     [generateSvelte, /svelte:component this=\{\(\{ "info": Info/],
     [generateReactNative, /"info": <Info \/>/],
     [generateSwiftUI, /"info": "info\.circle"/],
@@ -2904,7 +2904,7 @@ await checkAsync('P151', 'TS-1 gate TT3 and NOT ENABLED: empty reason, wrong app
   await bad(withEntry({ enabled: 'yes' }), 'enabled must be true or false', 'a non-boolean enabled');
   await bad(ttPolicyOf(TT_GOOD_ENTRIES.map((e) => (e.adapter === 'vue' ? { ...e, extra: 1 } : e))), 'unknown field', 'an unknown field');
   // an enabled adapter other than react has no checker yet: refused, never silently passed
-  await bad(ttPolicyOf(TT_GOOD_ENTRIES.map((e) => (e.adapter === 'vue' ? { adapter: 'vue', enabled: true } : e))), 'no checker for it yet', 'enabling an adapter without a checker');
+  await bad(ttPolicyOf(TT_GOOD_ENTRIES.map((e) => (e.adapter === 'svelte' ? { adapter: 'svelte', enabled: true } : e))), 'no checker for it yet', 'enabling an adapter without a checker');
   // deterministic: same input, same report, sorted by rule order then file
   const a = await checkTsTypecheck(ttOpts({ policyText: withEntry({ reason: '', expires: '2020-01-01' }), tree: { react: { ...ttTree().react, zz: ['Z.tsx'], aa: ['A.tsx'] } } }));
   const b = await checkTsTypecheck(ttOpts({ policyText: withEntry({ reason: '', expires: '2020-01-01' }), tree: { react: { ...ttTree().react, zz: ['Z.tsx'], aa: ['A.tsx'] } } }));
@@ -2996,7 +2996,7 @@ check('P154', 'TS-1 React R1 and R2: several top-level elements are wrapped in a
   assert(/<div style=\{\{ gap[^\n]*\n      \{isEmpty \? \(/.test(cl), 'the outer conditional keeps its single { } container as a child');
 });
 
-check('P155', 'TS-1 React R3: the shared callbackSignatures() helper derives arity from the name (/change/i) and the value type from the bound control; React uses it, no other adapter does; zero-argument callbacks are called without arguments', () => {
+check('P155', 'TS-1 React R3: the shared callbackSignatures() helper derives arity from the name (/change/i) and the value type from the bound control; React and Vue use it, no other adapter does; zero-argument callbacks are called without arguments', () => {
   const sig = (spec, name) => new RendererBase(specToIrFromFile(spec), { adapter: 'x' }).callbackSignatures().get(name);
   const eq = (a, b, m) => assert(JSON.stringify(a) === JSON.stringify(b), `${m}: got ${JSON.stringify(a)}`);
   eq(sig(TT_ARTIFACT('checkbox-control'), 'onCheckedChange'), { takesValue: true, valueType: 'boolean' }, 'checkbox (boolean state)');
@@ -3014,8 +3014,8 @@ check('P155', 'TS-1 React R3: the shared callbackSignatures() helper derives ari
   assert(/: \(value: number\) => void;/.test(sc) && /\(Number\(e\.target\.value\)\)/.test(sc), 'a numeric callback is typed (value: number) => void and called with a number');
   assert(/: \(value: boolean\) => void;/.test(generateReact(TT_ARTIFACT('state-boolean'), '_verify').code), 'a boolean state callback is typed (value: boolean) => void');
   assert(/: \(value: string\) => void;/.test(generateReact(TT_ARTIFACT('form-field'), '_verify').code), 'a text callback stays (value: string) => void');
-  for (const a of ['vue', 'svelte', 'react-native', 'swiftui', 'compose']) assert(!/callbackSignatures|inputValueKind/.test(readFileSync(resolve(ROOT, `adapters/${a}/generate.mjs`), 'utf8')), `${a}: must not use the new helper in this change`);
-  assert(/callbackSignatures/.test(readFileSync(resolve(ROOT, 'adapters/react/generate.mjs'), 'utf8')), 'React uses the helper');
+  for (const a of ['svelte', 'react-native', 'swiftui', 'compose']) assert(!/callbackSignatures|inputValueKind/.test(readFileSync(resolve(ROOT, `adapters/${a}/generate.mjs`), 'utf8')), `${a}: must not use the new helper in this change`);
+  for (const a of ['react', 'vue']) assert(/callbackSignatures/.test(readFileSync(resolve(ROOT, `adapters/${a}/generate.mjs`), 'utf8')), `${a} uses the helper`);
 });
 
 check('P156', 'TS-1 React R4 to R6: a lookup map has an entry for every enum value (null or {} when none); a slot is declared as an optional React.ReactNode prop; a checkbox or switch is a checkbox input with checked and e.target.checked and keeps its role; other input types are unchanged', () => {
@@ -3041,14 +3041,14 @@ check('P156', 'TS-1 React R4 to R6: a lookup map has an entry for every enum val
   }
 });
 
-await checkAsync('P157', 'TS-1 wiring: ci.mjs runs the gate after generation and before verify-patches and counts a failure; the real policy enables react only with the three NOT ENABLED reasons and counts; the real generated React output type-checks; package.json and the lock pin TypeScript 6, React 19 and @types/react 19; the workflow file is unchanged', async () => {
+await checkAsync('P157', 'TS-1 wiring: ci.mjs runs the gate after generation and before verify-patches and counts a failure; the real policy enables react and vue with the two NOT ENABLED reasons and counts; the real generated React and Vue output passes; package.json and the lock pin TypeScript 6, React 19 and @types/react 19; the workflow file is unchanged', async () => {
   const ci = readFileSync(resolve(ROOT, '_shared/scripts/ci.mjs'), 'utf8');
   const gateAt = ci.indexOf("run('node _shared/scripts/check-ts-typecheck.mjs')"), genAt = ci.indexOf("run(`node _shared/scripts/e2e-multi.mjs"), vpAt = ci.indexOf("run('node _shared/scripts/verify-patches.mjs')");
   assert(genAt > 0 && gateAt > genAt && gateAt < vpAt, 'ci.mjs must run the TypeScript gate after the generation steps and before verify-patches');
   assert(/failures\+\+/.test(ci.slice(gateAt, vpAt)), 'a gate failure must count as a CI failure');
   const { entries, problem } = ttLoadPolicy({ path: TT_POLICY_PATH });
-  assert(!problem && JSON.stringify(entries.map((e) => [e.adapter, e.enabled])) === JSON.stringify([['react', true], ['react-native', false], ['vue', false], ['svelte', false]]), `the real policy enables react only: ${problem} ${JSON.stringify(entries.map((e) => [e.adapter, e.enabled]))}`);
-  const expect = { 'react-native': '28 of 54', vue: '15 of 54', svelte: '14 of 54' };
+  assert(!problem && JSON.stringify(entries.map((e) => [e.adapter, e.enabled])) === JSON.stringify([['react', true], ['react-native', false], ['vue', true], ['svelte', false]]), `the real policy enables react and vue: ${problem} ${JSON.stringify(entries.map((e) => [e.adapter, e.enabled]))}`);
+  const expect = { 'react-native': '28 of 54', svelte: '14 of 54' };
   for (const e of entries.filter((x) => !x.enabled)) {
     assert(e.approver === TT_APPROVER && String(e.expires).slice(0, 10) === '2027-03-31', `${e.adapter}: approver and expiry`);
     assert(e.reason.includes(expect[e.adapter]) && /fixes planned in their own PR, see docs\/SUPPORTED-VERSIONS\.md/.test(e.reason), `${e.adapter}: the reason must carry the count and the pointer: ${e.reason}`);
@@ -3058,9 +3058,13 @@ await checkAsync('P157', 'TS-1 wiring: ci.mjs runs the gate after generation and
     const art = resolve(ROOT, '.claude/artifacts', f, 'design-spec.yaml');
     generateReact(existsSync(art) ? art : resolve(ROOT, '_shared/schemas/examples', `${f}.spec.yaml`), f);
   }
+  for (const f of corpusFeaturesTs()) {
+    const art = resolve(ROOT, '.claude/artifacts', f, 'design-spec.yaml');
+    generateVue(existsSync(art) ? art : resolve(ROOT, '_shared/schemas/examples', `${f}.spec.yaml`), f);
+  }
   const real = await checkTsTypecheck({ now: TT_NOW });
-  assert(real.ok && /^ts typecheck: react PASS \(54 files\)$/m.test(ttFormat(real)), `the real React output must type-check: ${ttFormat(real).slice(0, 400)}`);
-  assert(real.lines.filter((l) => /NOT ENABLED/.test(l)).length === 3, 'three NOT ENABLED lines print on every run');
+  assert(real.ok && /^ts typecheck: react PASS \(54 files\)$/m.test(ttFormat(real)) && /^ts typecheck: vue PASS \(54 files: compiler \+ vue-tsc\)$/m.test(ttFormat(real)), `the real React and Vue output must pass: ${ttFormat(real).slice(0, 400)}`);
+  assert(real.lines.filter((l) => /NOT ENABLED/.test(l)).length === 2, 'two NOT ENABLED lines print on every run');
   const pkg = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf8'));
   const d = pkg.devDependencies;
   assert(/^\^6\./.test(d.typescript) && /^\^19\./.test(d.react) && /^\^19\./.test(d['@types/react']) && d['lucide-react'], `devDependencies: ${JSON.stringify(d)}`);
@@ -3082,6 +3086,246 @@ check('P158', 'TS-1 docs: docs/BREADTH-MATRIX.md has a TS-1 section, docs/SUPPOR
   for (const needle of ['React 19', 'Vue 3.5', 'Svelte 5', 'React Native 0.87', 'TypeScript ^6', 'TypeScript 7', 'Node 20', 'Node 22', '@lucide/vue', '@lucide/svelte', 'declared, gate pending', 'React 18', 'Svelte 4']) assert(v.includes(needle), `SUPPORTED-VERSIONS.md must mention ${needle}`);
   const vl = readFileSync(resolve(ROOT, 'docs/VERIFICATION-LAYERS.md'), 'utf8');
   assert(/check-ts-typecheck\.mjs/.test(vl) && /\| TypeScript typecheck gate/.test(vl), 'VERIFICATION-LAYERS.md must have a row for the TypeScript typecheck gate');
+});
+
+
+// =====================================================================================================
+// TS-2: the generated Vue compiles and type-checks; Vue is enabled in the TypeScript gate (TV1, vue-tsc).
+// Rule-logic pins inject fakes; the real-tool pins run the real @vue/compiler-sfc and the real vue-tsc on tiny
+// fixtures on every OS (never skipped). The clock is the pinned D3_NOW, never a real expiry date.
+// =====================================================================================================
+const TV_ENTRIES = [{ adapter: 'react', enabled: true }, ttEntry('react-native'), { adapter: 'vue', enabled: true }, ttEntry('svelte')];
+const TV_POLICY = ttPolicyOf(TV_ENTRIES);
+const tvTree = () => ({ react: ttTree().react, vue: { alpha: ['Alpha.vue'], beta: ['Beta.vue'], _verify: ['X.vue'], 'verify-z': ['Z.vue'] } });
+const tvFake = (script = {}, calls = []) => async (files) => {
+  calls.push(files.map((f) => relative(ROOT, f)));
+  return {
+    compiler: new Map(files.map((f) => [f, script.compiler?.[basename(f)] ?? { errors: [], warnings: [] }])),
+    tsc: new Map(files.map((f) => [f, script.tsc?.[basename(f)] ?? []])),
+    crash: script.crash, ms: { compiler: 1, tsc: 2 },
+  };
+};
+const tvOpts = (over = {}) => ({ ...ttOpts({ policyText: TV_POLICY, tree: tvTree(), ...over }), hasVuePackages: over.hasVuePackages ?? (() => []), vueRunner: over.vueRunner ?? tvFake() });
+
+await checkAsync('P159', 'TS-2 gate Vue runner logic (fakes): TV1 compiler errors fail with the raw message and position, vue-tsc errors are TT1, warnings print without failing, a missing vue package or vue-tsc binary and a vue-tsc crash are TT0 (nothing is compiled), the runner gets only the corpus .vue files', async () => {
+  const calls = [];
+  const ok = await checkTsTypecheck(tvOpts({ vueRunner: tvFake({ compiler: { 'Alpha.vue': { errors: [], warnings: ['a tip'] } } }, calls) }));
+  assert(ok.ok && ok.lines.includes('ts typecheck: vue PASS (2 files: compiler + vue-tsc)') && ok.lines.includes('ts typecheck: react PASS (2 files)'), `the good fixture must pass: ${JSON.stringify(ok.issues)} ${ok.lines.join(' | ')}`);
+  assert(ok.lines.includes('  warning (not failing) vue compiler out/vue/alpha/Alpha.vue: a tip') && ok.lines.indexOf('  warning (not failing) vue compiler out/vue/alpha/Alpha.vue: a tip') < ok.lines.indexOf('ts typecheck: vue PASS (2 files: compiler + vue-tsc)'), 'a compiler warning is printed and does not fail');
+  assert(JSON.stringify(calls) === JSON.stringify([['out/vue/alpha/Alpha.vue', 'out/vue/beta/Beta.vue']]), `the runner gets only the corpus .vue files, in order, not _verify or verify-*: ${JSON.stringify(calls)}`);
+  const bad = await checkTsTypecheck(tvOpts({ vueRunner: tvFake({
+    compiler: { 'Alpha.vue': { errors: [{ message: 'Error parsing JavaScript expression: Unexpected token (1:87)', line: 14, col: 48 }, { message: 'second', line: 15, col: 1 }], warnings: [] } },
+    tsc: { 'Beta.vue': [{ code: 2345, line: 13, col: 99, msg: "Argument of type 'boolean' is not assignable to parameter of type 'string'." }, { code: 2554, line: 14, col: 1, msg: 'x' }] },
+  }) }));
+  const tv = bad.issues.find((i) => i.rule === 'TV1-compiler'), tt = bad.issues.find((i) => i.rule === 'TT1-type' && i.file.endsWith('.vue'));
+  assert(tv.msg === 'out/vue/alpha/Alpha.vue:14:48 Error parsing JavaScript expression: Unexpected token (1:87) (2 errors in file, vue-tsc skipped for this file)', `TV1 names the file, raw message, position and count: ${tv.msg}`);
+  assert(tt.msg === "out/vue/beta/Beta.vue:13:99 TS2345 Argument of type 'boolean' is not assignable to parameter of type 'string'. (2 errors in file)", `TT1 from vue-tsc: ${tt.msg}`);
+  assert(bad.lines.includes('ts typecheck: vue FAIL (2 issues, 2 files: compiler + vue-tsc)'), `FAIL line: ${bad.lines.join(' | ')}`);
+  // TT0: a missing package or the binary, nothing is compiled, react is unaffected
+  const spy = [];
+  const env = await checkTsTypecheck(tvOpts({ hasVuePackages: () => ['vue-tsc', 'lucide-vue-next'], vueRunner: tvFake({}, spy) }));
+  assert(spy.length === 0 && ttHas(env, 'TT0-env', 'node_modules/vue-tsc/bin/vue-tsc.js') && ttHas(env, 'TT0-env', 'lucide-vue-next') && env.issues.every((i) => /run `npm ci`/.test(i.msg)), 'a missing vue-tsc binary or lucide package is TT0 saying run npm ci, and the runner is not called');
+  assert(env.lines.includes('ts typecheck: vue FAIL (environment not ready, see TT0)') && env.lines.includes('ts typecheck: react PASS (2 files)'), 'only vue reports the broken environment');
+  assert(ttHas(await checkTsTypecheck(tvOpts({ hasVuePackages: () => ['vue'] })), 'TT0-env', 'the vue package is not installed'), 'a missing vue package is TT0');
+  const crash = await checkTsTypecheck(tvOpts({ vueRunner: tvFake({ crash: 'vue-tsc exited 1 without a parseable error: boom' }) }));
+  assert(ttHas(crash, 'TT0-env', 'vue-tsc exited 1 without a parseable error: boom'), 'a vue-tsc crash is TT0, not a silent pass');
+  const noVue = await checkTsTypecheck(tvOpts({ tree: { react: ttTree().react, vue: { alpha: ['Alpha.vue'], _verify: ['X.vue'] } } }));
+  assert(ttHas(noVue, 'TT2-inventory', 'corpus feature beta has no vue output'), 'a corpus feature with no .vue output is TT2');
+  const stray = await checkTsTypecheck(tvOpts({ tree: { react: ttTree().react, vue: { ...tvTree().vue, stray: ['S.vue'] } } }));
+  assert(ttHas(stray, 'TT2-inventory', 'out/vue/stray'), 'an unexpected directory under out/vue is TT2');
+  // a disabled vue is not run at all (the TS-1 behaviour)
+  const off = [];
+  const disabled = await checkTsTypecheck(tvOpts({ policyText: ttPolicyOf(TT_GOOD_ENTRIES), vueRunner: tvFake({}, off) }));
+  assert(off.length === 0 && disabled.lines.some((l) => l.startsWith('ts typecheck: vue NOT ENABLED')), 'a disabled vue is printed NOT ENABLED and not run');
+});
+
+await checkAsync('P160', 'TS-2 policy: the real policy enables react and vue and keeps react-native and svelte NOT ENABLED with their reasons; a disabled adapter past its expiry still fails; the report is deterministic and ordered by rule', async () => {
+  const { entries, problem } = ttLoadPolicy({ path: TT_POLICY_PATH });
+  assert(!problem && JSON.stringify(entries.map((e) => [e.adapter, e.enabled])) === JSON.stringify([['react', true], ['react-native', false], ['vue', true], ['svelte', false]]), 'react and vue enabled, react-native and svelte disabled');
+  const vue = entries.find((e) => e.adapter === 'vue');
+  assert(JSON.stringify(Object.keys(vue)) === JSON.stringify(['adapter', 'enabled']), 'the vue entry carries no NOT ENABLED reason, approver or expiry any more');
+  const rn = entries.find((e) => e.adapter === 'react-native'), sv = entries.find((e) => e.adapter === 'svelte');
+  assert(rn.reason.includes('28 of 54') && sv.reason.includes('14 of 54') && rn.approver === TT_APPROVER && sv.approver === TT_APPROVER && String(rn.expires).slice(0, 10) === '2027-03-31' && String(sv.expires).slice(0, 10) === '2027-03-31', 'react-native and svelte entries are unchanged');
+  const r = await checkTsTypecheck(tvOpts());
+  assert(r.lines.filter((l) => /NOT ENABLED/.test(l)).length === 2 && r.lines.some((l) => l.startsWith('ts typecheck: react-native NOT ENABLED (policy, expires 2027-03-31)')) && r.lines.some((l) => l.startsWith('ts typecheck: svelte NOT ENABLED (policy, expires 2027-03-31)')), 'two NOT ENABLED lines print: react-native and svelte');
+  const past = await checkTsTypecheck(tvOpts({ policyText: ttPolicyOf(TV_ENTRIES.map((e) => (e.adapter === 'svelte' ? ttEntry('svelte', { expires: '2026-10-05' }) : e))) }));
+  assert(ttHas(past, 'TT3-policy', 'svelte was disabled until 2026-10-05'), 'a disabled adapter past its expiry fails');
+  const script = { compiler: { 'Beta.vue': { errors: [{ message: 'm', line: 1, col: 1 }], warnings: [] } }, tsc: { 'Alpha.vue': [{ code: 2304, line: 2, col: 3, msg: 'x' }] } };
+  const mk = () => checkTsTypecheck(tvOpts({ policyText: ttPolicyOf(TV_ENTRIES.map((e) => (e.adapter === 'svelte' ? ttEntry('svelte', { reason: '' }) : e))), tree: { react: ttTree().react, vue: { ...tvTree().vue, zz: ['Z.vue'] } }, vueRunner: tvFake(script) }));
+  const a = await mk(), b = await mk();
+  assert(JSON.stringify(a) === JSON.stringify(b) && ttFormat(a) === ttFormat(b), 'two runs must produce identical reports');
+  const order = a.issues.map((i) => RULES_TT.indexOf(i.rule));
+  assert(order.every((x, i) => i === 0 || order[i - 1] <= x) && a.issues.map((i) => i.rule).includes('TV1-compiler') && a.issues.map((i) => i.rule).includes('TT2-inventory') && a.issues.map((i) => i.rule).includes('TT3-policy'), 'issues sort by rule order (TT0, TT1, TV1, TT2, TT3)');
+  assert(JSON.stringify(RULES_TT) === JSON.stringify(['TT0-env', 'TT1-type', 'TV1-compiler', 'TT2-inventory', 'TT3-policy']), 'the rule list');
+});
+
+await checkAsync('P161', 'TS-2 vue-tsc invocation: ONE process for all files, with the repo node binary and vue-tsc.js (no npx), a tsconfig and an ambient *.css declaration written into an OS temp directory (never the repo) that is removed afterwards; the tsconfig content and the output parser', async () => {
+  const cfgText = JSON.parse(ttVueTsconfig(['/a/X.vue', '/b/Y.vue'], '/t/ambient.d.ts'));
+  assert(JSON.stringify(cfgText.compilerOptions) === JSON.stringify({ target: 'ES2022', module: 'ESNext', moduleResolution: 'Bundler', strict: true, noEmit: true, skipLibCheck: true, esModuleInterop: true, lib: ['ES2023', 'DOM'], jsx: 'preserve', types: [] }), 'the compiler options are the probe options');
+  assert(cfgText.vueCompilerOptions.target === 3.5 && JSON.stringify(cfgText.include) === JSON.stringify(['/a/X.vue', '/b/Y.vue', '/t/ambient.d.ts']), 'vueCompilerOptions target 3.5 and the include list');
+  const before = readdirSync(tmpdir()).filter((n) => n.startsWith('ts-gate-vue-')).length;
+  const seen = [];
+  let spawns = 0;
+  const files = Array.from({ length: 30 }, (_, i) => `/x/f${i}.vue`);
+  const out = ttRunVueTsc(files, {
+    bin: '/fake/vue-tsc.js', cwd: ROOT,
+    onTsconfig: ({ dir, cfg, text }) => seen.push({ dir, cfg, text, ambient: readFileSync(join(dir, 'ambient.d.ts'), 'utf8'), cfgOnDisk: readFileSync(cfg, 'utf8') }),
+    spawn: (cmd, args) => { spawns++; seen.push({ cmd, args }); return { status: 1, stdout: 'out/vue/a/A.vue(3,4): error TS2345: first line\n  continuation line\nout/vue/a/A.vue(5,6): error TS2554: second\n', stderr: '' }; },
+  });
+  const t = seen.find((x) => x.dir), c = seen.find((x) => x.cmd);
+  assert(spawns === 1, `one vue-tsc process for ${files.length} files, got ${spawns}`);
+  assert(c.cmd === process.execPath && c.args[0] === '/fake/vue-tsc.js' && JSON.stringify(c.args.slice(1)) === JSON.stringify(['--noEmit', '-p', t.cfg, '--pretty', 'false']), `node + vue-tsc.js, no npx: ${JSON.stringify(c)}`);
+  assert(t.dir.startsWith(tmpdir()) && !t.dir.startsWith(ROOT) && t.cfg.startsWith(tmpdir()), 'the tsconfig lives in an OS temp directory, not in the repo');
+  assert(t.ambient === "declare module '*.css';\n" && t.cfgOnDisk === t.text && JSON.parse(t.text).include.length === 31, 'the ambient declaration and the tsconfig are written for the process');
+  assert(!existsSync(t.dir) && readdirSync(tmpdir()).filter((n) => n.startsWith('ts-gate-vue-')).length === before, 'the temp directory is removed afterwards');
+  const d = out.diags.get(resolve(ROOT, 'out/vue/a/A.vue'));
+  assert(d.length === 2 && d[0].code === 2345 && d[0].line === 3 && d[0].col === 4 && d[0].msg === 'first line' && d[1].code === 2554 && out.crash === undefined, 'the output parser reads path(line,col): error TSnnnn and ignores continuation lines');
+  const crash = ttRunVueTsc(files, { bin: '/fake/vue-tsc.js', spawn: () => ({ status: 2, stdout: '', stderr: 'node: cannot find module\n' }) });
+  assert(/vue-tsc exited 2 without a parseable error: node: cannot find module/.test(crash.crash), 'a non-zero exit with no parseable error is a crash, never a pass');
+  assert(ttParseVueTsc('nothing here\n').size === 0, 'no error lines, no diagnostics');
+});
+
+const TV_GOOD_VUE = `<script setup lang="ts">\nimport '../../_shared/tokens/tokens.css';\n\ndefineProps<{\n  label: string;\n  checked: boolean;\n  onChange: (value: boolean) => void\n}>();\n</script>\n\n<template>\n  <label for="g">{{ label }}</label>\n  <input id="g" type="checkbox" :checked="checked" @change="onChange(($event.target as HTMLInputElement).checked)" />\n</template>\n`;
+const TV_QUOTE_VUE = TV_GOOD_VUE.replace(`type="checkbox" :checked="checked"`, `:style="{ ...({ "a": { 'color': 'red' } })['a'] }"`);
+const TV_TYPE_VUE = TV_GOOD_VUE.replace('(value: boolean) => void', '(value: string) => void');
+const tvTmp = (files) => {
+  const dir = mkdtempSync(join(tmpdir(), 'ts2-'));
+  symlinkSync(resolve(ROOT, 'node_modules'), join(dir, 'node_modules'));
+  const abs = {};
+  for (const [rel, text] of Object.entries(files)) { const f = join(dir, 'out/vue', rel); mkdirSync(dirname(f), { recursive: true }); writeFileSync(f, text); abs[rel] = f; }
+  return { dir, abs };
+};
+
+await checkAsync('P162', 'TS-2 gate with the REAL @vue/compiler-sfc and the REAL vue-tsc (every OS, never skipped): a good .vue passes both layers; a quote-broken attribute is TV1 with a position; a type error is TT1 from vue-tsc (TS2345); all files go through ONE vue-tsc process; the ambient *.css declaration resolves the missing relative import (without it TS2882)', async () => {
+  assert(existsSync(TT_VUE_BIN) && ttVueMissing().length === 0, `vue, @vue/compiler-sfc, vue-tsc and lucide-vue-next must be installed: ${ttVueMissing()}`);
+  const { dir } = tvTmp({ 'good/Good.vue': TV_GOOD_VUE });
+  try {
+    let spawns = 0;
+    const vueRunner = async (files) => {
+      const sfc = await import('@vue/compiler-sfc');
+      const compiler = ttCompileVue(sfc.default ?? sfc, files);
+      const typed = files.filter((f) => !compiler.get(f).errors.length);
+      const tsc = ttRunVueTsc(typed, { spawn: (...a) => { spawns++; return spawnSync(...a); } });
+      return { compiler, tsc: tsc.diags, crash: tsc.crash, ms: { compiler: 0, tsc: tsc.ms } };
+    };
+    const base = { policyText: ttPolicyOf([ttEntry('react'), ttEntry('react-native'), { adapter: 'vue', enabled: true }, ttEntry('svelte')]), now: TT_NOW, outRoot: join(dir, 'out'), vueRunner };
+    const only = await checkTsTypecheck({ ...base, features: ['good'] });
+    assert(only.lines.includes('ts typecheck: vue PASS (1 files: compiler + vue-tsc)') && !only.issues.length, `the good fixture must pass both layers: ${JSON.stringify(only.issues)} ${only.lines.join('|')}`);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+  const three = tvTmp({ 'good/Good.vue': TV_GOOD_VUE, 'quote/Quote.vue': TV_QUOTE_VUE, 'type/Type.vue': TV_TYPE_VUE });
+  try {
+    let spawns = 0;
+    const vueRunner = async (files) => {
+      const sfc = await import('@vue/compiler-sfc');
+      const compiler = ttCompileVue(sfc.default ?? sfc, files);
+      const typed = files.filter((f) => !compiler.get(f).errors.length);
+      const tsc = ttRunVueTsc(typed, { spawn: (...a) => { spawns++; return spawnSync(...a); } });
+      return { compiler, tsc: tsc.diags, crash: tsc.crash, ms: { compiler: 0, tsc: tsc.ms } };
+    };
+    const r = await checkTsTypecheck({ policyText: ttPolicyOf([ttEntry('react'), ttEntry('react-native'), { adapter: 'vue', enabled: true }, ttEntry('svelte')]), now: TT_NOW, outRoot: join(three.dir, 'out'), features: ['good', 'quote', 'type'], vueRunner });
+    const tv = r.issues.find((i) => i.rule === 'TV1-compiler'), tt = r.issues.find((i) => i.rule === 'TT1-type');
+    assert(r.issues.length === 2 && !r.issues.some((i) => i.file.endsWith('Good.vue')), `exactly the two bad fixtures fail: ${JSON.stringify(r.issues)}`);
+    assert(/Quote\.vue:\d+:\d+ Error parsing JavaScript expression/.test(tv.msg) && /vue-tsc skipped for this file/.test(tv.msg), `quote-broken fixture is TV1 with a position: ${tv.msg}`);
+    assert(/Type\.vue:13:\d+ TS2345 Argument of type 'boolean' is not assignable to parameter of type 'string'\./.test(tt.msg), `type-error fixture is TT1 from vue-tsc: ${tt.msg}`);
+    assert(spawns === 1, `one vue-tsc process for the whole tree, got ${spawns}`);
+    // the ambient declaration: without it TypeScript reports TS2882 for the missing relative css import
+    const cfgDir = mkdtempSync(join(tmpdir(), 'ts2-cfg-'));
+    try {
+      const good = [three.abs['good/Good.vue']];
+      const cfg = join(cfgDir, 'tsconfig.json');
+      writeFileSync(cfg, ttVueTsconfig(good, join(cfgDir, 'no-such-ambient.d.ts')));
+      const run = spawnSync(process.execPath, [TT_VUE_BIN, '--noEmit', '-p', cfg, '--pretty', 'false'], { cwd: ROOT, encoding: 'utf8' });
+      assert(/TS2882/.test(run.stdout + run.stderr), `without the ambient declaration vue-tsc reports TS2882: ${(run.stdout + run.stderr).slice(0, 200)}`);
+    } finally { rmSync(cfgDir, { recursive: true, force: true }); }
+    assert(!existsSync(join(three.dir, 'out/_shared')), 'no token file is copied into out/');
+  } finally { rmSync(three.dir, { recursive: true, force: true }); }
+});
+
+// The original Vue defects, in the shape they were generated before TS-2.
+const TV_DEFECT = (extraScript, tpl) => `<script setup lang="ts">\n${extraScript}\n</script>\n\n<template>\n${tpl}\n</template>\n`;
+const TV_DEFECTS = {
+  V1: { layer: 'compiler', tsx: TV_DEFECT(`defineProps<{ severity: 'info' | 'error' }>();`, `  <div :style="{ ...({ "info": { 'color': 'red' }, "error": { 'color': 'blue' } })[severity] }"></div>`) },
+  V2: { layer: 'tsc', code: 2345, tsx: TV_DEFECT(`defineProps<{ on: (value: string) => void }>();`, `  <input type="checkbox" @change="on(($event.target as HTMLInputElement).checked)" />`) },
+  V2b: { layer: 'tsc', code: 2554, tsx: TV_DEFECT(`defineProps<{ onToggle: () => void }>();`, `  <input type="checkbox" @change="onToggle(($event.target as HTMLInputElement).checked)" />`) },
+  V3: { layer: 'tsc', code: 2339, tsx: TV_DEFECT(`import { Info } from 'lucide-vue-next';\ndefineProps<{ status: 'default' | 'success' }>();`, `  <component :is="({ 'success': Info })[status]" />`) },
+};
+await checkAsync('P163', 'TS-2 fired-gate pins: the original quoting defect (V1) is rejected by the real Vue compiler and the original callback-type, zero-argument and missing-enum-entry defects (V2, V3) by the real vue-tsc; the original checkbox-as-text-input shape (V4) still type-checks, so V4 is guarded by the markup pins only', async () => {
+  const files = Object.fromEntries(Object.entries(TV_DEFECTS).map(([k, v]) => [`${k}/${k}.vue`, v.tsx]));
+  files['V4/V4.vue'] = TV_DEFECT(`defineProps<{ checked: boolean; onChange: (value: string) => void }>();`, `  <input type="text" :value="checked" @input="onChange(($event.target as HTMLInputElement).value)" role="checkbox" />`);
+  const { dir, abs } = tvTmp(files);
+  try {
+    const sfc = await import('@vue/compiler-sfc');
+    const all = Object.values(abs);
+    const compiled = ttCompileVue(sfc.default ?? sfc, all);
+    for (const [k, v] of Object.entries(TV_DEFECTS)) assert((compiled.get(abs[`${k}/${k}.vue`]).errors.length > 0) === (v.layer === 'compiler'), `${k}: the compiler verdict`);
+    const typed = all.filter((f) => !compiled.get(f).errors.length);
+    const tsc = ttRunVueTsc(typed);
+    for (const [k, v] of Object.entries(TV_DEFECTS)) {
+      if (v.layer !== 'tsc') continue;
+      const d = tsc.diags.get(abs[`${k}/${k}.vue`]) ?? [];
+      assert(d.some((x) => x.code === v.code), `${k}: vue-tsc must report TS${v.code}, got ${JSON.stringify(d.map((x) => x.code))}`);
+    }
+    assert(!(tsc.diags.get(abs['V4/V4.vue']) ?? []).length && !compiled.get(abs['V4/V4.vue']).errors.length, 'V4 (a checkbox rendered as type="text") passes both tools: only the markup pins can guard it');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+const TV_ARTIFACT = (f) => resolve(ROOT, '.claude/artifacts', f, 'design-spec.yaml');
+await checkAsync('P164', 'TS-2 Vue adapter V1 to V4: no double quote inside an attribute expression (every corpus spec with a variant compiles with the real Vue compiler; a quote or backslash in a case value is escaped, a quote in a static attribute is &quot;); callbacks come from the shared helper; every enum value has a lookup entry; checkbox and switch are type="checkbox" with :checked and @change; other input types unchanged', async () => {
+  const sfc = await import('@vue/compiler-sfc');
+  const names = ['alert', 'badge', 'banner', 'button', 'stat-card', 'status-default-intent', 'variant-padding-radius'];
+  const gen = names.map((n) => generateVue(TV_ARTIFACT(n), '_verify'));
+  const res = ttCompileVue(sfc.default ?? sfc, gen.map((g) => g.file));
+  for (const g of gen) {
+    assert(!/\(\{ "/.test(g.code) && !/, "[A-Za-z]+": /.test(g.code), `${g.component}: a lookup map key must not be double quoted inside an attribute`);
+    assert(res.get(g.file).errors.length === 0, `${g.component}: the real Vue compiler rejects it: ${JSON.stringify(res.get(g.file).errors[0])}`);
+  }
+  // escaping: a single quote in a case value (text check) and a double quote and an ampersand in a static attribute (compiles)
+  const sp = ttSpec(`component: Q\ncategory: display\nprops:\n  - { name: tone, type: enum, values: [a, "b'c"], required: true }\n  - { name: pic, type: string, required: true }\nroot:\n  el: container\n  variant:\n    prop: tone\n    cases:\n      a: { background: color.bg.muted }\n      "b'c": { background: color.bg.subtle, icon: icon.info }\n  children:\n    - el: media\n      src: { kind: ref, value: pic }\n      alt: { kind: literal, value: 'say "hi" & bye' }\n`);
+  const sp2 = ttSpec(`component: Q2\ncategory: display\nprops:\n  - { name: pic, type: string, required: true }\nroot:\n  el: media\n  src: { kind: ref, value: pic }\n  alt: { kind: literal, value: 'say "hi" & bye' }\n`);
+  try {
+    const q = generateVue(sp.p, '_verify');
+    assert(q.code.includes(`'b\\'c': {`) && q.code.includes(`alt="say &quot;hi&quot; &amp; bye"`), 'a quote in a case value is escaped and a quote in a static attribute is &quot;');
+    const q2 = generateVue(sp2.p, '_verify');
+    assert(q2.code.includes(`alt="say &quot;hi&quot; &amp; bye"`) && ttCompileVue(sfc.default ?? sfc, [q2.file]).get(q2.file).errors.length === 0, 'the escaped static attribute compiles');
+  } finally { rmSync(sp.dir, { recursive: true, force: true }); rmSync(sp2.dir, { recursive: true, force: true }); }
+  // V2 callbacks
+  assert(/onCheckedChange: \(value: boolean\) => void/.test(generateVue(TV_ARTIFACT('checkbox-control'), '_verify').code), 'a boolean state callback is typed boolean');
+  assert(/\(value: number\) => void/.test(generateVue(TV_ARTIFACT('slider-control'), '_verify').code) && /@input="onValueChange\(Number\(/.test(generateVue(TV_ARTIFACT('slider-control'), '_verify').code), 'a numeric callback is typed number and called with a number');
+  assert(/\(value: string\) => void/.test(generateVue(TV_ARTIFACT('form-field'), '_verify').code), 'a text callback stays string');
+  const sw = generateVue(TV_ARTIFACT('switch-control'), '_verify').code;
+  assert(/onToggle: \(\) => void/.test(sw) && /@change="onToggle\(\)"/.test(sw) && !/onToggle\(\(\$event/.test(sw), 'a zero-argument callback is typed () => void and called without arguments');
+  // V3 lookup maps
+  assert(/'error': CircleAlert, 'default': null \}\)\[status\]/.test(generateVue(TV_ARTIFACT('badge'), '_verify').code), 'an enum value with no icon maps to null');
+  const part = ttSpec(`component: Tag\ncategory: display\nprops:\n  - { name: tone, type: enum, values: [a, b, c], required: true }\nroot:\n  el: container\n  variant:\n    prop: tone\n    cases:\n      a: { background: color.bg.muted }\n      b: { background: color.bg.subtle, icon: icon.info }\n`);
+  try {
+    const tag = generateVue(part.p, '_verify').code;
+    assert(/'a': \{ 'background-color': [^}]*\}, 'b': \{ 'background-color': [^}]*\}, 'c': \{\} \}\)\[tone\]/.test(tag) && /'b': Info, 'a': null, 'c': null/.test(tag), 'a style map has {} and an icon map has null for the missing enum values');
+  } finally { rmSync(part.dir, { recursive: true, force: true }); }
+  // V4 checkbox and switch
+  assert(/<input id="checkbox-checked" type="checkbox" :checked="checked" @change="onChange\(\(\$event\.target as HTMLInputElement\)\.checked\)" role="checkbox"/.test(generateVue(TV_ARTIFACT('checkbox'), '_verify').code), 'the checkbox spec is a checkbox input with :checked and @change reading target.checked, role kept');
+  assert(/type="checkbox" :checked="checked" @change="onToggle\(\)" role="switch"/.test(generateVue(TV_ARTIFACT('switch-toggle'), '_verify').code), 'the switch role is a checkbox input and keeps its role');
+  for (const [type, arg] of [['text', '($event.target as HTMLInputElement).value'], ['email', '($event.target as HTMLInputElement).value'], ['password', '($event.target as HTMLInputElement).value'], ['number', 'Number(($event.target as HTMLInputElement).value)']]) {
+    const f = ttSpec(`component: F\ncategory: input\nprops:\n  - { name: v, type: ${type === 'number' ? 'number' : 'string'}, required: true }\n  - { name: onVChange, type: function, required: true }\nroot:\n  el: input\n  input: { valueProp: v, changeProp: onVChange, inputType: ${type} }\n`);
+    try { assert(generateVue(f.p, '_verify').code.includes(`type="${type}" :value="v" @input="onVChange(${arg})"`), `inputType ${type}: unexpected output`); } finally { rmSync(f.dir, { recursive: true, force: true }); }
+  }
+});
+
+check('P165', 'TS-2 wiring and docs: package.json and the lock pin vue 3.5, vue-tsc 3 and lucide-vue-next 1 with ONE typescript 6; the workflow file is unchanged; docs/BREADTH-MATRIX.md has a TS-2 section, docs/SUPPORTED-VERSIONS.md marks Vue gate-enforced and records the lucide deprecation, docs/VERIFICATION-LAYERS.md names the Vue layers', () => {
+  const pkg = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf8')).devDependencies;
+  assert(/^\^3\.5\./.test(pkg.vue) && /^\^3\./.test(pkg['vue-tsc']) && /^\^1\./.test(pkg['lucide-vue-next']) && /^\^6\./.test(pkg.typescript), `devDependencies: ${JSON.stringify(pkg)}`);
+  const lock = JSON.parse(readFileSync(resolve(ROOT, 'package-lock.json'), 'utf8')).packages;
+  assert(/^3\.5\./.test(lock['node_modules/vue'].version) && /^3\./.test(lock['node_modules/vue-tsc'].version) && /^3\.5\./.test(lock['node_modules/@vue/compiler-sfc'].version) && /^1\./.test(lock['node_modules/lucide-vue-next'].version), 'the lock resolves vue 3.5, vue-tsc 3, @vue/compiler-sfc 3.5, lucide-vue-next 1');
+  assert(Object.keys(lock).filter((k) => /(^|\/)node_modules\/typescript$/.test(k)).length === 1 && /^6\./.test(lock['node_modules/typescript'].version), 'exactly one typescript, in the 6.x line');
+  const wf = readFileSync(resolve(ROOT, '.github/workflows/ci.yml'), 'utf8');
+  assert(/npm ci/.test(wf) && /node _shared\/scripts\/ci\.mjs/.test(wf) && !/vue|tsc/i.test(wf), 'the workflow file is not edited for this gate');
+  const doc = readFileSync(resolve(ROOT, 'docs/BREADTH-MATRIX.md'), 'utf8');
+  assert(doc.includes('# TS-2 - the generated Vue compiles and type-checks'), 'a TS-2 section must exist');
+  const sec = doc.slice(doc.indexOf('# TS-2 - the generated Vue compiles and type-checks'));
+  assert(/`TV1`/.test(sec) && /15 of the 54/.test(sec) && /7 of them/.test(sec) && /one project/.test(sec) && /lucide-vue-next/.test(sec) && /28 of 54/.test(sec) && /14 of 54/.test(sec) && /nothing renders/i.test(sec) && /type="text"/.test(sec) && /does not detect|cannot detect|not detected/i.test(sec), 'the section must record the finding, TV1, the one-process method, the lucide deprecation, the remaining counts, the V4 limit and that nothing renders');
+  const v = readFileSync(resolve(ROOT, 'docs/SUPPORTED-VERSIONS.md'), 'utf8');
+  assert(/Vue 3\.5[^\n]*\| yes/.test(v) && /@lucide\/vue/.test(v) && /lucide-vue-next/.test(v), 'SUPPORTED-VERSIONS.md marks Vue gate-enforced and records the lucide deprecation');
+  const vl = readFileSync(resolve(ROOT, 'docs/VERIFICATION-LAYERS.md'), 'utf8');
+  assert(/vue-tsc/.test(vl) && /compiler-sfc|Vue compiler/.test(vl), 'VERIFICATION-LAYERS.md names the Vue layers');
 });
 
 console.log('\n=== verify-patches ===');
